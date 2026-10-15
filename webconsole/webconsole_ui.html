@@ -221,6 +221,17 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 .cmd-list{display:flex;flex-wrap:wrap;gap:8px}
 .cmd-list .btn{min-height:34px}
 
+/* ---------- settings ---------- */
+.setgroup{margin-bottom:var(--space-5)}
+.setgroup:last-child{margin-bottom:0}
+.setgrouptitle{font-size:var(--text-xs);color:var(--mut);font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:var(--space-3)}
+.setrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.setrow:last-child{border-bottom:none}
+.setlabel{font-size:var(--text-sm)}
+.setctl{display:flex;gap:8px;justify-content:flex-end}
+.setctl input{width:min(180px,100%)}
+@media(max-width:640px){.setrow{grid-template-columns:minmax(0,1fr)}.setctl{justify-content:flex-start}}
+
 /* ---------- responsive ---------- */
 @media(max-width:900px){
   .wrap{grid-template-columns:minmax(0,1fr);gap:var(--space-4)}
@@ -290,6 +301,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     <div class="tab" data-t="sec" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Protection</div>
     <div class="tab" data-t="rdpsec" role="tab"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>RDP Security</div>
     <div class="tab" data-t="users" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Users</div>
+    <div class="tab" data-t="settings" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>Settings</div>
     <div class="nav-label" role="presentation">Reference</div>
     <div class="tab" data-t="diagnostics" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Diagnostics</div>
     <div class="tab" data-t="docs" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Docs</div>
@@ -564,6 +576,15 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     </div>
   </div>
 
+  <!-- ============ SETTINGS ============ -->
+  <div id="tab-settings" style="display:none">
+    <div class="card">
+      <h3>Settings <span class="mut" style="text-transform:none;font-weight:400">apply immediately on the monitor</span> <button class="btn" style="margin-inline-start:auto" onclick="loadSettings()">Refresh</button></h3>
+      <div id="settingsBox"><div class="skel">loading</div></div>
+      <div class="note">Changes are validated by the monitor and saved immediately. Enabling command execution, user management, imaging, or auto-restart asks for confirmation first.</div>
+    </div>
+  </div>
+
   <!-- ============ DIAGNOSTICS ============ -->
   <div id="tab-diagnostics" style="display:none">
     <div class="card">
@@ -740,6 +761,7 @@ function activateTab(t){
   if(t.dataset.t=="backup")loadBackup();
   if(t.dataset.t=="rdpsec")loadRdp();
   if(t.dataset.t=="users")loadUsers();
+  if(t.dataset.t=="settings")loadSettings();
   if(t.dataset.t=="diagnostics")loadDiag("diagnose");
   if(t.dataset.t=="docs")loadDocs();
 }
@@ -907,6 +929,38 @@ async function loadDocs(){
   try{const r=await fetch("/api/docs");const d=await r.json();
     $("docsBox").textContent=d.markdown||d.error||"No documentation available";}
   catch(e){toast("Docs load failed: "+e,true)}
+}
+
+/* ---------- settings tab ---------- */
+const SET_CONFIRM=new Set(["exec","users","image","imagedel","autorestart"]);
+async function loadSettings(){
+  try{
+    const r=await fetch("/api/settings");const d=await r.json();
+    if(d.error){$("settingsBox").innerHTML="<div class='mut'>"+eh(d.error)+"</div>";return}
+    $("settingsBox").innerHTML=(d.groups||[]).map(g=>"<div class='setgroup'><div class='setgrouptitle'>"+eh(g.name)+"</div>"+(g.items||[]).map(renderSetting).join("")+"</div>").join("");
+  }catch(e){toast("Settings load failed: "+e,true)}
+}
+function renderSetting(it){
+  const id="set-"+it.key;
+  if(it.type==="bool"){
+    const on=!!it.value;
+    return "<div class='setrow'><div class='setlabel'>"+eh(it.label)+"</div><div class='setctl'>"+
+      "<button class='btn"+(on?" primary":"")+"' onclick=\"toggleSetting('"+it.key+"',"+(!on)+")\">"+(on?"Enabled":"Disabled")+"</button></div></div>";
+  }
+  const val=it.value==null?"":it.value;
+  const num=it.type==="int"?(" type='number' min='"+(it.min!=null?it.min:"")+"' max='"+(it.max!=null?it.max:"")+"'"):"";
+  return "<div class='setrow'><div class='setlabel'>"+eh(it.label)+(it.unit?" <span class='mut'>("+eh(it.unit)+")</span>":"")+"</div>"+
+    "<div class='setctl'><input id='"+id+"' value=\""+eh(String(val))+"\""+num+"><button class='btn primary' onclick=\"saveSetting('"+it.key+"')\">Save</button></div></div>";
+}
+function saveSetting(key){const el=$("set-"+key);if(el)applySetting(key,el.value.trim(),false)}
+function toggleSetting(key,on){
+  let c=false;
+  if(on&&SET_CONFIRM.has(key)){if(!confirm("Enable "+key+"? This increases the power available to the bot and the panel."))return;c=true}
+  applySetting(key,on?"on":"off",c);
+}
+async function applySetting(key,value,confirmFlag){
+  const j=await act({action:"settings_set",key:key,value:value,confirm:!!confirmFlag});
+  if(j&&j.ok)loadSettings();
 }
 
 /* ---------- live poll ---------- */

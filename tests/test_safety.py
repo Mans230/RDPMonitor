@@ -258,5 +258,64 @@ class PanelDiagReadOnlyTests(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class PanelSettingsTests(unittest.TestCase):
+    """apply_setting is the one validated path for /set and the panel."""
+
+    def setUp(self):
+        self.old_config = rm.config
+        rm.config = {
+            "cpu_alert_threshold": 50, "disk_threshold": 90,
+            "exec_enabled": False, "instance_name": "",
+        }
+        self._saved = []
+        p = mock.patch.object(rm, "save_config",
+                              lambda: self._saved.append(dict(rm.config)))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def tearDown(self):
+        rm.config = self.old_config
+
+    def test_int_bounds_are_enforced(self):
+        ok, msg = rm.apply_setting("cpu", "0")
+        self.assertFalse(ok)
+        self.assertIn("between 1 and 100", msg)
+        self.assertEqual(rm.config["cpu_alert_threshold"], 50)
+
+    def test_valid_int_applies_and_saves(self):
+        ok, _ = rm.apply_setting("cpu", "72")
+        self.assertTrue(ok)
+        self.assertEqual(rm.config["cpu_alert_threshold"], 72)
+        self.assertEqual(len(self._saved), 1)
+
+    def test_bool_toggle(self):
+        ok, _ = rm.apply_setting("exec", "on")
+        self.assertTrue(ok)
+        self.assertTrue(rm.config["exec_enabled"])
+
+    def test_multiword_name_is_preserved(self):
+        ok, _ = rm.apply_setting("name", "prod web 02")
+        self.assertTrue(ok)
+        self.assertEqual(rm.config["instance_name"], "prod web 02")
+
+    def test_name_length_is_rejected(self):
+        ok, _ = rm.apply_setting("name", "x" * 60)
+        self.assertFalse(ok)
+
+    def test_unknown_key_is_rejected(self):
+        ok, _ = rm.apply_setting("nope", "1")
+        self.assertFalse(ok)
+
+    def test_snapshot_shape(self):
+        groups = rm.settings_snapshot()
+        self.assertTrue(groups)
+        keys = [i["key"] for g in groups for i in g["items"]]
+        self.assertIn("cpu", keys)
+        self.assertIn("exec", keys)
+        for g in groups:
+            for i in g["items"]:
+                self.assertIn(i["type"], ("int", "bool", "text"))
+
+
 if __name__ == "__main__":
     unittest.main()
