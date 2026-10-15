@@ -2833,6 +2833,74 @@ def api_diag(op, arg=""):
             _capture_end()
             return False, repr(e)
         return True, _capture_end() or "(no output)"
+    if op == "report":
+        midnight = datetime.now().replace(hour=0, minute=0, second=0,
+                                          microsecond=0).timestamp()
+        s = stats_since(midnight)
+        if not s:
+            return True, "Daily report: not enough data collected yet."
+        lines = ["Daily report — %s" % datetime.now().strftime("%Y-%m-%d"),
+                 "  CPU: average %.0f%% / peak %.0f%%" % (s["cpu_avg"], s["cpu_max"]),
+                 "  RAM: average %.0f%% / peak %.0f%%" % (s["ram_avg"], s["ram_max"]),
+                 "  Samples: %d" % s["points"]]
+        rec = _traffic.get(datetime.now().strftime("%Y-%m-%d"))
+        if rec:
+            lines.append("  Data today: DL %.2f GB | UL %.2f GB"
+                         % (rec["down"] / 1024.0, rec["up"] / 1024.0))
+        return True, "\n".join(lines)
+    if op == "logins":
+        n = int(arg) if arg.isdigit() and 1 <= int(arg) <= 30 else 10
+        _capture_begin()
+        try:
+            _logins_job(n)
+        except Exception as e:
+            _capture_end()
+            return False, repr(e)
+        return True, _capture_end() or "(no logins recorded)"
+    if op == "botlog":
+        if not os.path.isfile(LOG_FILE):
+            return True, "No log file yet."
+        with open(LOG_FILE, "rb") as f:
+            if os.path.getsize(LOG_FILE) > 40 * 1024:
+                f.seek(-40 * 1024, 2)
+            data = f.read()
+        return True, data.decode("utf-8", "replace")
+    if op == "configbackup":
+        data = copy.deepcopy(config)
+        tok = str(data.get("telegram_token", "") or "")
+        data["telegram_token"] = ("***" + tok[-4:]) if tok else ""
+        enc = str(data.get("telegram_token_enc", "") or "")
+        data["telegram_token_enc"] = "***redacted***" if enc else ""
+        return True, json.dumps(data, indent=2, ensure_ascii=False)
+    if op == "dumps":
+        dumps = _crash_dumps()
+        if not dumps:
+            return True, "No recent crash dump files (that is a good thing)."
+        out = ["Recent crash dumps:"]
+        for path, size, mtime in dumps[:10]:
+            out.append("  %s  %s  %s" % (
+                datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
+                format_size(size), path))
+        return True, "\n".join(out)
+    if op == "speedtest":
+        _capture_begin()
+        try:
+            speedtest_job(silent=True)
+        except Exception as e:
+            _capture_end()
+            return False, repr(e)
+        return True, _capture_end() or "(no result)"
+    if op == "nettest":
+        parts = arg.split()
+        if not parts:
+            return False, "provide a host, for example: 1.1.1.1"
+        _capture_begin()
+        try:
+            nettest_job(parts[0])
+        except Exception as e:
+            _capture_end()
+            return False, repr(e)
+        return True, _capture_end() or "(no result)"
     return False, "unknown diagnostic %r" % op
 
 
@@ -2885,8 +2953,14 @@ def monitor_control_loop():
                     os.remove(claimed)
                 except OSError:
                     pass
+            if isinstance(out, (dict, list)):
+                out_val = out
+            else:
+                out_val = str(out)
+                if len(out_val) > 200000:
+                    out_val = out_val[:200000] + "\n… (truncated)"
             _atomic_write_json(MONITOR_RESULT, {"id": rid, "ok": bool(ok),
-                                                "out": out if isinstance(out, (dict, list)) else str(out)[:400],
+                                                "out": out_val,
                                                 "t": time.time()})
         except Exception as e:
             try:
@@ -3863,8 +3937,8 @@ PANEL_COVERAGE = {
     "/restorelist": "backup", "/restore": "backup", "/drill": "backup",
     "/backupschedule": "backup", "/cloud": "backup", "/rclone": "panel",
     "/ps": "diagnostics", "/when": "diagnostics",
-    "/report": "bot-only", "/temp": "diagnostics", "/speedtest": "bot-only",
-    "/logins": "bot-only", "/bigfiles": "diagnostics",
+    "/report": "diagnostics", "/temp": "diagnostics", "/speedtest": "diagnostics",
+    "/logins": "diagnostics", "/bigfiles": "diagnostics",
     "/startup": "diagnostics", "/updates": "diagnostics", "/image": "bot-only",
     "/listusers": "users", "/adduser": "users",
     "/disableuser": "users", "/enableuser": "users", "/deluser": "users",
@@ -3872,12 +3946,12 @@ PANEL_COVERAGE = {
     "/status": "bot-only", "/blocksubnet": "bot-only", "/whitelist": "bot-only",
     "/rdpallow": "rdpsec", "/lockdown": "rdpsec", "/panic": "rdpsec",
     "/harden": "diagnostics", "/setrdpport": "bot-only", "/firewall": "diagnostics",
-    "/botlog": "bot-only", "/diagnose": "diagnostics",
-    "/logstats": "diagnostics", "/exportlogs": "bot-only", "/dumps": "bot-only",
+    "/botlog": "diagnostics", "/diagnose": "diagnostics",
+    "/logstats": "diagnostics", "/exportlogs": "bot-only", "/dumps": "diagnostics",
     "/watch": "bot-only",
     "/trap": "bot-only", "/allow": "bot-only", "/update": "bot-only",
-    "/configbackup": "bot-only", "/cancel_restart": "bot-only",
-    "/nettest": "bot-only", "/test": "bot-only", "/noop": "bot-only",
+    "/configbackup": "diagnostics", "/cancel_restart": "bot-only",
+    "/nettest": "diagnostics", "/test": "bot-only", "/noop": "bot-only",
     "/start": "bot-only", "/menu": "bot-only", "/help": "bot-only",
     "/docs": "docs",
 }

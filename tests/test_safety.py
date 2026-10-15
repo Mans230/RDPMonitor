@@ -192,5 +192,71 @@ class SafetyTests(unittest.TestCase):
             cleanup.assert_not_called()
 
 
+class PanelDiagReadOnlyTests(unittest.TestCase):
+    """The WebConsole read-only reports must reuse bot logic without Telegram."""
+
+    def setUp(self):
+        self.old_config = rm.config
+        rm.config = {
+            "rdp_port": 3389,
+            "telegram_token": "123456:ABCDEF-secret-token",
+            "telegram_token_enc": "DPAPI-BLOB-SHOULD-NOT-LEAK",
+            "rdp_allowed_ips": [],
+        }
+
+    def tearDown(self):
+        rm.config = self.old_config
+
+    def test_report_returns_text(self):
+        with mock.patch.object(rm, "stats_since", return_value={
+                "cpu_avg": 41.2, "cpu_max": 88.0, "ram_avg": 55.5,
+                "ram_max": 79.0, "points": 1200}):
+            ok, out = rm.api_diag("report")
+        self.assertTrue(ok)
+        self.assertIn("Daily report", out)
+        self.assertIn("1200", out)
+
+    def test_configbackup_redacts_secrets(self):
+        ok, out = rm.api_diag("configbackup")
+        self.assertTrue(ok)
+        self.assertNotIn("DPAPI-BLOB-SHOULD-NOT-LEAK", out)
+        data = json.loads(out)
+        self.assertEqual(data["telegram_token_enc"], "***redacted***")
+        self.assertTrue(data["telegram_token"].startswith("***"))
+        self.assertFalse(data["telegram_token"].endswith("secret-token"))
+
+    def test_botlog_reads_tail_without_telegram(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "rdp_monitor.log"
+            p.write_text("line-one\nline-two\n", encoding="utf-8")
+            with mock.patch.object(rm, "LOG_FILE", str(p)):
+                ok, out = rm.api_diag("botlog")
+        self.assertTrue(ok)
+        self.assertIn("line-two", out)
+
+    def test_dumps_reports_none_when_empty(self):
+        with mock.patch.object(rm, "_crash_dumps", return_value=[]):
+            ok, out = rm.api_diag("dumps")
+        self.assertTrue(ok)
+        self.assertIn("No recent crash dump", out)
+
+    def test_nettest_requires_a_host(self):
+        ok, out = rm.api_diag("nettest", "")
+        self.assertFalse(ok)
+        self.assertIn("host", out)
+
+    def test_logins_captures_job_output(self):
+        def fake_job(n):
+            rm.send_message("2026-10-14 09:00 | Administrator | 203.0.113.7")
+        with mock.patch.object(rm, "_logins_job", side_effect=fake_job):
+            ok, out = rm.api_diag("logins")
+        self.assertTrue(ok)
+        self.assertIn("Administrator", out)
+
+    def test_unknown_diag_is_rejected(self):
+        ok, _ = rm.api_diag("not-a-real-op")
+        self.assertFalse(ok)
+
+
 if __name__ == "__main__":
     unittest.main()

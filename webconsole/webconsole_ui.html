@@ -582,9 +582,25 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         <button class="btn" onclick="loadDiag('sysinfo')">System info</button>
         <button class="btn" onclick="loadDiag('harden')">Security audit</button>
       </div>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
+      <h3 style="margin-top:16px">Reports and logs</h3>
+      <div class="cmd-list" style="margin-bottom:12px">
+        <button class="btn" onclick="loadDiag('report')">Daily report</button>
+        <button class="btn" onclick="loadDiag('logins')">RDP logins</button>
+        <button class="btn" onclick="loadDiag('botlog')">Bot log</button>
+        <button class="btn" onclick="loadDiag('configbackup')">Config (redacted)</button>
+        <button class="btn" onclick="loadDiag('dumps')">Crash dumps</button>
+      </div>
+      <h3 style="margin-top:16px">Network tests</h3>
+      <div class="cmd-list" style="margin-bottom:12px">
+        <button class="btn" onclick="loadDiag('speedtest')">Speed test (~20s)</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
         <input id="diagPs" placeholder="process name (for process detail)" style="width:220px">
         <button class="btn" onclick="loadDiag('ps', $('diagPs').value.trim())">Process detail</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <input id="diagHost" placeholder="host (for connectivity test)" style="width:220px">
+        <button class="btn" onclick="loadDiag('nettest', $('diagHost').value.trim())">Nettest</button>
       </div>
       <pre id="diagOut" class="mono" style="white-space:pre-wrap;max-height:60vh;overflow:auto;font-size:12px;color:var(--mut)">Pick a report above.</pre>
     </div>

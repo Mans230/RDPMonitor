@@ -1596,7 +1596,8 @@ class Handler(BaseHTTPRequestHandler):
             arg = (qs.get("arg") or [""])[0]
             if op not in ("diagnose", "logstats", "logs", "firewall", "netstat",
                           "when", "ps", "bigfiles", "temp", "startup", "updates",
-                          "sysinfo", "harden"):
+                          "sysinfo", "harden", "report", "logins", "botlog",
+                          "configbackup", "dumps", "speedtest", "nettest"):
                 return self._json(400, {"error": "invalid diagnostic"})
             ok, out = panel_request("diag", {"op": op, "arg": arg[:64]}, timeout=150)
             return self._json(200 if ok else 503, {"text": out} if ok else {"error": out})

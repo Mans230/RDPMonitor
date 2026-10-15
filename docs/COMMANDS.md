@@ -217,7 +217,7 @@
 ### /botlog
 - Purpose: Sends the tail of the tool's own log file (rdp_monitor.log) - use it when the tool itself misbehaves.
 - Usage: `/botlog`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** The tool's own recent log.
 
@@ -257,7 +257,7 @@
 ### /configbackup
 - Purpose: Sends a copy of the configuration with secrets hidden.
 - Usage: `/configbackup`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Sends a copy of the configuration with secrets hidden.
 
@@ -297,7 +297,7 @@
 ### /dumps
 - Purpose: Sends the newest Windows crash dump (minidump) file.
 - Usage: `/dumps`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Sends the newest Windows crash dump.
 
@@ -554,7 +554,7 @@
 ### /logins
 - Purpose: Last successful RDP logins from the Security event log: time, username, source IP. Use it after any suspicion - it shows who actually got in.
 - Usage: `/logins`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Last successful RDP logins with source IPs.
 
@@ -608,7 +608,7 @@
 ### /nettest
 - Purpose: Tests connectivity and latency to a host.
 - Usage: `/nettest <host>`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Connectivity and latency to a host.
 
@@ -670,7 +670,7 @@
 ### /report
 - Purpose: Today's report: average and peak CPU/RAM since midnight with the chart, plus today's transferred data. The same report is sent automatically every day at the configured hour.
 - Usage: `/report`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Today's averages and peaks.
 
@@ -688,7 +688,7 @@
 ### /speedtest
 - Purpose: Measures real internet speed via Cloudflare (~20 seconds): ping, download and upload Mbps.
 - Usage: `/speedtest`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Real internet speed test.
 
@@ -1119,7 +1119,7 @@
 **Related:** /restore /restorelist /backupstatus
 
 ### /image
-- Purpose: Full system image: captures every volume (Windows, programs, users, and the boot partition) into one VHDX while running, so the disk can be mounted and booted on another VM/VPS. Needs free space equal to the used space; if no second disk is present the image is written to the system disk. Optionally uploads via rclone.
+- Purpose: System image attempt: captures selected volumes into one or more VHDX files while Windows runs. Verify the complete file set and test a restore in a VM before relying on it. Needs free space equal to the used space; if no second disk is present the image is written to the system disk. Optionally uploads via rclone.
 - Usage: `/image start|list|upload|status|progress|stop`
 - Panel: bot-only
 
