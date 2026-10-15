@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RDPWebConsole v2</title>
+<style>
+/* =====================================================================
+   RDPWebConsole design tokens
+   Layer 1 primitives -> Layer 2 semantic -> legacy aliases.
+   Inline styles and scripts read the legacy aliases (--bg, --acc, ...),
+   so those stay stable while the semantic layer is the source of truth.
+   ===================================================================== */
+:root{
+  /* ---- layer 1: primitive palette (existing app colors only) ---- */
+  --slate-950:#0B1120;--slate-900:#0F172A;--slate-800:#1B2336;--slate-750:#232C42;
+  --slate-700:#272F42;--slate-600:#334155;--slate-400:#94A3B8;--slate-300:#CBD5E1;
+  --slate-100:#F1F5F9;--white:#F8FAFC;
+  --sky-400:#38BDF8;--green-500:#22C55E;--yellow-500:#EAB308;--red-500:#EF4444;
+
+  /* ---- layer 2: semantic roles ---- */
+  --color-bg-canvas:var(--slate-900);
+  --color-surface-base:rgba(27,35,54,.72);
+  --color-surface-solid:var(--slate-800);
+  --color-surface-sunken:rgba(11,17,32,.55);
+  --color-surface-hover:rgba(56,189,248,.05);
+  --color-text-default:var(--white);
+  --color-text-subtle:var(--slate-400);
+  --color-border-subtle:rgba(255,255,255,.09);
+  --color-border-strong:rgba(255,255,255,.18);
+  --color-accent:var(--sky-400);
+  --color-success:var(--green-500);
+  --color-warning:var(--yellow-500);
+  --color-danger:var(--red-500);
+
+  /* ---- space / radius / type ---- */
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;
+  --radius-control:9px;--radius-container:16px;--radius-pill:999px;
+  --font-sans:'Segoe UI',system-ui,-apple-system,Tahoma,sans-serif;
+  --font-mono:Consolas,'Courier New',ui-monospace,monospace;
+  --text-xs:12px;--text-sm:13.5px;--text-md:15px;--text-lg:17px;--text-xl:22px;--text-2xl:30px;
+
+  /* ---- elevation / motion (presets named by job) ---- */
+  --shadow-card:0 8px 28px rgba(2,6,23,.35);
+  --shadow-pop:0 20px 60px rgba(2,6,23,.6);
+  --motion-micro:160ms;--motion-base:200ms;--ease-out:cubic-bezier(.16,1,.3,1);
+
+  /* ---- legacy aliases (kept for inline styles + scripts) ---- */
+  --bg:var(--color-bg-canvas);--card:var(--color-surface-base);--card-solid:var(--color-surface-solid);
+  --muted:var(--slate-700);--tx:var(--color-text-default);--mut:var(--color-text-subtle);
+  --bd:var(--color-border-subtle);--bd2:var(--color-border-strong);
+  --ok:var(--color-success);--warn:var(--color-warning);--bad:var(--color-danger);
+  --acc:var(--color-accent);--acc2:var(--color-success);
+  --mono:var(--font-mono);--sans:var(--font-sans);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{scrollbar-color:var(--slate-600) var(--bg)}
+body{background:
+  radial-gradient(1100px 520px at 88% -12%, rgba(56,189,248,.10), transparent 60%),
+  radial-gradient(900px 520px at -12% 112%, rgba(34,197,94,.08), transparent 60%),
+  var(--bg);
+  color:var(--tx);font-family:var(--sans);font-size:var(--text-md);min-height:100vh;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--slate-600);border-radius:var(--radius-pill);border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:var(--slate-400);background-clip:content-box}
+::selection{background:rgba(56,189,248,.32)}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+button{font-family:inherit;font-size:inherit}
+.ic{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px}
+
+/* ---------- shell: top bar + sidebar + content ---------- */
+.wrap{max-width:1440px;margin:0 auto;padding:var(--space-5) var(--space-4) 64px;
+  display:grid;grid-template-columns:216px minmax(0,1fr);gap:var(--space-4) var(--space-5);align-items:start}
+.top{grid-column:1/-1;display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) var(--space-4);
+  border:1px solid var(--bd);border-radius:var(--radius-container);background:var(--card);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);position:sticky;top:10px;z-index:50;
+  box-shadow:var(--shadow-card)}
+.logo{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;flex:0 0 auto;
+  background:linear-gradient(135deg,rgba(56,189,248,.28),rgba(34,197,94,.18));border:1px solid var(--bd2)}
+.logo svg{width:21px;height:21px;stroke:var(--acc)}
+.hname{font-size:var(--text-lg);font-weight:650;letter-spacing:.2px;display:flex;align-items:baseline;gap:8px}
+.hsub{font-size:var(--text-xs);color:var(--mut);margin-top:2px}
+.netpill{display:flex;gap:12px;align-items:center;font-family:var(--mono);font-size:11.5px;color:var(--mut);
+  border:1px solid var(--bd);border-radius:var(--radius-pill);padding:6px 13px;background:var(--color-surface-sunken);white-space:nowrap}
+.netpill b{color:var(--tx);font-weight:500}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);display:inline-block;margin-left:6px}
+.clock{font-family:var(--mono);font-size:12px;color:var(--mut);white-space:nowrap}
+.connection{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:6px 11px;
+  border:1px solid var(--bd2);border-radius:var(--radius-pill);color:var(--mut);font-size:var(--text-sm);white-space:nowrap}
+.connection .dot{margin:0;background:var(--warn);box-shadow:none}
+.connection[data-state="online"] .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.connection[data-state="offline"]{color:#FCA5A5;border-color:rgba(239,68,68,.4)}
+.connection[data-state="offline"] .dot{background:var(--bad)}
+.skip-link{position:fixed;left:16px;top:-80px;z-index:250;padding:10px 16px;border-radius:var(--radius-control);
+  background:var(--card-solid);border:2px solid var(--acc);color:var(--tx)}
+.skip-link:focus{top:12px}
+
+/* ---------- navigation ---------- */
+.tabs{grid-column:1;grid-row:2;position:sticky;top:88px;display:flex;flex-direction:column;gap:6px;margin:0;flex-wrap:nowrap}
+.nav-label{margin:14px 12px 3px;color:var(--mut);font-size:var(--text-xs);font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase}
+.nav-label:first-child{margin-top:0}
+[id^="tab-"]{grid-column:2;grid-row:2;min-width:0}
+.tab{display:flex;align-items:center;gap:10px;min-height:44px;padding:9px 12px;border:1px solid transparent;border-radius:var(--radius-control);
+  cursor:pointer;color:var(--mut);background:transparent;font-size:13px;font-weight:500;user-select:none;
+  transition:color var(--motion-micro) var(--ease-out),background var(--motion-micro) var(--ease-out),border-color var(--motion-micro) var(--ease-out)}
+.tab:hover{color:var(--tx);background:rgba(255,255,255,.045)}
+.tab.on{color:var(--tx);border-color:rgba(56,189,248,.35);
+  background:linear-gradient(90deg,rgba(56,189,248,.16),rgba(56,189,248,.04));box-shadow:inset 2px 0 0 var(--acc)}
+.tab .ic{width:15px;height:15px;opacity:.92}
+
+/* ---------- cards ---------- */
+.grid{display:grid;gap:var(--space-4)}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}.g2{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:1200px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:820px){.g4,.g2,.g3{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:var(--radius-container);padding:var(--space-4);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);min-width:0;
+  box-shadow:var(--shadow-card),inset 0 1px 0 rgba(255,255,255,.035);
+  transition:border-color var(--motion-base) var(--ease-out),box-shadow var(--motion-base) var(--ease-out)}
+.card:hover{border-color:var(--bd2)}
+.card h3{font-size:var(--text-xs);color:var(--mut);font-weight:650;letter-spacing:.8px;text-transform:uppercase;
+  margin-bottom:var(--space-3);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.big{font-family:var(--mono);font-size:var(--text-2xl);font-weight:600;line-height:1.1;letter-spacing:-.5px}
+.big .unit{font-size:13px;color:var(--mut);font-weight:400;letter-spacing:0}
+.sub2{font-family:var(--mono);font-size:var(--text-sm)}
+.bar{height:7px;background:var(--color-surface-sunken);border-radius:var(--radius-pill);overflow:hidden;margin-top:10px;border:1px solid rgba(255,255,255,.05)}
+.bar>div{height:100%;border-radius:var(--radius-pill);transition:width 600ms var(--ease-out)}
+.row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:var(--text-sm);border-bottom:1px solid rgba(255,255,255,.05)}
+.row:last-child{border-bottom:none}
+.mut{color:var(--mut)}
+.mono{font-family:var(--mono)}
+
+/* ---------- status pills ---------- */
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 10px;border-radius:var(--radius-pill);font-size:var(--text-xs);
+  border:1px solid var(--bd);font-family:var(--mono);white-space:nowrap;line-height:1.6}
+.p-ok{color:var(--ok);border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08)}
+.p-bad{color:var(--bad);border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.08)}
+.p-warn{color:var(--warn);border-color:rgba(234,179,8,.4);background:rgba(234,179,8,.08)}
+
+/* ---------- tables ---------- */
+table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+th{color:var(--mut);text-align:left;padding:8px;font-weight:650;font-size:var(--text-xs);letter-spacing:.5px;text-transform:uppercase;
+  border-bottom:1px solid var(--bd2);position:sticky;top:0;background:var(--card-solid);z-index:2}
+td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle}
+tbody tr{transition:background var(--motion-micro) var(--ease-out)}
+tbody tr:hover{background:var(--color-surface-hover)}
+.scroll{max-height:340px;overflow:auto;border-radius:10px}
+
+/* ---------- controls ---------- */
+button.btn{background:rgba(255,255,255,.05);color:var(--tx);border:1px solid var(--bd);border-radius:var(--radius-control);
+  min-height:40px;padding:8px 14px;cursor:pointer;font-size:var(--text-sm);font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+  transition:background var(--motion-micro) var(--ease-out),border-color var(--motion-micro) var(--ease-out),color var(--motion-micro) var(--ease-out),transform var(--motion-micro) var(--ease-out)}
+button.btn:hover{border-color:var(--acc);color:var(--acc);background:rgba(56,189,248,.08)}
+button.btn:active{transform:translateY(1px)}
+button.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+button.btn.danger{color:#FCA5A5;border-color:rgba(239,68,68,.35)}
+button.btn.danger:hover{border-color:var(--bad);color:var(--bad);background:rgba(239,68,68,.1)}
+button.btn.primary{background:linear-gradient(135deg,rgba(56,189,248,.28),rgba(34,197,94,.2));border-color:rgba(56,189,248,.45)}
+button.btn.primary:hover{box-shadow:0 6px 18px rgba(56,189,248,.25)}
+input,select,textarea{background:var(--color-surface-sunken);border:1px solid var(--bd);color:var(--tx);border-radius:var(--radius-control);
+  padding:8px 12px;font-size:var(--text-sm);font-family:var(--mono);
+  transition:border-color var(--motion-micro) var(--ease-out),box-shadow var(--motion-micro) var(--ease-out)}
+input::placeholder,textarea::placeholder{color:var(--slate-400)}
+.field-label{display:block;color:var(--tx);font-size:var(--text-sm);font-weight:600;margin-bottom:8px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(56,189,248,.15)}
+input:disabled,select:disabled{opacity:.5;cursor:not-allowed}
+canvas{width:100%;display:block;border-radius:10px}
+hr{border:none;border-top:1px solid var(--bd)}
+kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radius:5px;padding:1px 6px;border:1px solid var(--bd)}
+
+/* ---------- toast + modal ---------- */
+.toast{position:fixed;bottom:20px;left:20px;background:var(--card-solid);border:1px solid var(--bd2);
+  color:var(--tx);padding:12px 18px;border-radius:12px;display:none;z-index:99;font-size:13px;
+  box-shadow:var(--shadow-pop);max-width:420px;backdrop-filter:blur(10px)}
+.toast.err{border-color:rgba(239,68,68,.5)}
+.modalbg{position:fixed;inset:0;background:rgba(2,6,23,.7);backdrop-filter:blur(6px);display:none;z-index:90;place-items:center;padding:20px}
+.modal{background:var(--card-solid);border:1px solid var(--bd2);border-radius:var(--radius-container);max-width:640px;width:100%;
+  max-height:82vh;overflow:auto;padding:var(--space-5);box-shadow:var(--shadow-pop)}
+.note{font-size:var(--text-xs);color:var(--mut);background:rgba(234,179,8,.06);border:1px solid rgba(234,179,8,.2);
+  border-radius:10px;padding:8px 12px;margin-top:10px;line-height:1.6}
+.skel{animation:pulse 1.4s ease-in-out infinite;background:var(--muted);border-radius:8px;color:transparent!important}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:6px}
+
+/* ---------- login ---------- */
+.loginbg{position:fixed;inset:0;z-index:200;background:
+  radial-gradient(700px 400px at 50% -10%, rgba(56,189,248,.12), transparent 60%),var(--bg);
+  display:grid;place-items:center;padding:20px}
+.loginbox{width:min(420px,100%);background:var(--card-solid);border:1px solid var(--bd2);border-radius:18px;padding:var(--space-6);
+  box-shadow:var(--shadow-pop)}
+.loginbox h1{font-size:var(--text-xl);margin-bottom:8px}
+.loginbox p{color:var(--mut);line-height:1.7;margin-bottom:16px;font-size:var(--text-sm)}
+.loginbox input{width:100%;margin-bottom:12px}
+.loginerr{color:#FCA5A5;min-height:20px;margin-top:10px;font-size:var(--text-sm)}
+
+/* ---------- bot command center ---------- */
+.cmd-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-4)}
+.cmd-card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:var(--space-4);min-width:0;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}
+.cmd-card h3{margin-bottom:6px}
+.cmd-card p{color:var(--mut);font-size:12px;line-height:1.55;margin-bottom:12px}
+.cmd-list{display:flex;flex-wrap:wrap;gap:8px}
+.cmd-list .btn{min-height:34px}
+
+/* ---------- responsive ---------- */
+@media(max-width:900px){
+  .wrap{grid-template-columns:minmax(0,1fr);gap:var(--space-4)}
+  .tabs{grid-column:1;grid-row:auto;position:static;flex-direction:row;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+  .nav-label{display:none}
+  .tab{flex:0 0 auto}
+  [id^="tab-"]{grid-column:1;grid-row:auto}
+}
+@media(max-width:980px){.cmd-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){
+  body{font-size:16px}
+  input,select,textarea{font-size:16px;min-height:44px}
+  .wrap{padding:var(--space-3) var(--space-3) 48px}
+  .netpill,.hsub,.clock{display:none}
+  .top{flex-wrap:wrap}
+  .connection{margin-left:auto}
+  .tabs{scroll-snap-type:x proximity}
+  .tab{scroll-snap-align:start}
+}
+@media(max-width:620px){.cmd-grid{grid-template-columns:minmax(0,1fr)}.cmd-list .btn{flex:1 1 140px;justify-content:center}}
+
+/* motion: announce presets only; honour reduced-motion with a plain fade */
+@media (prefers-reduced-motion: reduce){
+  *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+</style>
+</head>
+<body>
+<div class="loginbg" id="loginBg">
+  <div class="loginbox"><h1>RDPWebConsole</h1><p>Enter the login token. The token is not placed in the link, and a secure, time-limited session is created.</p>
+    <label for="loginToken" class="field-label">Login token</label>
+    <input id="loginToken" type="password" autocomplete="current-password" placeholder="Enter your token" aria-describedby="loginErr">
+    <button class="btn primary" id="loginBtn">Login</button><div class="loginerr" id="loginErr" role="alert"></div>
+  </div>
+</div>
+<a class="skip-link" id="skipNavigation" href="#tab-bot">Skip navigation</a>
+<div class="wrap" id="app" style="display:none">
+
+  <!-- ============ top bar ============ -->
+  <div class="top">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/><path d="M10 7h4M10 17h4"/></svg></div>
+    <div style="flex:1;min-width:0">
+      <div class="hname">RDPWebConsole <span id="hostname" class="mut" style="font-size:12px;font-weight:400"></span></div>
+      <div class="hsub">Server operations and live health · updates every two seconds</div>
+    </div>
+    <div class="connection" id="connectionStatus" data-state="connecting" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span><span id="connectionText">Connecting</span>
+    </div>
+    <div class="netpill">
+      <span>&darr; <b id="downMini">—</b></span><span>&uarr; <b id="upMini">—</b></span></div>
+    <div class="clock" id="clock">—</div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Console sections">
+    <div class="nav-label" role="presentation">Overview</div>
+    <div class="tab on" data-t="bot" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v4"/><rect x="5" y="6" width="14" height="12" rx="2"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M9 16h6"/></svg>Bot</div>
+    <div class="tab" data-t="backup" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Backup</div>
+    <div class="tab" data-t="live" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Live</div>
+    <div class="tab" data-t="charts" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15l4-6 4 3 5-8"/></svg>Charts</div>
+    <div class="tab" data-t="apps" role="tab"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Applications</div>
+    <div class="nav-label" role="presentation">Operations</div>
+    <div class="tab" data-t="tools" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>System tools</div>
+    <div class="tab" data-t="sec" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Protection</div>
+    <div class="tab" data-t="rdpsec" role="tab"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>RDP Security</div>
+    <div class="tab" data-t="users" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Users</div>
+    <div class="nav-label" role="presentation">Reference</div>
+    <div class="tab" data-t="diagnostics" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Diagnostics</div>
+    <div class="tab" data-t="docs" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Docs</div>
+    <div class="tab" data-t="ctl" role="tab"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Control</div>
+  </div>
+
+  <!-- ============ BOT COMMAND CENTER ============ -->
+  <div id="tab-bot">
+    <div class="card" style="margin-bottom:14px">
+      <h3>Bot command center <span class="pill p-ok">Hardened session</span></h3>
+      <div class="mut" style="line-height:1.65">Browser equivalents for the most useful RDPMonitor bot commands. Every action uses the authenticated session, CSRF protection, server-side validation, and the same confirmation flow as the rest of this panel.</div>
+    </div>
+    <div class="cmd-grid">
+      <section class="cmd-card">
+        <h3>Monitoring</h3><p>Resource reports, history, processes, applications, and active RDP sessions.</p>
+        <div class="cmd-list">
+          <button class="btn primary" onclick="goTab('live')">/view Live</button>
+          <button class="btn" onclick="goTab('charts')">/chart History</button>
+          <button class="btn" onclick="goTab('apps')">/top Apps</button>
+          <button class="btn" onclick="goTab('tools');loadSysinfo()">/sysinfo</button>
+        </div>
+      </section>
+      <section class="cmd-card">
+        <h3>Process control</h3><p>Run an approved command or program, inspect processes, and capture the interactive desktop.</p>
+        <div class="cmd-list">
+          <button class="btn primary" onclick="botExec()">/exec</button>
+          <button class="btn" onclick="botRun()">/run</button>
+          <button class="btn" onclick="goTab('live')">/kill Process list</button>
+          <button class="btn" onclick="botScreenshot()">/screenshot</button>
+        </div>
+      </section>
+      <section class="cmd-card">
+        <h3>RDP and security</h3><p>Review RDP posture and manage individual firewall block entries.</p>
+        <div class="cmd-list">
+          <button class="btn primary" onclick="goTab('sec');loadSec()">/rdp Status</button>
+          <button class="btn" onclick="botBlockIp()">/block IP</button>
+          <button class="btn" onclick="goTab('sec');loadSec()">/blocklist</button>
+          <button class="btn" onclick="goTab('tools');loadNetstat()">/netstat</button>
+        </div>
+      </section>
+      <section class="cmd-card">
+        <h3>Sessions and messages</h3><p>Display a message to signed-in users or log off a selected RDP session.</p>
+        <div class="cmd-list">
+          <button class="btn primary" onclick="botMessage()">/msg</button>
+          <button class="btn" onclick="botLogoff()">/logoff</button>
+          <button class="btn" onclick="goTab('live')">Active sessions</button>
+        </div>
+      </section>
+      <section class="cmd-card">
+        <h3>Maintenance</h3><p>Clean old temporary files and inspect or restart Windows services.</p>
+        <div class="cmd-list">
+          <button class="btn primary" onclick="botClean()">/clean</button>
+          <button class="btn" onclick="botService()">/svc restart</button>
+          <button class="btn" onclick="goTab('tools');loadServices()">Services</button>
+        </div>
+      </section>
+      <section class="cmd-card">
+        <h3>Power</h3><p>Destructive power operations require a fresh server-issued confirmation nonce.</p>
+        <div class="cmd-list">
+          <button class="btn danger" onclick="confirmAct('reboot')">/restart</button>
+          <button class="btn danger" onclick="confirmAct('shutdown')">/shutdown</button>
+        </div>
+      </section>
+    </div>
+    <div class="note">Features disabled by secure defaults, such as command execution, remain disabled here. Enable them only through the protected state configuration when they are genuinely required.</div>
+  </div>
+
+  <!-- ============ BACKUP ============ -->
+  <div id="tab-backup" style="display:none">
+    <div class="grid g4">
+      <div class="card"><h3>Worker</h3><div class="big" id="backupState" style="font-size:24px">—</div><div class="mut" id="backupMessage">Loading…</div></div>
+      <div class="card"><h3>Last successful run</h3><div class="big" id="backupLast" style="font-size:20px">—</div><div class="mut" id="backupSummary">—</div></div>
+      <div class="card"><h3>Schedule</h3><div class="big" id="backupSchedule" style="font-size:24px">—</div><div class="mut" id="backupEngine">—</div></div>
+      <div class="card"><h3>Destinations</h3><div class="big" id="backupDestinations" style="font-size:24px">—</div><div class="mut" id="backupSources">—</div></div>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card">
+        <h3>Backup controls</h3>
+        <p class="mut" style="line-height:1.6;margin-bottom:12px">The backup engine runs in an isolated SYSTEM worker so schedules and VSS continue without an interactive login.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" id="backupNowBtn" onclick="backupNow()">Backup now</button>
+          <button class="btn" onclick="runDrill()">Run restore drill</button>
+          <button class="btn" onclick="openBackupGui()">Open settings window</button>
+          <button class="btn" onclick="loadBackup()">Refresh</button>
+        </div>
+        <div class="note">Starting a backup is safe to repeat: the worker rejects overlapping jobs.</div>
+      </div>
+      <div class="card"><h3>Local backups <span class="mut" style="text-transform:none;font-weight:400">restore extracts into an isolated folder</span></h3><div class="scroll" style="max-height:260px"><table id="backupTbl"><thead><tr><th>Archive</th><th>Size</th><th>Modified</th><th></th></tr></thead><tbody></tbody></table></div></div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3>Recent backup log</h3><pre id="backupLog" class="mono" style="white-space:pre-wrap;max-height:300px;overflow:auto;color:var(--mut);font-size:11.5px">—</pre></div>
+  </div>
+
+  <!-- ============ LIVE ============ -->
+  <div id="tab-live" style="display:none">
+    <div class="grid g4">
+      <div class="card"><h3>CPU <span id="stealBadge" class="pill p-ok">steal —</span></h3>
+        <div class="big"><span id="cpuPct">—</span><span class="unit"> %</span></div>
+        <div class="bar"><div id="cpuBar" style="width:0;background:var(--ok)"></div></div>
+        <div class="row" style="margin-top:10px"><span class="mut">Cores</span><span class="mono" id="cpuCores">—</span></div>
+        <div class="row"><span class="mut">Frequency</span><span class="mono" id="cpuFreq">—</span></div>
+        <div class="row"><span class="mut">Estimated steal</span><span class="mono" id="cpuSteal">—</span></div>
+      </div>
+      <div class="card"><h3>Memory</h3>
+        <div class="big"><span id="ramPct">—</span><span class="unit"> %</span></div>
+        <div class="bar"><div id="ramBar" style="width:0;background:var(--ok)"></div></div>
+        <div class="row" style="margin-top:10px"><span class="mut">Used</span><span class="mono" id="ramUsed">—</span></div>
+        <div class="row"><span class="mut">Available</span><span class="mono" id="ramAvail">—</span></div>
+        <div class="row"><span class="mut">Swap</span><span class="mono" id="ramSwap">—</span></div>
+      </div>
+      <div class="card"><h3>Network</h3>
+        <div class="big" style="color:var(--ok);font-size:24px"><span id="downBps">—</span><span class="unit"> ↓</span></div>
+        <div class="big" style="color:var(--bad);font-size:24px"><span id="upBps">—</span><span class="unit"> ↑</span></div>
+        <div class="row" style="margin-top:10px"><span class="mut">Adapter</span><span class="mono" id="nicName">—</span></div>
+        <div class="row"><span class="mut">IP</span><span class="mono" id="nicIp">—</span></div>
+      </div>
+      <div class="card"><h3>Disks</h3>
+        <div class="big" style="font-size:22px"><span id="diskR">—</span><span class="unit"> Read/s</span></div>
+        <div class="big" style="font-size:22px"><span id="diskW">—</span><span class="unit"> Write/s</span></div>
+        <div id="diskList" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card"><h3>Per-core usage</h3><div id="coreGrid" class="grid" style="grid-template-columns:repeat(4,1fr);gap:8px"></div></div>
+      <div class="card"><h3>RDP sessions <span id="sessCount" class="pill">—</span></h3>
+        <div class="scroll"><table id="sessTbl"><thead><tr><th>User</th><th>Session</th><th>ID</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div class="mut" style="margin-top:8px;font-size:11px">IPs Connected: <span class="mono" id="rdpIps">—</span></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h3>Top resource-consuming processes <span class="mut" style="text-transform:none;letter-spacing:0;font-weight:400">Click on the name of the process for its details</span></h3>
+      <div class="scroll"><table id="procTbl"><thead><tr><th>PID</th><th>Process</th><th>User</th><th>CPU%</th><th>RAM</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- ============ CHARTS ============ -->
+  <div id="tab-charts" style="display:none">
+    <div class="card">
+      <h3>Another 60 Minute — CPU% / RAM% <span class="mut" style="text-transform:none;font-weight:400">Hover the mouse to view the values</span></h3>
+      <canvas id="cvLive" height="150"></canvas>
+      <div class="row" style="border:none"><span style="color:var(--acc)">CPU</span><span style="color:var(--ok)">RAM</span><span class="mut mono" id="cvLiveInfo" style="margin-inline-start:auto"></span></div>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card"><h3>network — Another 60 Minute</h3><canvas id="cvNet" height="140"></canvas>
+        <div class="row" style="border:none"><span style="color:var(--ok)">Download</span><span style="color:var(--bad)">Upload</span></div></div>
+      <div class="card"><h3>Disc I/O — Another 60 Minute</h3><canvas id="cvDisk" height="140"></canvas>
+        <div class="row" style="border:none"><span style="color:var(--acc)">Read</span><span style="color:var(--warn)">Writing</span></div></div>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card"><h3>24 hours — CPU% / Steal%</h3><canvas id="cvSteal" height="140"></canvas>
+        <div class="row" style="border:none"><span style="color:var(--acc)">CPU</span><span style="color:var(--bad)">Steal</span></div>
+        <div class="note">Steal = Time taken by hypervisor to other virtual machines on the same host. Its frequent rise means that the host is stressed — Windows does not provide an official number, it is a gap estimate CPU-time.</div></div>
+      <div class="card"><h3>24 hours — network</h3><canvas id="cvNetDay" height="140"></canvas>
+        <div class="row" style="border:none"><span style="color:var(--ok)">Download</span><span style="color:var(--bad)">Upload</span></div></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>History RDPMonitor (Point every minute — Saved) <span id="rdpmonInfo" class="mut" style="text-transform:none;font-weight:400"></span></h3>
+      <canvas id="cvDay" height="150"></canvas>
+      <div class="row" style="border:none"><span style="color:var(--acc)">CPU</span><span style="color:var(--ok)">RAM</span></div>
+    </div>
+  </div>
+
+  <!-- ============ APPS ============ -->
+  <div id="tab-apps" style="display:none">
+    <div class="card">
+      <h3>Consumption is grouped by application name <span class="mut" style="text-transform:none;font-weight:400">All processes for the same application combined</span></h3>
+      <input id="appFilter" placeholder="Filter by name…" style="width:220px;margin-bottom:12px">
+      <div class="scroll" style="max-height:560px"><table id="appTbl">
+        <thead><tr><th>Application</th><th>Processes</th><th>CPU%</th><th>RAM</th><th>Read/s</th><th>Write/s</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- ============ TOOLS ============ -->
+  <div id="tab-tools" style="display:none">
+    <div class="grid g2">
+      <div class="card">
+        <h3>Command line</h3>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <input id="cmdInput" placeholder="ipconfig /all …" style="flex:1">
+          <button class="btn primary" onclick="doRun()">Run</button>
+        </div>
+        <pre id="cmdOut" class="mono" style="background:rgba(15,23,42,.8);border:1px solid var(--bd);border-radius:10px;padding:12px;font-size:11.5px;max-height:280px;overflow:auto;white-space:pre-wrap;color:var(--mut)">The result appears here…</pre>
+        <div class="note">Command execution is disabled by default. Set exec_enabled=true in webconsole_state.json only when required and after securing access.</div>
+      </div>
+      <div class="card">
+        <h3>Run a program</h3>
+        <input id="progPath" placeholder="C:\path\app.exe" style="width:100%;margin-bottom:8px">
+        <input id="progArgs" placeholder="Arguments (optional)" style="width:100%;margin-bottom:10px">
+        <button class="btn primary" onclick="doStartProg()">Run</button>
+        <hr style="border:none;border-top:1px solid var(--bd);margin:14px 0">
+        <h3>Screenshot</h3>
+        <button class="btn primary" onclick="doShot()">Capture screen</button>
+        <div style="margin-top:10px"><img id="shotImg" style="max-width:100%;border-radius:10px;border:1px solid var(--bd);display:none"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>Services <span class="mut" style="text-transform:none;font-weight:400">first 80</span> <button class="btn" style="margin-inline-start:auto" onclick="loadServices()">Update</button></h3>
+      <div class="scroll" style="max-height:380px"><table id="svcTbl"><thead><tr><th>Status</th><th>Name</th><th>Description</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card"><h3>Active connections <button class="btn" style="margin-inline-start:auto" onclick="loadNetstat()">Update</button></h3>
+        <div class="scroll"><table id="netTbl"><thead><tr><th>Local</th><th>Remote</th><th>Program</th></tr></thead><tbody></tbody></table></div></div>
+      <div class="card"><h3>System information <button class="btn" style="margin-inline-start:auto" onclick="loadSysinfo()">Update</button></h3><div id="sysinfoBox"><div class="mut">—</div></div></div>
+    </div>
+  </div>
+
+  <!-- ============ SECURITY ============ -->
+  <div id="tab-sec" style="display:none">
+    <div class="grid g2">
+      <div class="card"><h3>RDP status</h3><div id="rdpStatus"><div class="skel">loading</div></div></div>
+      <div class="card"><h3>Blocked IPs <span id="blkCount" class="pill">—</span></h3>
+        <div class="scroll" style="max-height:300px"><table id="blkTbl"><thead><tr><th>IP</th><th>Since</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <input id="blkNew" placeholder="1.2.3.4" style="width:150px"><button class="btn primary" onclick="blockIp()">Ban</button>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3>Traffic totals (RDPMonitor traffic.json)</h3><div id="trafficBox" class="mono"></div></div>
+    <div class="card" style="margin-top:14px"><h3>Event log — audit <button class="btn" style="margin-inline-start:auto" onclick="loadSec()">Update</button></h3>
+      <div class="scroll"><table id="auditTbl"><thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- ============ RDP SECURITY ============ -->
+  <div id="tab-rdpsec" style="display:none">
+    <div class="grid g4">
+      <div class="card"><h3>RDP port</h3><div class="big" id="rdpPort">—</div></div>
+      <div class="card"><h3>Allow-list</h3><div class="big" id="rdpAllow">—</div></div>
+      <div class="card"><h3>Lockdown</h3><div class="big" id="rdpLock">—</div></div>
+      <div class="card"><h3>Panic</h3><div class="big" id="rdpPanic">—</div></div>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card">
+        <h3>IP allow-list <button class="btn" style="margin-inline-start:auto" onclick="loadRdp()">Update</button></h3>
+        <div class="scroll" style="max-height:260px"><table id="rdpIpTbl"><thead><tr><th>Allowed IP</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <input id="rdpNewIp" placeholder="1.2.3.4" style="width:150px">
+          <button class="btn primary" onclick="rdpAdd()">Add</button>
+          <button class="btn" onclick="rdpAct('rdp_allow_apply')">Apply restriction</button>
+          <button class="btn danger" onclick="rdpClear()">Clear (open to any IP)</button>
+        </div>
+        <div class="note">Apply restricts RDP to these IPs. Clear removes the restriction and opens RDP to any source.</div>
+      </div>
+      <div class="card">
+        <h3>Emergency controls</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="rdpAct('lockdown',{mode:'on'})">Lockdown on</button>
+          <button class="btn" onclick="rdpAct('lockdown',{mode:'off'})">Lockdown off</button>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn danger" onclick="rdpPanic('on')">Panic on (close RDP)</button>
+          <button class="btn" onclick="rdpPanic('off')">Panic off</button>
+        </div>
+        <div class="note">Panic closes RDP for everyone. Only use it if you can still reach the machine through a provider console.</div>
+        <div class="mut" style="margin-top:10px">Blocked IPs: <span id="rdpBlocked">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ USERS ============ -->
+  <div id="tab-users" style="display:none">
+    <div class="card">
+      <h3>Local users <button class="btn" style="margin-inline-start:auto" onclick="loadUsers()">Update</button></h3>
+      <div class="scroll" style="max-height:60vh"><table id="userTbl"><thead><tr><th>User</th><th>Enabled</th><th>Last logon</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <input id="newUserName" placeholder="new user name" style="width:180px">
+        <input id="newUserPass" placeholder="password" type="password" style="width:180px">
+        <button class="btn primary" onclick="userAdd()">Add user</button>
+      </div>
+      <div class="note">User management changes Windows local accounts. Passwords are sent to the server over this session.</div>
+    </div>
+  </div>
+
+  <!-- ============ DIAGNOSTICS ============ -->
+  <div id="tab-diagnostics" style="display:none">
+    <div class="card">
+      <h3>Diagnostics <span class="mut" style="text-transform:none;font-weight:400">read-only reports, run on the monitor</span></h3>
+      <div class="cmd-list" style="margin-bottom:12px">
+        <button class="btn primary" onclick="loadDiag('diagnose')">Diagnose</button>
+        <button class="btn" onclick="loadDiag('logstats')">Log stats</button>
+        <button class="btn" onclick="loadDiag('logs')">System log (24h, error)</button>
+        <button class="btn" onclick="loadDiag('firewall')">Firewall</button>
+        <button class="btn" onclick="loadDiag('netstat')">Connections</button>
+        <button class="btn" onclick="loadDiag('when')">Peak times</button>
+        <button class="btn" onclick="loadDiag('bigfiles')">Big files</button>
+        <button class="btn" onclick="loadDiag('temp')">Temperature</button>
+        <button class="btn" onclick="loadDiag('startup')">Startup items</button>
+        <button class="btn" onclick="loadDiag('updates')">Windows updates</button>
+        <button class="btn" onclick="loadDiag('sysinfo')">System info</button>
+        <button class="btn" onclick="loadDiag('harden')">Security audit</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input id="diagPs" placeholder="process name (for process detail)" style="width:220px">
+        <button class="btn" onclick="loadDiag('ps', $('diagPs').value.trim())">Process detail</button>
+      </div>
+      <pre id="diagOut" class="mono" style="white-space:pre-wrap;max-height:60vh;overflow:auto;font-size:12px;color:var(--mut)">Pick a report above.</pre>
+    </div>
+  </div>
+
+  <!-- ============ DOCS ============ -->
+  <div id="tab-docs" style="display:none">
+    <div class="card">
+      <h3>Command reference <button class="btn" style="margin-inline-start:auto" onclick="loadDocs()">Reload</button></h3>
+      <pre id="docsBox" class="mono" style="white-space:pre-wrap;max-height:70vh;overflow:auto;font-size:12px;color:var(--mut)">Loading...</pre>
+    </div>
+  </div>
+
+  <!-- ============ CONTROL ============ -->
+  <div id="tab-ctl" style="display:none">
+    <div class="grid g3">
+      <div class="card"><h3>Maintenance</h3>
+        <button class="btn primary" onclick="doClean()">Clean TEMP files older than 24 hours</button>
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <input id="svcName2" placeholder="Service name" style="width:130px">
+          <button class="btn" onclick="doService('restart')">Restart</button>
+        </div>
+      </div>
+      <div class="card"><h3>Message on screen</h3>
+        <input id="msgTxt" placeholder="Message text…" style="width:100%;margin-bottom:10px">
+        <button class="btn primary" onclick="doMsg()">Show to users</button>
+      </div>
+      <div class="card"><h3>Dangerous operations</h3>
+        <button class="btn danger" onclick="confirmAct('reboot')">Restart the server</button>
+        <button class="btn danger" style="margin-top:8px" onclick="confirmAct('shutdown')">Shut down the server</button>
+        <div class="note">The action runs after five seconds and cannot be undone.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="modalbg" id="modalbg" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" id="modalBox"></div>
+</div>
+
+<script>
+let CSRF="",started=false,toastTimer;
+let liveHist=[],dayHist=[],rdpHist=[],lastApps=[],lastProcs=[];
+const $=id=>document.getElementById(id);
+const eh=v=>String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const enc=v=>encodeURIComponent(String(v)).replace(/'/g,"%27");
+const hb=n=>{if(n==null)return"—";n=+n;for(const u of["B","KB","MB","GB","TB"]){if(Math.abs(n)<1024)return n<10&&u!=="B"?n.toFixed(1)+" "+u:Math.round(n)+" "+u;n/=1024}return n.toFixed(1)+" PB"};
+const hbs=n=>n==null?"—":hb(n)+"/s";
+const colorOf=p=>p>90?"#EF4444":p>70?"#EAB308":"#22C55E";
+function toast(m,isErr){
+  const t=$("toast");
+  clearTimeout(toastTimer);
+  t.className="toast"+(isErr?" err":"");
+  t.setAttribute("role",isErr?"alert":"status");
+  t.textContent=m;
+  t.style.display="block";
+  toastTimer=setTimeout(()=>t.style.display="none",5000);
+}
+function setConnection(state,message){
+  const status=$("connectionStatus");
+  if(status.dataset.state===state)return;
+  status.dataset.state=state;
+  $("connectionText").textContent=message;
+}
+
+/* ---------- charts (canvas, hover tooltip) ---------- */
+function drawLine(cv,series,unit,fixedMax){
+  if(!cv.clientWidth)return;
+  const dpr=window.devicePixelRatio||1,W=cv.clientWidth,H=parseInt(cv.getAttribute("height"));
+  cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+"px";
+  const x=cv.getContext("2d");x.scale(dpr,dpr);x.clearRect(0,0,W,H);
+  let mx=fixedMax||Math.max(1,...series.flatMap(s=>s.data.filter(v=>v!=null)));
+  x.strokeStyle="rgba(255,255,255,.06)";x.lineWidth=1;
+  x.font="10px Fira Code";x.fillStyle="#94A3B8";
+  for(let i=0;i<=4;i++){const y=H*i/4+6;x.beginPath();x.moveTo(0,y);x.lineTo(W,y);x.stroke();
+    x.fillText((mx*(1-i/4)).toFixed(mx>=100?0:1)+(unit||""),2,y-2)}
+  const N=Math.max(...series.map(s=>s.data.length),2);
+  for(const s of series){
+    // area fill 20%
+    x.beginPath();let started=false;
+    s.data.forEach((v,i)=>{if(v==null)return;const px=W-(s.data.length-1-i)*(W/(N-1)),py=H-(v/mx)*(H-18)-4;
+      if(!started){x.moveTo(px,py);started=true}else x.lineTo(px,py)});
+    if(started){
+      x.save();x.lineTo(W,H);x.lineTo(0,H);x.closePath();
+      x.fillStyle=s.c+"33";x.fill();x.restore();
+      x.beginPath();started=false;
+      s.data.forEach((v,i)=>{if(v==null)return;const px=W-(s.data.length-1-i)*(W/(N-1)),py=H-(v/mx)*(H-18)-4;
+        if(!started){x.moveTo(px,py);started=true}else x.lineTo(px,py)});
+      x.strokeStyle=s.c;x.lineWidth=1.6;x.stroke();
+    }
+  }
+  cv.onmousemove=ev=>{
+    const r=cv.getBoundingClientRect(),px=ev.clientX-r.left;
+    const idx=Math.round((1-px/W)*(N-1));
+    const vals=series.map(s=>s.data[Math.max(0,Math.min(s.data.length-1,idx))]);
+    cv.title=vals.map((v,i)=>v==null?"":(i?" | ":"")+ (v>=1024?(v/1024).toFixed(1)+"K":v.toFixed(1))).join("");
+  };
+}
+function gridOver(pts,key,windowMs,buckets){
+  const now=Date.now(),out=[],n=buckets||180;
+  const sel=pts.filter(q=>q.t*1000>now-windowMs);
+  for(let i=0;i<n;i++){
+    const t0=now-windowMs+(i*windowMs/n),t1=t0+windowMs/n;
+    const v=sel.filter(q=>q.t*1000>=t0&&q.t*1000<t1);
+    out.push(v.length?v.reduce((a,q)=>a+(q[key]||0),0)/v.length:null);
+  }
+  return out;
+}
+function drawAll(){
+  drawLine($("cvLive"),[{c:"#38BDF8",data:liveHist.map(p=>p.c)},{c:"#22C55E",data:liveHist.map(p=>p.r)}],"%",100);
+  drawLine($("cvNet"),[{c:"#22C55E",data:liveHist.map(p=>p.down/1024)},{c:"#EF4444",data:liveHist.map(p=>p.up/1024)}],"K");
+  drawLine($("cvDisk"),[{c:"#38BDF8",data:liveHist.map(p=>p.dr/1024)},{c:"#EAB308",data:liveHist.map(p=>p.dw/1024)}],"K");
+  const H24=86400000;
+  drawLine($("cvSteal"),[{c:"#38BDF8",data:gridOver(dayHist,"c",H24)},{c:"#EF4444",data:gridOver(dayHist,"steal",H24)}],"%",100);
+  drawLine($("cvNetDay"),[{c:"#22C55E",data:gridOver(dayHist,"down",H24).map(v=>v==null?null:v/1024)},{c:"#EF4444",data:gridOver(dayHist,"up",H24).map(v=>v==null?null:v/1024)}],"K");
+  if(rdpHist.length){
+    $("rdpmonInfo").textContent=rdpHist.length+" points";
+    drawLine($("cvDay"),[{c:"#38BDF8",data:rdpHist.map(p=>p.c)},{c:"#22C55E",data:rdpHist.map(p=>p.r)}],"%",100);
+  }
+}
+
+/* ---------- tabs ---------- */
+const consoleTabs=[...document.querySelectorAll(".tab")];
+function activateTab(t){
+  consoleTabs.forEach(x=>{
+    const selected=x===t;
+    x.classList.toggle("on",selected);
+    x.setAttribute("aria-selected",String(selected));
+    x.tabIndex=selected?0:-1;
+    $("tab-"+x.dataset.t).style.display=selected?"":"none";
+  });
+  $("skipNavigation").href="#tab-"+t.dataset.t;
+  if(t.dataset.t=="charts")drawAll();
+  if(t.dataset.t=="sec")loadSec();
+  if(t.dataset.t=="tools"){loadServices();loadNetstat();loadSysinfo()}
+  if(t.dataset.t=="backup")loadBackup();
+  if(t.dataset.t=="rdpsec")loadRdp();
+  if(t.dataset.t=="users")loadUsers();
+  if(t.dataset.t=="diagnostics")loadDiag("diagnose");
+  if(t.dataset.t=="docs")loadDocs();
+}
+consoleTabs.forEach((t,i)=>{
+  t.id="nav-"+t.dataset.t;
+  t.querySelector("svg")?.setAttribute("aria-hidden","true");
+  t.setAttribute("aria-controls","tab-"+t.dataset.t);
+  t.setAttribute("aria-selected",String(t.classList.contains("on")));
+  t.tabIndex=t.classList.contains("on")?0:-1;
+  const panel=$("tab-"+t.dataset.t);
+  panel.setAttribute("role","tabpanel");
+  panel.setAttribute("aria-labelledby",t.id);
+  panel.tabIndex=-1;
+  t.onclick=()=>activateTab(t);
+  t.onkeydown=e=>{
+    let next=i;
+    if(e.key==="ArrowDown"||e.key==="ArrowRight")next=(i+1)%consoleTabs.length;
+    else if(e.key==="ArrowUp"||e.key==="ArrowLeft")next=(i-1+consoleTabs.length)%consoleTabs.length;
+    else if(e.key==="Home")next=0;
+    else if(e.key==="End")next=consoleTabs.length-1;
+    else if(e.key==="Enter"||e.key===" "){e.preventDefault();activateTab(t);return}
+    else return;
+    e.preventDefault();consoleTabs[next].focus();activateTab(consoleTabs[next]);
+  };
+});
+
+function goTab(name){
+  const tab=document.querySelector('.tab[data-t="'+name+'"]');
+  if(tab){tab.click();window.scrollTo({top:0,behavior:"smooth"})}
+}
+function botExec(){
+  const cmd=prompt("Command to run:");if(!cmd)return;
+  $("cmdInput").value=cmd;goTab("tools");doRun();
+}
+function botRun(){
+  const path=prompt("Full executable path:","C:\\Windows\\System32\\notepad.exe");if(!path)return;
+  const args=prompt("Arguments (optional):","")||"";
+  $("progPath").value=path;$("progArgs").value=args;goTab("tools");doStartProg();
+}
+function botScreenshot(){goTab("tools");doShot()}
+function botBlockIp(){
+  const ip=prompt("IP address to block:");if(!ip)return;
+  $("blkNew").value=ip;act({action:"block_ip",ip}).then(()=>{goTab("sec");loadSec()});
+}
+function botMessage(){
+  const text=prompt("Message to show to signed-in users:");if(!text)return;
+  act({action:"msg",text});
+}
+function botLogoff(){
+  const sid=prompt("Numeric RDP session ID (shown on the Live tab):");if(!sid)return;
+  logoff(sid);
+}
+function botClean(){if(confirm("Delete TEMP files older than 24 hours?"))doClean()}
+function botService(){
+  const name=prompt("Windows service name to restart:");if(!name)return;
+  doSvcNamed(name,"restart");
+}
+
+async function loadBackup(){
+  try{
+    const r=await fetch("/api/backup");const d=await r.json();
+    if(!d.installed){$("backupState").textContent="Not installed";return}
+    const w=d.worker||{},s=d.settings||{},last=d.last||{};
+    $("backupState").textContent=(w.state||"unknown").toUpperCase();
+    $("backupState").style.color=w.state==="ok"||w.state==="idle"?"var(--ok)":w.state==="running"?"var(--warn)":"var(--bad)";
+    const pr=d.progress||{};
+    $("backupMessage").textContent=(w.message||"No worker status")+(pr.state==="running"?(" — "+Number(pr.percent||0)+"% "+String(pr.message||"")):"");
+    $("backupLast").textContent=last.last_success?new Date(last.last_success).toLocaleString("en-US"):"Never";
+    $("backupSummary").textContent=last.summary||"No successful backup recorded";
+    $("backupSchedule").textContent=s.schedule_enabled?(s.schedule_time||"Enabled"):"Disabled";
+    $("backupEngine").textContent=(s.engine||"zip").toUpperCase()+" engine • keep "+(s.keep_local_copies||1)+" local • config v"+(s.config_version||"?")+"."+(s.config_revision||"?");
+    $("backupDestinations").textContent=Number(s.cloud_destinations||0)+" cloud";
+    $("backupSources").textContent=Number(s.sources||0)+" sources • drill "+(s.drill_enabled?("every "+s.drill_interval_days+"d"):"off");
+    $("backupTbl").querySelector("tbody").innerHTML=(d.items||[]).map(x=>"<tr><td class='mono'>"+eh(x.name)+"</td><td class='mono'>"+hb(x.size)+"</td><td class='mut'>"+new Date(x.modified*1000).toLocaleString("en-US")+"</td><td><button class='btn' onclick=\"restoreArchive('"+enc(x.name)+"')\">Restore</button></td></tr>").join("")||'<tr><td colspan=4 class="mut">No local backups</td></tr>';
+    $("backupLog").textContent=(d.recent_log||[]).join("\n")||"No log entries";
+    $("backupNowBtn").disabled=w.state==="running";
+  }catch(e){toast("Unable to load backup status",true)}
+}
+function backupNow(){
+  if(!confirm("Start a manual backup now?"))return;
+  act({action:"backup_now"}).then(j=>{if(j&&j.ok){toast("Backup request queued");setTimeout(loadBackup,2200)}});
+}
+function openBackupGui(){act({action:"backup_gui"}).then(j=>{if(j&&j.ok)toast("Backup settings opened on the server desktop")})}
+function restoreArchive(encName){
+  const name=decodeURIComponent(encName);
+  if(!confirm("Restore "+name+" into an isolated folder under the suite? It will not overwrite the original paths."))return;
+  act({action:"restore",name:name}).then(j=>{toast(j&&j.ok?"Restore complete":"Restore: "+((j&&j.out)||"failed"),!(j&&j.ok))});
+}
+function runDrill(){
+  if(!confirm("Run a restore drill now? It restores the newest archive into an isolated folder and verifies it."))return;
+  act({action:"drill"}).then(j=>{toast(j&&j.ok?"Restore drill passed":"Drill: "+((j&&j.out)||"failed"),!(j&&j.ok))});
+}
+async function loadRdp(){
+  try{
+    const r=await fetch("/api/rdp");const d=await r.json();
+    if(d.error){toast("RDP status: "+d.error,true);return}
+    $("rdpPort").textContent=d.port||"—";
+    $("rdpAllow").textContent=d.allow_active?"On":"Off";
+    $("rdpLock").textContent=d.lockdown?"Active":"Off";
+    $("rdpPanic").textContent=d.panic?"ACTIVE":"Off";
+    $("rdpBlocked").textContent=Number(d.blocked_count||0);
+    $("rdpIpTbl").querySelector("tbody").innerHTML=(d.allowed_ips||[]).map(ip=>"<tr><td class='mono'>"+eh(ip)+"</td><td><button class='btn' onclick=\"rdpRemove('"+enc(ip)+"')\">Remove</button></td></tr>").join("")||'<tr><td colspan=2 class="mut">None</td></tr>';
+  }catch(e){toast("RDP status failed: "+e,true)}
+}
+function rdpAct(op,extra){
+  act(Object.assign({action:"rdp",op:op},extra||{})).then(j=>{
+    const out=(j&&j.out&&typeof j.out==="object")?"":((j&&j.out)||"");
+    toast(j&&j.ok?("Done: "+out):("Failed: "+(out||"error")),!(j&&j.ok));
+    setTimeout(loadRdp,800);
+  });
+}
+function rdpAdd(){const ip=$("rdpNewIp").value.trim();if(ip)rdpAct("rdp_allow_add",{ip:ip});}
+function rdpRemove(encIp){const ip=decodeURIComponent(encIp);if(confirm("Remove "+ip+" from the allow-list?"))rdpAct("rdp_allow_remove",{ip:ip});}
+function rdpClear(){if(confirm("Clear the allow-list and open RDP to ANY IP?"))rdpAct("rdp_allow_clear");}
+function rdpPanic(mode){if(confirm("Panic "+mode+": this closes RDP for everyone. Continue?"))rdpAct("panic",{mode:mode});}
+function dotnetDate(s){
+  if(!s)return "-";
+  const m=/\/Date\((-?\d+)\)\//.exec(String(s));
+  if(!m)return String(s);
+  return new Date(Number(m[1])).toLocaleString("en-US");
+}
+async function loadUsers(){
+  try{
+    const r=await fetch("/api/users");const d=await r.json();
+    if(d.error){toast("Users: "+d.error,true);return}
+    $("userTbl").querySelector("tbody").innerHTML=(d.items||[]).map(u=>"<tr><td class='mono'>"+eh(u.name)+"</td><td><span class='pill "+(u.enabled?"p-ok":"p-warn")+"'>"+(u.enabled?"enabled":"disabled")+"</span></td><td class='mut'>"+eh(dotnetDate(u.last))+"</td><td>"+
+      "<button class='btn' onclick=\"userAct('disable','"+enc(u.name)+"')\">Disable</button> "+
+      "<button class='btn' onclick=\"userAct('enable','"+enc(u.name)+"')\">Enable</button> "+
+      "<button class='btn' onclick=\"userPass('"+enc(u.name)+"')\">Password</button> "+
+      "<button class='btn' onclick=\"userRename('"+enc(u.name)+"')\">Rename</button> "+
+      "<button class='btn danger' onclick=\"userAct('delete','"+enc(u.name)+"')\">Delete</button>"+
+      "</td></tr>").join("")||'<tr><td colspan=4 class="mut">None</td></tr>';
+  }catch(e){toast("Users load failed: "+e,true)}
+}
+function userAct(op,encName){
+  const name=decodeURIComponent(encName);
+  if(!confirm(op+" user "+name+"?"))return;
+  act({action:"user",op:op,name:name}).then(j=>{toast(j&&j.ok?("Done: "+op):("Failed: "+((j&&j.out)||"")),!(j&&j.ok));setTimeout(loadUsers,600)});
+}
+function userPass(encName){
+  const name=decodeURIComponent(encName);
+  const pw=prompt("New password for "+name+":");if(!pw)return;
+  act({action:"user",op:"password",name:name,value:pw}).then(j=>{toast(j&&j.ok?"Password set":"Failed",!(j&&j.ok))});
+}
+function userRename(encName){
+  const name=decodeURIComponent(encName);
+  const nn=prompt("New name for "+name+":");if(!nn)return;
+  act({action:"user",op:"rename",name:name,value:nn}).then(j=>{toast(j&&j.ok?"Renamed":"Failed",!(j&&j.ok));setTimeout(loadUsers,600)});
+}
+function userAdd(){
+  const n=$("newUserName").value.trim();const p=$("newUserPass").value;
+  if(!n||!p){toast("Name and password required",true);return}
+  act({action:"user",op:"add",name:n,value:p}).then(j=>{toast(j&&j.ok?"User created":"Failed",!(j&&j.ok));$("newUserName").value="";$("newUserPass").value="";setTimeout(loadUsers,600)});
+}
+async function loadDiag(op,arg){
+  const box=$("diagOut");
+  box.textContent="Running "+(op||"diagnose")+"...";
+  try{
+    const r=await fetch("/api/diag?op="+encodeURIComponent(op||"diagnose")+"&arg="+encodeURIComponent(arg||""));
+    const d=await r.json();
+    box.textContent=d.error?("Error: "+d.error):(d.text||"(no output)");
+  }catch(e){box.textContent="Diagnostics failed: "+e}
+}
+async function loadDocs(){
+  try{const r=await fetch("/api/docs");const d=await r.json();
+    $("docsBox").textContent=d.markdown||d.error||"No documentation available";}
+  catch(e){toast("Docs load failed: "+e,true)}
+}
+
+/* ---------- live poll ---------- */
+async function poll(){
+  try{
+    const r=await fetch("/api/stats");
+    if(r.status==401){showLogin("The session has ended — Sign in again");return}
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const s=await r.json();if(!s.ts)throw new Error("No live data");
+    setConnection("online","Live");
+    const c=s.cpu,m=s.ram;
+    const setBar=(bar,p)=>{bar.style.width=p+"%";bar.style.background=colorOf(p)};
+    $("cpuPct").textContent=c.pct.toFixed(0);setBar($("cpuBar"),c.pct);
+    $("cpuCores").textContent=c.cores+" logical / "+(c.physical||"?")+" physical";
+    $("cpuFreq").textContent=c.freq?c.freq.toFixed(0)+" MHz"+(c.freq_max&&c.freq_max!=c.freq?" / "+c.freq_max:""):"—";
+    $("cpuSteal").textContent=c.steal==null?"Measured after the first minute":c.steal.toFixed(1)+" %";
+    const sb=$("stealBadge");sb.textContent="steal "+(c.steal==null?"…":c.steal.toFixed(0)+"%");
+    sb.className="pill "+(c.steal>10?"p-bad":c.steal>5?"p-warn":"p-ok");
+    $("ramPct").textContent=m.pct.toFixed(0);setBar($("ramBar"),m.pct);
+    $("ramUsed").textContent=hb(m.used)+" / "+hb(m.total);
+    $("ramAvail").textContent=hb(m.avail);
+    $("ramSwap").textContent=m.swap_total?hb(m.swap_used)+" / "+hb(m.swap_total)+" ("+m.swap_pct.toFixed(0)+"%)":"None";
+    $("downBps").textContent=hbs(s.down_bps);$("upBps").textContent=hbs(s.up_bps);
+    $("downMini").textContent=hbs(s.down_bps);$("upMini").textContent=hbs(s.up_bps);
+    const mainNic=(s.nics||[]).find(n=>n.ips&&n.ips.length);
+    $("nicName").textContent=mainNic?mainNic.name:"—";$("nicIp").textContent=mainNic?mainNic.ips[0]:"—";
+    $("diskR").textContent=hbs(s.disk_r_bps);$("diskW").textContent=hbs(s.disk_w_bps);
+    $("diskList").innerHTML=(s.disks||[]).map(d=>'<div class="row"><span class="mono">'+eh(d.dev)+'</span><span class="mut mono">'+hb(d.free)+" free of "+hb(d.total)+" ("+Number(d.pct||0).toFixed(0)+'%)</span></div>').join("");
+    $("coreGrid").innerHTML=(c.per_core||[]).map((p,i)=>'<div><div style="font-size:10px;color:var(--mut)" class="mono">#'+i+'</div><div class="bar" style="height:6px;margin-top:4px"><div style="width:'+p+'%;background:'+colorOf(p)+'"></div></div></div>').join("");
+    const ss=s.sessions||[];$("sessCount").textContent=ss.length+" sessions";
+    $("sessTbl").querySelector("tbody").innerHTML=ss.map(x=>"<tr><td>"+eh(x.user)+"</td><td class='mono'>"+eh(x.session)+"</td><td class='mono'>"+eh(x.id||"—")+"</td><td><span class='pill "+(x.state=="Active"?"p-ok":"p-warn")+"'>"+eh(x.state)+"</span></td><td>"+(x.id?"<button class='btn danger' onclick=\"logoffEnc('"+enc(x.id)+"')\">Log off</button>":"")+"</td></tr>").join("")||'<tr><td colspan=5 class="mut">None</td></tr>';
+    $("rdpIps").textContent=(s.rdp_ips||[]).join(", ")||"—";
+    lastProcs=s.procs||[];
+    $("procTbl").querySelector("tbody").innerHTML=lastProcs.slice(0,25).map(p=>"<tr><td class='mono'>"+Number(p.pid)+"</td><td><a href='#' onclick='showProc("+Number(p.pid)+");return false' style='color:var(--acc)'>"+eh(p.name)+"</a></td><td class='mut'>"+eh(p.user||"—")+"</td><td class='mono' style='color:"+colorOf(Number(p.cpu))+"'>"+Number(p.cpu).toFixed(1)+"</td><td class='mono'>"+hb(p.rss)+"</td><td><button class='btn danger' onclick=\"killEnc("+Number(p.pid)+",'"+enc(p.name)+"')\">End</button></td></tr>").join("");
+    liveHist.push({t:s.ts,c:c.pct,r:m.pct,up:s.up_bps,down:s.down_bps,dr:s.disk_r_bps,dw:s.disk_w_bps});
+    if(liveHist.length>180)liveHist.shift();
+    lastApps=s.apps||[];
+    if(!$("tab-apps").style.display)renderApps();
+    if(!$("tab-charts").style.display)drawAll();
+    $("clock").textContent=new Date(s.ts*1000).toLocaleTimeString("en-US");
+  }catch(e){setConnection("offline","Connection lost")}
+}
+function renderApps(){
+  const f=($("appFilter").value||"").toLowerCase();
+  const rows=lastApps.filter(a=>!f||a.app.toLowerCase().includes(f));
+  $("appTbl").querySelector("tbody").innerHTML=rows.slice(0,80).map(a=>"<tr><td><b>"+eh(a.app)+"</b></td><td class='mono'>"+Number(a.procs)+"</td><td class='mono' style='color:"+colorOf(Number(a.cpu))+"'>"+Number(a.cpu).toFixed(1)+"</td><td class='mono'>"+hb(a.ram)+"</td><td class='mut mono'>"+hbs(a.io_rps)+"</td><td class='mut mono'>"+hbs(a.io_wps)+"</td><td><button class='btn danger' onclick=\"killAppP('"+enc(a.app)+"')\">End all</button></td></tr>").join("");
+}
+$("appFilter").oninput=renderApps;
+
+async function loadDay(){
+  try{
+    const r=await fetch("/api/history");const h=await r.json();
+    dayHist=h.points||[];rdpHist=h.rdpmon||[];
+    if(!$("tab-charts").style.display)drawAll();
+  }catch(e){}
+}
+
+/* ---------- actions ---------- */
+async function act(body,silent){
+  try{
+    const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":CSRF},body:JSON.stringify(body)});
+    if(r.status===401){showLogin("The session has ended");return {error:"authentication required"}}
+    const j=await r.json();
+    if(!r.ok||j.error||j.ok===false){
+      toast("Action failed: "+String(j.error||j.out||"Please check the details and try again").slice(0,180),true);
+    }else if(!silent){
+      const result=typeof j.out==="string"&&j.out.length<120?j.out:"Action completed";
+      toast(result);
+    }
+    return j;
+  }catch(e){toast("Request failed: "+e,true);return {error:String(e)}}
+}
+function kill(pid,name){if(confirm("End the process "+name+" ("+pid+")?"))act({action:"kill",pids:[pid]})}
+function killEnc(pid,name){kill(pid,decodeURIComponent(name))}
+function killAppP(enc){const app=decodeURIComponent(enc);const a=lastApps.find(x=>x.app===app);
+  if(a&&confirm("End all processes for "+app+" ("+a.procs+" processes)?"))act({action:"kill_app",app:app,pids:a.pids})}
+function logoff(sid){if(confirm("Log off session "+sid+"?"))act({action:"logoff",sid:sid})}
+function logoffEnc(sid){logoff(decodeURIComponent(sid))}
+function doClean(){act({action:"clean_temp"}).then(j=>{if(j.freed!=null)toast("Done: "+j.files+" file, saving "+hb(j.freed))})}
+function doMsg(){const t=$("msgTxt").value;if(t)act({action:"msg",text:t})}
+function doService(m){const n=$("svcName2").value.trim();if(n)act({action:"service",name:n,mode:m})}
+function blockIp(){const ip=$("blkNew").value.trim();if(ip)act({action:"block_ip",ip:ip}).then(()=>loadSec())}
+function unblockIp(ip){if(confirm("Unblock "+ip+"?"))act({action:"unblock_ip",ip:ip}).then(()=>loadSec())}
+function unblockIpEnc(ip){unblockIp(decodeURIComponent(ip))}
+async function confirmAct(kind){
+  if(!confirm("Are you sure you want to "+(kind=="reboot"?"restart":"shut down")+" the server in five seconds?"))return;
+  const p=await act({action:"prepare",target:kind},true);if(p&&p.nonce)await act({action:kind,nonce:p.nonce});
+}
+function doRun(){const c=$("cmdInput").value.trim();if(!c)return;
+  $("cmdOut").textContent="Running…";
+  act({action:"run_command",cmd:c,timeout:30}).then(j=>{
+    $("cmdOut").textContent=j.out||"(No output)";$("cmdOut").style.color=j.ok?"var(--tx)":"var(--bad)"})}
+$("cmdInput").addEventListener("keydown",e=>{if(e.key=="Enter")doRun()});
+function doStartProg(){const p=$("progPath").value.trim();if(p)act({action:"start_program",path:p,args:$("progArgs").value})}
+function doShot(){act({action:"screenshot"}).then(j=>{if(j.png){$("shotImg").src=j.png;$("shotImg").style.display="block"}})}
+
+/* ---------- process detail modal ---------- */
+async function showProc(pid){
+  $("modalbg").style.display="grid";$("modalBox").innerHTML="<div class='mut'>Loading…</div>";
+  try{
+    const r=await fetch("/api/proc?pid="+pid);const d=await r.json();
+    if(d.error){$("modalBox").textContent="Error: "+d.error;return}
+    $("modalBox").innerHTML="<h3 style='margin-bottom:12px'>"+eh(d.name)+" <span class='mut mono' style='font-size:12px'>PID "+Number(d.pid)+"</span></h3>"+
+      "<div class='row'><span class='mut'>Path</span><span class='mono' style='direction:ltr;text-align:left'>"+eh(d.exe||"—")+"</span></div>"+
+      "<div class='row'><span class='mut'>Command line</span><span class='mono' style='direction:ltr;text-align:left;font-size:11px'>"+eh(d.cmdline||"—")+"</span></div>"+
+      "<div class='row'><span class='mut'>User</span><span class='mono'>"+eh(d.user||"—")+"</span></div>"+
+      "<div class='row'><span class='mut'>Started</span><span class='mono'>"+(d.started?new Date(d.started*1000).toLocaleString("en-US"):"—")+"</span></div>"+
+      "<div class='row'><span class='mut'>CPU / RAM</span><span class='mono'>"+d.cpu+"% / "+hb(d.rss)+"</span></div>"+
+      "<div class='row'><span class='mut'>Threads / IO</span><span class='mono'>"+d.threads+" / R "+hb(d.io_read)+" W "+hb(d.io_write)+"</span></div>"+
+      (d.conns&&d.conns.length?"<div class='mut' style='margin-top:10px'>Connections:</div>"+d.conns.map(c=>"<div class='row mono' style='direction:ltr;text-align:left;font-size:11px'><span>"+eh(c.l)+"</span><span>"+eh(c.r)+"</span><span>"+eh(c.s)+"</span></div>").join(""):"")+
+      "<div style='margin-top:14px;display:flex;gap:8px'><button class='btn danger' onclick=\"killEnc("+Number(d.pid)+",'"+enc(d.name)+"');$('modalbg').style.display='none'\">End the process</button>"+
+      "<button class='btn' onclick='$(\"modalbg\").style.display=\"none\"'>Close</button></div>";
+  }catch(e){$("modalBox").textContent="Error: "+e}
+}
+
+/* ---------- tools tab ---------- */
+async function loadServices(){
+  try{
+    const r=await fetch("/api/services");const j=await r.json();
+    $("svcTbl").querySelector("tbody").innerHTML=(j.items||[]).map(s=>"<tr><td><span class='pill "+(s.status=="Running"?"p-ok":"p-warn")+"'>"+eh(s.status)+"</span></td><td class='mono'>"+eh(s.name)+"</td><td class='mut'>"+eh(s.display||"")+"</td>"+
+      "<td><button class='btn' onclick=\"doSvcNamedEnc('"+enc(s.name)+"','restart')\">↻</button> <button class='btn' onclick=\"doSvcNamedEnc('"+enc(s.name)+"','stop')\"></button></td></tr>").join("");
+    $("svcTbl").querySelectorAll("tbody tr").forEach(row=>{
+      const [restart,stop]=row.querySelectorAll("button");
+      if(restart)restart.textContent="Restart";
+      if(stop){stop.textContent="Stop";stop.classList.add("danger")}
+    });
+  }catch(e){toast("Services load failed: "+e,true)}
+}
+function doSvcNamed(name,mode){
+  if(mode=="restart"&&!confirm("Restart the service "+name+"?"))return;
+  if(mode=="stop"&&!confirm("Stop the service "+name+"?"))return;
+  act({action:"service",name:name,mode:mode}).then(()=>setTimeout(loadServices,1500));
+}
+function doSvcNamedEnc(name,mode){doSvcNamed(decodeURIComponent(name),mode)}
+async function loadNetstat(){
+  try{
+    const r=await fetch("/api/netstat");const j=await r.json();
+    $("netTbl").querySelector("tbody").innerHTML=(j.items||[]).map(c=>"<tr><td class='mono' style='direction:ltr;text-align:left'>"+eh(c.l)+"</td><td class='mono' style='direction:ltr;text-align:left'>"+eh(c.r)+"</td><td>"+eh(c.proc||"—")+"</td></tr>").join("");
+  }catch(e){toast("Connections load failed: "+e,true)}
+}
+async function loadSysinfo(){
+  try{
+    const r=await fetch("/api/sysinfo");const d=await r.json();
+    $("sysinfoBox").innerHTML=
+      "<div class='row'><span class='mut'>Host</span><span class='mono'>"+eh(d.hostname)+"</span></div>"+
+      "<div class='row'><span class='mut'>System</span><span class='mono' style='direction:ltr;text-align:left'>"+eh(d.os)+" ("+eh(d.arch)+")</span></div>"+
+      "<div class='row'><span class='mut'>Processor</span><span class='mono' style='direction:ltr;text-align:left;font-size:11px'>"+eh(d.cpu_model||"—")+"</span></div>"+
+      "<div class='row'><span class='mut'>RAM</span><span class='mono'>"+hb(d.ram_total)+"</span></div>"+
+      "<div class='row'><span class='mut'>Boot time</span><span class='mono'>"+new Date(d.boot*1000).toLocaleString("en-US")+"</span></div>"+
+      "<div class='row'><span class='mut'>Uptime</span><span class='mono'>"+Math.floor(d.uptime_s/86400)+" days "+Math.floor(d.uptime_s%86400/3600)+" hours</span></div>"+
+      (d.disks||[]).map(x=>"<div class='row'><span class='mono'>"+eh(x.dev)+"</span><span class='mono'>"+hb(x.free)+" Free / "+hb(x.total)+"</span></div>").join("");
+  }catch(e){toast("System information load failed: "+e,true)}
+}
+
+/* ---------- security tab ---------- */
+async function loadSec(){
+  try{
+    const r=await fetch("/api/security");const s=await r.json();
+    const c=s.config||{};
+    $("rdpStatus").innerHTML=
+      "<div class='row'><span class='mut'>RDP port</span><span class='mono'>"+eh(c.rdp_port||3389)+"</span></div>"+
+      "<div class='row'><span class='mut'>Allowlist enabled</span><span class='pill "+(c.rdp_allow_active?"p-ok":"p-bad")+"'>"+(c.rdp_allow_active?"Yes":"No")+"</span></div>"+
+      "<div class='row'><span class='mut'>Allowed IPs</span><span class='mono'>"+eh((c.rdp_allowed_ips||[]).join(", ")||"—")+"</span></div>"+
+      "<div class='row'><span class='mut'>Automatic ban</span><span>"+(c.failed_login_block?"Enabled ("+c.failed_login_block_threshold+" attempts / "+c.failed_login_window+" min)":"Disabled")+"</span></div>"+
+      "<div class='row'><span class='mut'>Lockdown</span><span class='pill "+(c.lockdown?"p-ok":"")+"'>"+(c.lockdown?"Enabled":"Disabled")+"</span></div>"+
+      "<div class='row'><span class='mut'>rdpwatch / netwatch</span><span>"+(c.rdp_watch?"":"")+" / "+(c.net_watch?"":"")+"</span></div>"+
+      "<div class='row'><span class='mut'>Device name in chat</span><span class='mono'>"+eh(c.instance_name||c.machine_name||"Default")+"</span></div>";
+    const b=s.blocked||{};$("blkCount").textContent=Object.keys(b).length+" IP";
+    $("blkTbl").querySelector("tbody").innerHTML=Object.entries(b).sort((a,x)=>x[1]-a[1]).slice(0,100).map(e=>
+      "<tr><td class='mono'>"+eh(e[0])+"</td><td class='mut'>"+new Date(e[1]*1000).toLocaleDateString("en-US")+"</td><td><button class='btn' onclick=\"unblockIpEnc('"+enc(e[0])+"')\">Unblock</button></td></tr>").join("")||'<tr><td colspan=3 class="mut">None</td></tr>';
+    const tr=s.traffic||{};const days=Object.keys(tr).sort().slice(-7);
+    $("trafficBox").innerHTML=days.map(d=>"<div class='row'><span>"+eh(d)+"</span><span>↓ "+hb((tr[d].down||0)*1048576)+" • ↑ "+hb((tr[d].up||0)*1048576)+"</span></div>").join("")+
+      "<div class='row'><b>7-day total</b><b>↓ "+hb(days.reduce((a,d)=>a+((tr[d].down||0)*1048576),0))+" • ↑ "+hb(days.reduce((a,d)=>a+((tr[d].up||0)*1048576),0))+"</b></div>";
+    try{
+      const ar=await fetch("/api/audit");const aj=await ar.json();
+      $("auditTbl").querySelector("tbody").innerHTML=(aj.items||[]).slice(-50).reverse().map(a=>
+        "<tr><td class='mut mono'>"+new Date(a.t*1000).toLocaleString("en-US")+"</td><td><b>"+eh(a.action)+"</b></td><td class='mut mono' style='direction:ltr;text-align:left'>"+eh(a.detail||"")+"</td></tr>").join("");
+    }catch(e){toast("Audit load failed: "+e,true)}
+  }catch(e){toast("Security data load failed: "+e,true)}
+}
+
+function showLogin(msg){
+  $("app").style.display="none";$("loginBg").style.display="grid";
+  $("loginErr").textContent=msg||"";CSRF="";
+}
+function startApp(){
+  $("loginBg").style.display="none";$("app").style.display="";
+  if(started)return;started=true;
+  setInterval(poll,2000);poll();
+  setInterval(()=>{if(!$("tab-sec").style.display)loadSec()},10000);
+  setInterval(()=>{if(!$("tab-backup").style.display)loadBackup()},5000);
+  loadSec();loadDay();setInterval(loadDay,120000);
+}
+async function doLogin(){
+  const token=$("loginToken").value;$("loginErr").textContent="Verifying…";
+  try{
+    const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});
+    const j=await r.json();if(!r.ok){showLogin(j.error||"Login failed");return}
+    CSRF=j.csrf;$("loginToken").value="";startApp();
+  }catch(e){showLogin("Unable to connect to the server")}
+}
+async function initAuth(){
+  try{const r=await fetch("/api/session");const j=await r.json();if(r.ok&&j.ok){CSRF=j.csrf;startApp()}else showLogin("")}
+  catch(e){showLogin("Unable to connect to the server")}
+}
+$("loginBtn").onclick=doLogin;
+$("loginToken").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
+initAuth();
+window.addEventListener("resize",()=>{if(!$("tab-charts").style.display)drawAll()});
+</script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+{
+  "_meta": {
+    "version": 2,
+    "revision": 1,
+    "updated": ""
+  },
+  "restore_drill": {
+    "enabled": false,
+    "interval_days": 7,
+    "dest": "",
+    "keep": false
+  },
+  "backup": {
+    "engine": "zip",
+    "sources": [
+      "C:\\Path\\To\\Backup"
+    ],
+    "exclude_extensions": [
+      ".tmp",
+      ".lock"
+    ],
+    "exclude_patterns": [],
+    "exclude_max_size_mb": 0,
+    "archive_password": "",
+    "keep_local_copies": 3,
+    "use_vss": false,
+    "verify": true,
+    "require_all_sources": true,
+    "pre_command": "",
+    "post_command": "",
+    "hook_timeout_minutes": 60
+  },
+  "schedule": {
+    "enabled": false,
+    "mode": "daily",
+    "time": "03:00",
+    "times": [],
+    "interval_hours": 1,
+    "retry_count": 3,
+    "retry_delay_minutes": 10
+  },
+  "cloud": {
+    "remotes": [],
+    "remote_folder": "VPS-Backups",
+    "retention_days": 30,
+    "allow_share_links": true,
+    "rclone_config": ""
+  },
+  "restic": {
+    "repository": "",
+    "password": "",
+    "keep_daily": 7,
+    "keep_weekly": 4,
+    "keep_monthly": 12,
+    "check_after_backup": true
+  },
+  "telegram": {
+    "bot_token": "",
+    "api_id": "",
+    "api_hash": "",
+    "chat_id": "",
+    "bot_enabled": false,
+    "send_file": true,
+    "send_report": true,
+    "verify_delivery": true,
+    "delivery_timeout": 3600,
+    "direct_max_mb": 45
+  },
+  "monitoring": {
+    "healthcheck_url": "",
+    "heartbeat_url": "",
+    "alert_after_hours": 26
+  },
+  "general": {
+    "autostart": false,
+    "language": "en"
+  }
+}

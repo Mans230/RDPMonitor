@@ -1,0 +1,40 @@
+# Secrets and runtime state - never commit these
+config.json
+config.json.bak
+webconsole/webconsole_state.json
+webconsole/webconsole_audit.jsonl
+webconsole/webconsole_history.json
+webconsole/webconsole.pid
+webconsole/tls/
+*.pem
+*.key
+backup/config.json
+backup/control/
+backup/local_backups/
+backup/logs/
+backup/rclone/
+backup/restic/
+backup/app.lock
+backup/app.pid
+control/
+screenshots/
+
+# Runtime data
+audit.json
+blocked.json
+history.json
+traffic.json
+alert_queue.json
+file_queue.json
+suite_user.pid.json
+rdp_monitor.log
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Agent tooling (not part of the tool)
+.agents/
+skills-lock.json
