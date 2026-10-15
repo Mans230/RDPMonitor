@@ -47,8 +47,7 @@ optional speed tests).
 
 It is a consolidated, separately maintained build based on v4.3. It includes the
 corrected core, transactional TCP/UDP firewall handling, per-installation Windows
-mutexes, safer defaults, persistent retry queues, and a hardened WebConsole. See
-[`CHANGELOG-FIXED.md`](CHANGELOG-FIXED.md) and [`PATCH-NOTES.md`](PATCH-NOTES.md).
+mutexes, safer defaults, persistent retry queues, and a hardened WebConsole.
 
 ## Who it is for
 
