@@ -1586,6 +1586,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/rdp":
             ok, out = panel_request("rdp_status", timeout=10)
             return self._json(200 if ok else 503, out if isinstance(out, dict) else {"error": out})
+        if u.path == "/api/settings":
+            ok, out = panel_request("settings_get", timeout=15)
+            return self._json(200 if ok else 503, out if isinstance(out, dict) else {"error": out})
         if u.path == "/api/users":
             ok, out = panel_request("users_list", timeout=20)
             return self._json(200 if ok else 503,
@@ -1751,6 +1754,13 @@ class Handler(BaseHTTPRequestHandler):
                     args["mode"] = str(body.get("mode", "status"))[:16]
                 ok, out = panel_request(op, args)
                 audit("rdp", "%s %s -> %s" % (op, args, ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "settings_set":
+                key = str(body.get("key", ""))[:32]
+                value = str(body.get("value", ""))[:64]
+                ok, out = panel_request("settings_set", {"key": key, "value": value,
+                                                         "confirm": bool(body.get("confirm"))})
+                audit("settings", "%s=%s -> %s" % (key, value, ok))
                 return self._json(200, {"ok": ok, "out": out})
             if act == "block_ip":
                 ok, out = block_ip(body.get("ip", "")); return self._json(200, {"ok": ok, "out": out})

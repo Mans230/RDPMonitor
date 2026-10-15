@@ -2925,6 +2925,16 @@ def _dispatch_panel(action, args):
         return api_lockdown(args.get("mode", "status"))
     if action == "panic":
         return api_panic(args.get("mode", "status"))
+    if action == "settings_get":
+        return True, {"groups": settings_snapshot()}
+    if action == "settings_set":
+        key = str(args.get("key", ""))
+        value = str(args.get("value", ""))
+        if (key.lower() in SET_ENABLE_CONFIRM and value.lower() == "on"
+                and not config.get(SET_ENABLE_CONFIRM[key.lower()])
+                and not args.get("confirm")):
+            return False, "confirmation required for " + key
+        return apply_setting(key, value)
     return False, "unknown action"
 
 
@@ -3942,8 +3952,8 @@ PANEL_COVERAGE = {
     "/startup": "diagnostics", "/updates": "diagnostics", "/image": "bot-only",
     "/listusers": "users", "/adduser": "users",
     "/disableuser": "users", "/enableuser": "users", "/deluser": "users",
-    "/renameuser": "users", "/mute": "bot-only", "/set": "bot-only",
-    "/status": "bot-only", "/blocksubnet": "bot-only", "/whitelist": "bot-only",
+    "/renameuser": "users", "/mute": "bot-only", "/set": "settings",
+    "/status": "settings", "/blocksubnet": "bot-only", "/whitelist": "bot-only",
     "/rdpallow": "rdpsec", "/lockdown": "rdpsec", "/panic": "rdpsec",
     "/harden": "diagnostics", "/setrdpport": "bot-only", "/firewall": "diagnostics",
     "/botlog": "diagnostics", "/diagnose": "diagnostics",
@@ -9131,6 +9141,252 @@ def set_key_help(key):
     return "[X] Unknown setting." + (" Did you mean: " + ", ".join(suggestions) + "?" if suggestions else "") + "\nSee /set."
 
 
+# --- Settings: one validated path shared by /set and the WebConsole panel ---
+
+# key -> config field (used to read the current value for the panel)
+SET_FIELDS = {
+    "cpu": "cpu_alert_threshold", "ram": "ram_alert_threshold",
+    "danger": "danger_threshold", "critical": "critical_threshold",
+    "disk": "disk_threshold", "spike": "spike_threshold",
+    "interval": "alert_interval", "daily": "daily_report_enabled",
+    "dailyhour": "daily_report_hour", "weekly": "weekly_report_enabled",
+    "weeklyday": "weekly_report_day", "speedtest": "speedtest_interval_hours",
+    "exec": "exec_enabled", "users": "user_management",
+    "uploads": "uploads_enabled", "sessions": "session_alerts",
+    "accountwatch": "account_watch", "name": "instance_name",
+    "lock": "auto_lock_minutes", "logins": "failed_login_alerts",
+    "block": "failed_login_block", "blocklimit": "failed_login_block_threshold",
+    "tempalert": "temp_threshold", "traffic": "traffic_quota_gb",
+    "trafficday": "traffic_reset_day", "autorestart": "auto_restart_enabled",
+    "autolimit": "auto_restart_cpu", "autocount": "auto_restart_consecutive",
+    "autoclean": "auto_clean_enabled", "heartbeat": "heartbeat_hours",
+    "rdpwatch": "rdp_watch", "netwatch": "net_watch", "fwguard": "fw_guard",
+    "updatecheck": "update_check_hours", "image": "image_enabled",
+    "imagedel": "image_delete_after", "rcloneremote": "rclone_remote",
+    "subnetblock": "subnetblock", "selfheal": "selfheal_disk",
+    "newipalert": "new_ip_alerts", "learn": "auto_learn_ips",
+    "learnforlockdown": "learn_for_lockdown", "lockdown": "lockdown",
+    "lockdownlimit": "lockdown_limit", "lockdownmins": "lockdown_minutes",
+}
+
+# (group, [(key, label, type, min, max, unit), ...]) for the panel settings tab
+SETTINGS_SCHEMA = [
+    ("Alerts", [
+        ("cpu", "CPU warning", "int", 1, 100, "%"),
+        ("ram", "RAM warning", "int", 1, 100, "%"),
+        ("danger", "Danger threshold", "int", 1, 100, "%"),
+        ("critical", "Critical threshold", "int", 1, 100, "%"),
+        ("disk", "Disk warning", "int", 10, 99, "%"),
+        ("spike", "Sudden spike", "int", 1, 100, "%"),
+        ("interval", "Alert interval", "int", 30, 86400, "s"),
+    ]),
+    ("Reports", [
+        ("daily", "Daily report", "bool", None, None, ""),
+        ("dailyhour", "Daily report hour", "int", 0, 23, "h"),
+        ("weekly", "Weekly report", "bool", None, None, ""),
+        ("weeklyday", "Weekly report day (0=Mon)", "int", 0, 6, ""),
+        ("speedtest", "Auto speed test", "int", 0, 8760, "h"),
+    ]),
+    ("Access", [
+        ("exec", "Command execution (/exec)", "bool", None, None, ""),
+        ("users", "User management", "bool", None, None, ""),
+        ("uploads", "Receive files", "bool", None, None, ""),
+        ("sessions", "Session alerts", "bool", None, None, ""),
+        ("accountwatch", "Account watch", "bool", None, None, ""),
+        ("name", "Device name", "text", None, None, ""),
+        ("lock", "Auto-lock idle", "int", 0, 1440, "min"),
+    ]),
+    ("Protection", [
+        ("logins", "Failed-login alerts", "bool", None, None, ""),
+        ("block", "Auto-ban offenders", "bool", None, None, ""),
+        ("blocklimit", "Auto-ban after", "int", 1, 100, "tries"),
+        ("tempalert", "Temperature alert", "int", 40, 120, "C"),
+        ("traffic", "Traffic quota", "int", 0, 1000000, "GB"),
+        ("trafficday", "Billing cycle day", "int", 1, 28, ""),
+        ("lockdown", "Auto lockdown", "bool", None, None, ""),
+        ("lockdownlimit", "Lockdown after", "int", 1, 1000, "tries"),
+        ("lockdownmins", "Lockdown duration", "int", 1, 1440, "min"),
+    ]),
+    ("Automation", [
+        ("autorestart", "Auto restart", "bool", None, None, ""),
+        ("autolimit", "Auto restart limit", "int", 50, 100, "%"),
+        ("autocount", "Auto restart after", "int", 1, 60, "min"),
+        ("autoclean", "Weekly cleaning", "bool", None, None, ""),
+        ("heartbeat", "Heartbeat", "int", 0, 168, "h"),
+        ("rdpwatch", "RDP watch", "bool", None, None, ""),
+        ("netwatch", "Internet watch", "bool", None, None, ""),
+        ("fwguard", "Firewall guard", "bool", None, None, ""),
+        ("updatecheck", "Update check", "int", 0, 8760, "h"),
+    ]),
+    ("Image & cloud", [
+        ("image", "System imaging", "bool", None, None, ""),
+        ("imagedel", "Delete image after upload", "bool", None, None, ""),
+        ("rcloneremote", "Image upload target", "text", None, None, ""),
+    ]),
+]
+
+
+def settings_snapshot():
+    """Current settings as panel-ready groups."""
+    groups = []
+    for gname, items in SETTINGS_SCHEMA:
+        rows = []
+        for key, label, typ, lo, hi, unit in items:
+            field = SET_FIELDS.get(key, key)
+            rows.append({"key": key, "label": label, "type": typ,
+                         "min": lo, "max": hi, "unit": unit,
+                         "value": config.get(field)})
+        groups.append({"name": gname, "items": rows})
+    return groups
+
+
+def apply_setting(key, val):
+    """Validate and apply one setting. Returns (ok, human message).
+
+    Single source of truth for /set <key> <value> and the WebConsole panel.
+    """
+    key = str(key or "").strip().lower()
+    val = str(val if val is not None else "")
+    low = val.lower()
+    if key in SET_BOUNDS and low.isdigit():
+        minimum, maximum = SET_BOUNDS[key]
+        if not minimum <= int(low) <= maximum:
+            return False, ("%s must be between %d and %d. Nothing changed."
+                           % (key, minimum, maximum))
+    if key == "name" and (not val or len(val) > 48):
+        return False, "Name must contain 1 to 48 characters. Nothing changed."
+    if key == "rcloneremote" and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]*:[^\s]*", val):
+        return False, "Use a destination such as myremote:Images. Nothing changed."
+    before = dict(config)
+    ok = True
+    if key == "cpu" and low.isdigit():
+        config["cpu_alert_threshold"] = max(1, min(100, int(val)))
+    elif key == "ram" and low.isdigit():
+        config["ram_alert_threshold"] = max(1, min(100, int(val)))
+    elif key == "danger" and low.isdigit():
+        config["danger_threshold"] = max(1, min(100, int(val)))
+    elif key == "critical" and low.isdigit():
+        config["critical_threshold"] = max(1, min(100, int(val)))
+    elif key == "disk" and low.isdigit():
+        config["disk_threshold"] = max(10, min(99, int(val)))
+    elif key == "spike" and low.isdigit():
+        config["spike_threshold"] = max(1, min(100, int(val)))
+    elif key == "interval" and low.isdigit():
+        config["alert_interval"] = max(30, min(86400, int(val)))
+    elif key == "daily" and low in ("on", "off"):
+        config["daily_report_enabled"] = (low == "on")
+    elif key == "dailyhour" and low.isdigit() and 0 <= int(val) < 24:
+        config["daily_report_hour"] = int(val)
+    elif key == "weekly" and low in ("on", "off"):
+        config["weekly_report_enabled"] = (low == "on")
+    elif key == "weeklyday" and low.isdigit():
+        config["weekly_report_day"] = int(val) % 7
+    elif key == "speedtest" and low.isdigit():
+        config["speedtest_interval_hours"] = int(val)
+    elif key == "autorestart" and low in ("on", "off"):
+        config["auto_restart_enabled"] = (low == "on")
+    elif key == "autolimit" and low.isdigit():
+        config["auto_restart_cpu"] = max(50, min(100, int(val)))
+        config["auto_restart_ram"] = max(50, min(100, int(val)))
+    elif key == "autocount" and low.isdigit():
+        config["auto_restart_consecutive"] = max(1, min(60, int(val)))
+    elif key == "exec" and low in ("on", "off"):
+        config["exec_enabled"] = (low == "on")
+    elif key == "users" and low in ("on", "off"):
+        config["user_management"] = (low == "on")
+    elif key == "accountwatch" and low in ("on", "off"):
+        config["account_watch"] = (low == "on")
+    elif key == "uploads" and low in ("on", "off"):
+        config["uploads_enabled"] = (low == "on")
+    elif key == "image" and low in ("on", "off"):
+        config["image_enabled"] = (low == "on")
+    elif key == "sessions" and low in ("on", "off"):
+        config["session_alerts"] = (low == "on")
+    elif key == "name":
+        config["instance_name"] = "" if low in ("none", "off") else val
+    elif key == "lock" and low.isdigit():
+        config["auto_lock_minutes"] = max(0, min(1440, int(val)))
+    elif key == "tempalert" and low.isdigit():
+        config["temp_threshold"] = max(40, min(120, int(val)))
+    elif key == "logins" and low in ("on", "off"):
+        config["failed_login_alerts"] = (low == "on")
+    elif key == "critical" and low in ("on", "off"):
+        config["critical_alerts"] = (low == "on")
+    elif key == "block" and low in ("on", "off"):
+        config["failed_login_block"] = (low == "on")
+    elif key == "blocklimit" and low.isdigit():
+        config["failed_login_block_threshold"] = max(1, min(100, int(val)))
+    elif key == "logontypes" and re.fullmatch(r"10|3|3,10|10,3", low):
+        config["failed_logon_types"] = ("10" if "10" in low and "3" not in low
+                                        else "3,10" if "3" in low and "10" in low
+                                        else low)
+    elif key == "autoclean" and low in ("on", "off"):
+        config["auto_clean_enabled"] = (low == "on")
+    elif key == "cleanday" and low.isdigit():
+        config["auto_clean_day"] = int(val) % 7
+    elif key == "heartbeat" and low.isdigit():
+        config["heartbeat_hours"] = max(0, min(168, int(val)))
+    elif key == "rdpwatch" and low in ("on", "off"):
+        config["rdp_watch"] = (low == "on")
+    elif key == "netwatch" and low in ("on", "off"):
+        config["net_watch"] = (low == "on")
+    elif key == "fwguard" and low in ("on", "off"):
+        config["fw_guard"] = (low == "on")
+    elif key == "updatecheck" and low.isdigit():
+        config["update_check_hours"] = int(val)
+    elif key == "lockdown" and low in ("on", "off"):
+        config["lockdown"] = (low == "on")
+    elif key == "lockdownlimit" and low.isdigit():
+        config["lockdown_limit"] = max(1, min(1000, int(val)))
+    elif key == "lockdownmins" and low.isdigit():
+        config["lockdown_minutes"] = max(1, min(1440, int(val)))
+    elif key == "learn" and low in ("on", "off"):
+        config["auto_learn_ips"] = (low == "on")
+    elif key == "learnforlockdown" and low in ("on", "off"):
+        config["learn_for_lockdown"] = (low == "on")
+    elif key == "traffic" and low.isdigit():
+        config["traffic_quota_gb"] = max(0, min(1000000, int(val)))
+    elif key == "trafficday" and low.isdigit():
+        config["traffic_reset_day"] = min(max(int(val), 1), 28)
+    elif key == "rclone" and val:
+        config["rclone_path"] = val
+    elif key == "rcloneremote" and val:
+        config["rclone_remote"] = val
+    elif key == "imagedel" and low in ("on", "off"):
+        config["image_delete_after"] = (low == "on")
+    elif key == "subnetblock" and low in ("on", "off"):
+        config["subnetblock"] = (low == "on")
+    elif key == "selfheal" and low in ("on", "off"):
+        config["selfheal_disk"] = (low == "on")
+    elif key == "newipalert" and low in ("on", "off"):
+        config["new_ip_alerts"] = (low == "on")
+    elif key == "rdphours":
+        if low in ("off", "none", "0"):
+            config["rdphours"] = ""
+        else:
+            rng = _parse_hours(val)
+            if rng:
+                config["rdphours"] = f"{rng[0]}-{rng[1]}"
+            else:
+                ok = False
+    elif key == "update" and val.startswith("https://"):
+        config["update_url"] = val
+    elif key == "updatehash" and re.fullmatch(r"[0-9a-fA-F]{64}", val):
+        config["update_hash"] = val.lower()
+    else:
+        ok = False
+    if not ok:
+        return False, "Invalid value or setting. Use /set <key> for examples."
+    save_config()
+    changed = [(name, before.get(name), value) for name, value in config.items()
+               if before.get(name) != value]
+    if changed:
+        details = ", ".join("%s: %s -> %s" % (name, old, new)
+                            for name, old, new in changed)
+        return True, "Setting saved - " + details
+    return True, "No change; the setting already has that value."
+
 HELP_TEXT = (
     "<b>RDP MONITOR - COMMAND REFERENCE</b>\n"
     "Tip: /menu gives the same commands as buttons. /docs &lt;command&gt; gives the full "
@@ -10687,157 +10943,14 @@ def handle_command(text):
         if key == "name":
             val = " ".join(args[1:]).strip()
         low = val.lower()
-        if key in SET_BOUNDS and low.isdigit():
-            minimum, maximum = SET_BOUNDS[key]
-            if not minimum <= int(low) <= maximum:
-                send_message(f"[X] {esc(key)} must be between {minimum} and {maximum}. Nothing changed.")
-                return
-        if key == "name" and (not val or len(val) > 48):
-            send_message("[X] Name must contain 1 to 48 characters. Nothing changed.")
-            return
         if (key in SET_ENABLE_CONFIRM and low == "on"
                 and not config.get(SET_ENABLE_CONFIRM[key])
                 and "confirm" not in [a.lower() for a in args[2:]]):
             send_buttons("Enable <b>" + esc(key) + "</b>? Review the effect with /set " + esc(key) + ".",
                          confirm_buttons("/set " + key + " on"))
             return
-        if key == "rcloneremote" and not re.fullmatch(
-                r"[A-Za-z0-9][A-Za-z0-9_.-]*:[^\s]*", val):
-            send_message("[X] Use a destination such as myremote:Images. Nothing changed.")
-            return
-        before = dict(config)
-        ok = True
-        if key == "cpu" and low.isdigit():
-            config["cpu_alert_threshold"] = max(1, min(100, int(val)))
-        elif key == "ram" and low.isdigit():
-            config["ram_alert_threshold"] = max(1, min(100, int(val)))
-        elif key == "danger" and low.isdigit():
-            config["danger_threshold"] = max(1, min(100, int(val)))
-        elif key == "critical" and low.isdigit():
-            config["critical_threshold"] = max(1, min(100, int(val)))
-        elif key == "disk" and low.isdigit():
-            config["disk_threshold"] = max(10, min(99, int(val)))
-        elif key == "spike" and low.isdigit():
-            config["spike_threshold"] = max(1, min(100, int(val)))
-        elif key == "interval" and low.isdigit():
-            # There was no minimum 0 It means alert every cycle (5 Seconds) = Dumping
-            config["alert_interval"] = max(30, min(86400, int(val)))
-        elif key == "daily" and low in ("on", "off"):
-            config["daily_report_enabled"] = (low == "on")
-        elif key == "dailyhour" and low.isdigit() and 0 <= int(val) < 24:
-            config["daily_report_hour"] = int(val)
-        elif key == "weekly" and low in ("on", "off"):
-            config["weekly_report_enabled"] = (low == "on")
-        elif key == "weeklyday" and low.isdigit():
-            config["weekly_report_day"] = int(val) % 7
-        elif key == "speedtest" and low.isdigit():
-            config["speedtest_interval_hours"] = int(val)
-        elif key == "autorestart" and low in ("on", "off"):
-            config["auto_restart_enabled"] = (low == "on")
-        elif key == "autolimit" and low.isdigit():
-            # Minimum 50: Zero meant restarting at any consumption
-            config["auto_restart_cpu"] = max(50, min(100, int(val)))
-            config["auto_restart_ram"] = max(50, min(100, int(val)))
-        elif key == "autocount" and low.isdigit():
-            # Zero meant an immediate restart once the limit was exceeded
-            config["auto_restart_consecutive"] = max(1, min(60, int(val)))
-        elif key == "exec" and low in ("on", "off"):
-            config["exec_enabled"] = (low == "on")
-        elif key == "users" and low in ("on", "off"):
-            config["user_management"] = (low == "on")
-        elif key == "accountwatch" and low in ("on", "off"):
-            config["account_watch"] = (low == "on")
-        elif key == "uploads" and low in ("on", "off"):
-            config["uploads_enabled"] = (low == "on")
-        elif key == "image" and low in ("on", "off"):
-            config["image_enabled"] = (low == "on")
-        elif key == "sessions" and low in ("on", "off"):
-            config["session_alerts"] = (low == "on")
-        elif key == "name":
-            config["instance_name"] = "" if low in ("none", "off") else val
-        elif key == "lock" and low.isdigit():
-            config["auto_lock_minutes"] = max(0, min(1440, int(val)))
-        elif key == "tempalert" and low.isdigit():
-            config["temp_threshold"] = max(40, min(120, int(val)))
-        elif key == "logins" and low in ("on", "off"):
-            config["failed_login_alerts"] = (low == "on")
-        elif key == "critical" and low in ("on", "off"):
-            config["critical_alerts"] = (low == "on")
-        elif key == "block" and low in ("on", "off"):
-            config["failed_login_block"] = (low == "on")
-        elif key == "blocklimit" and low.isdigit():
-            config["failed_login_block_threshold"] = max(1, min(100, int(val)))
-        elif key == "logontypes" and re.fullmatch(r"10|3|3,10|10,3", low):
-            config["failed_logon_types"] = ("10" if "10" in low and "3" not in low
-                                            else "3,10" if "3" in low and "10" in low
-                                            else low)
-        elif key == "autoclean" and low in ("on", "off"):
-            config["auto_clean_enabled"] = (low == "on")
-        elif key == "cleanday" and low.isdigit():
-            config["auto_clean_day"] = int(val) % 7
-        elif key == "heartbeat" and low.isdigit():
-            config["heartbeat_hours"] = max(0, min(168, int(val)))
-        elif key == "rdpwatch" and low in ("on", "off"):
-            config["rdp_watch"] = (low == "on")
-        elif key == "netwatch" and low in ("on", "off"):
-            config["net_watch"] = (low == "on")
-        elif key == "fwguard" and low in ("on", "off"):
-            config["fw_guard"] = (low == "on")
-        elif key == "updatecheck" and low.isdigit():
-            config["update_check_hours"] = int(val)
-        elif key == "lockdown" and low in ("on", "off"):
-            config["lockdown"] = (low == "on")
-        elif key == "lockdownlimit" and low.isdigit():
-            config["lockdown_limit"] = max(1, min(1000, int(val)))
-        elif key == "lockdownmins" and low.isdigit():
-            config["lockdown_minutes"] = max(1, min(1440, int(val)))
-        elif key == "learn" and low in ("on", "off"):
-            config["auto_learn_ips"] = (low == "on")
-        elif key == "learnforlockdown" and low in ("on", "off"):
-            config["learn_for_lockdown"] = (low == "on")
-        elif key == "traffic" and low.isdigit():
-            config["traffic_quota_gb"] = max(0, min(1000000, int(val)))
-        elif key == "trafficday" and low.isdigit():
-            config["traffic_reset_day"] = min(max(int(val), 1), 28)
-        elif key == "rclone" and val:
-            config["rclone_path"] = val
-        elif key == "rcloneremote" and val:
-            config["rclone_remote"] = val
-        elif key == "imagedel" and low in ("on", "off"):
-            config["image_delete_after"] = (low == "on")
-        elif key == "subnetblock" and low in ("on", "off"):
-            config["subnetblock"] = (low == "on")
-        elif key == "selfheal" and low in ("on", "off"):
-            config["selfheal_disk"] = (low == "on")
-        elif key == "newipalert" and low in ("on", "off"):
-            config["new_ip_alerts"] = (low == "on")
-        elif key == "rdphours":
-            if low in ("off", "none", "0"):
-                config["rdphours"] = ""
-            else:
-                rng = _parse_hours(val)
-                if rng:
-                    config["rdphours"] = f"{rng[0]}-{rng[1]}"
-                else:
-                    ok = False
-        elif key == "update" and val.startswith("https://"):
-            config["update_url"] = val  # https Only — http Download code with administrator privileges
-        elif key == "updatehash" and re.fullmatch(r"[0-9a-fA-F]{64}", val):
-            config["update_hash"] = val.lower()
-        else:
-            ok = False
-        if ok:
-            save_config()
-            changed = [(name, before.get(name), value) for name, value in config.items()
-                       if before.get(name) != value]
-            if changed:
-                details = ", ".join(esc(str(name)) + ": " + esc(str(old)) + " → " + esc(str(new))
-                                    for name, old, new in changed)
-                send_message("[OK] <b>Setting saved</b>\n" + details)
-            else:
-                send_message("[OK] No change; the setting already has that value.")
-        else:
-            send_message("[X] Invalid value or setting. Use /set &lt;key&gt; for examples.")
+        ok, msg = apply_setting(key, val)
+        send_message(("[OK] " if ok else "[X] ") + esc(msg))
 
     elif cmd == "/panel":
         send_panel_info()

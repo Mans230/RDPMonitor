@@ -377,7 +377,7 @@
 ### /set
 - Purpose: Detailed settings guide with current values and examples.
 - Usage: `/set`
-- Panel: bot-only
+- Panel: settings
 
 **What it does:** Detailed settings guide and value changes.
 
@@ -395,7 +395,7 @@
 ### /status
 - Purpose: Current value of every setting in one message.
 - Usage: `/status`
-- Panel: bot-only
+- Panel: settings
 
 **What it does:** Current value of every setting.
 
