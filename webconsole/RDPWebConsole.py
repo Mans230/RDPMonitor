@@ -1589,6 +1589,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/settings":
             ok, out = panel_request("settings_get", timeout=15)
             return self._json(200 if ok else 503, out if isinstance(out, dict) else {"error": out})
+        if u.path == "/api/traps":
+            ok, out = panel_request("trap", {"op": "list"}, timeout=10)
+            return self._json(200 if ok else 503, {"items": out} if ok else {"error": out})
         if u.path == "/api/users":
             ok, out = panel_request("users_list", timeout=20)
             return self._json(200 if ok else 503,
@@ -1761,6 +1764,34 @@ class Handler(BaseHTTPRequestHandler):
                 ok, out = panel_request("settings_set", {"key": key, "value": value,
                                                          "confirm": bool(body.get("confirm"))})
                 audit("settings", "%s=%s -> %s" % (key, value, ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "block_subnet":
+                ok, out = panel_request("block_subnet",
+                                        {"ip": str(body.get("ip", ""))[:64],
+                                         "confirm": bool(body.get("confirm"))}, timeout=90)
+                audit("block_subnet", "%s -> %s" % (body.get("ip"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "set_rdp_port":
+                ok, out = panel_request("set_rdp_port",
+                                        {"port": body.get("port"),
+                                         "confirm": bool(body.get("confirm"))}, timeout=300)
+                audit("set_rdp_port", "%s -> %s" % (body.get("port"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "mute":
+                ok, out = panel_request("mute",
+                                        {"minutes": body.get("minutes"),
+                                         "off": bool(body.get("off"))}, timeout=10)
+                audit("mute", "%s -> %s" % (body.get("minutes") or "off", ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "trap":
+                ok, out = panel_request("trap",
+                                        {"op": str(body.get("op", ""))[:12],
+                                         "name": str(body.get("name", ""))[:40]}, timeout=10)
+                audit("trap", "%s %s -> %s" % (body.get("op"), body.get("name"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "cancel_restart":
+                ok, out = panel_request("cancel_restart", {}, timeout=20)
+                audit("cancel_restart", "-> %s" % ok)
                 return self._json(200, {"ok": ok, "out": out})
             if act == "block_ip":
                 ok, out = block_ip(body.get("ip", "")); return self._json(200, {"ok": ok, "out": out})

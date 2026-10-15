@@ -520,6 +520,14 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         </div>
       </div>
     </div>
+    <div class="card" style="margin-top:14px"><h3>Trap usernames <span class="mut" style="text-transform:none;font-weight:400">any login attempt bans the IP</span></h3>
+      <div id="trapList" class="cmd-list" style="margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="trapName" placeholder="trap user name" style="width:180px">
+        <button class="btn primary" onclick="trapAdd()">Add trap</button>
+      </div>
+      <div class="note">Use names no real user has. The first login attempt with a trap name blocks the source IP immediately.</div>
+    </div>
     <div class="card" style="margin-top:14px"><h3>Traffic totals (RDPMonitor traffic.json)</h3><div id="trafficBox" class="mono"></div></div>
     <div class="card" style="margin-top:14px"><h3>Event log — audit <button class="btn" style="margin-inline-start:auto" onclick="loadSec()">Update</button></h3>
       <div class="scroll"><table id="auditTbl"><thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead><tbody></tbody></table></div>
@@ -558,6 +566,24 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         </div>
         <div class="note">Panic closes RDP for everyone. Only use it if you can still reach the machine through a provider console.</div>
         <div class="mut" style="margin-top:10px">Blocked IPs: <span id="rdpBlocked">—</span></div>
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card">
+        <h3>Block a /24 subnet</h3>
+        <p class="mut" style="line-height:1.6;margin-bottom:10px">Blocks all 256 addresses of an IPv4 /24 — for rotating proxies on the same range.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="subnetIp" placeholder="1.2.3.4" style="width:150px">
+          <button class="btn danger" onclick="blockSubnet()">Block subnet</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Change RDP port</h3>
+        <p class="mut" style="line-height:1.6;margin-bottom:10px">Edits the registry, opens the new port, restarts the service, then closes the old port. Your session drops — reconnect to IP:port.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="newRdpPort" placeholder="44389" type="number" min="1024" max="65535" style="width:150px">
+          <button class="btn danger" onclick="setRdpPort()">Change port</button>
+        </div>
       </div>
     </div>
   </div>
@@ -644,6 +670,16 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
           <input id="svcName2" placeholder="Service name" style="width:130px">
           <button class="btn" onclick="doService('restart')">Restart</button>
         </div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="muteMins" aria-label="Mute duration">
+            <option value="60">1 hour</option>
+            <option value="180" selected>3 hours</option>
+            <option value="720">12 hours</option>
+            <option value="1440">1 day</option>
+          </select>
+          <button class="btn" onclick="doMute()">Mute alerts</button>
+          <button class="btn" onclick="doMute(true)">Unmute</button>
+        </div>
       </div>
       <div class="card"><h3>Message on screen</h3>
         <input id="msgTxt" placeholder="Message text…" style="width:100%;margin-bottom:10px">
@@ -652,6 +688,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
       <div class="card"><h3>Dangerous operations</h3>
         <button class="btn danger" onclick="confirmAct('reboot')">Restart the server</button>
         <button class="btn danger" style="margin-top:8px" onclick="confirmAct('shutdown')">Shut down the server</button>
+        <button class="btn" style="margin-top:8px" onclick="cancelRestart()">Cancel scheduled restart</button>
         <div class="note">The action runs after five seconds and cannot be undone.</div>
       </div>
     </div>
@@ -756,7 +793,7 @@ function activateTab(t){
   });
   $("skipNavigation").href="#tab-"+t.dataset.t;
   if(t.dataset.t=="charts")drawAll();
-  if(t.dataset.t=="sec")loadSec();
+  if(t.dataset.t=="sec"){loadSec();loadTraps()}
   if(t.dataset.t=="tools"){loadServices();loadNetstat();loadSysinfo()}
   if(t.dataset.t=="backup")loadBackup();
   if(t.dataset.t=="rdpsec")loadRdp();
@@ -877,6 +914,31 @@ function rdpAdd(){const ip=$("rdpNewIp").value.trim();if(ip)rdpAct("rdp_allow_ad
 function rdpRemove(encIp){const ip=decodeURIComponent(encIp);if(confirm("Remove "+ip+" from the allow-list?"))rdpAct("rdp_allow_remove",{ip:ip});}
 function rdpClear(){if(confirm("Clear the allow-list and open RDP to ANY IP?"))rdpAct("rdp_allow_clear");}
 function rdpPanic(mode){if(confirm("Panic "+mode+": this closes RDP for everyone. Continue?"))rdpAct("panic",{mode:mode});}
+function blockSubnet(){
+  const ip=$("subnetIp").value.trim();if(!ip)return;
+  if(!confirm("Block the whole /24 network of "+ip+" (256 addresses)?"))return;
+  act({action:"block_subnet",ip:ip,confirm:true}).then(()=>setTimeout(loadSec,600));
+}
+function setRdpPort(){
+  const p=parseInt($("newRdpPort").value,10);
+  if(!p)return;
+  if(!confirm("Change the RDP port to "+p+"? Your current connection will drop; reconnect to IP:"+p+"."))return;
+  act({action:"set_rdp_port",port:p,confirm:true}).then(()=>setTimeout(loadRdp,1200));
+}
+async function loadTraps(){
+  try{
+    const r=await fetch("/api/traps");const d=await r.json();
+    $("trapList").innerHTML=(d.items||[]).map(t=>"<button class='btn' onclick=\"trapDel('"+enc(t)+"')\">"+eh(t)+" &times;</button>").join("")||"<span class='mut'>No traps</span>";
+  }catch(e){toast("Traps load failed: "+e,true)}
+}
+function trapAdd(){const n=$("trapName").value.trim();if(!n)return;act({action:"trap",op:"add",name:n}).then(j=>{if(j&&j.ok){$("trapName").value="";loadTraps()}})}
+function trapDel(encName){const n=decodeURIComponent(encName);act({action:"trap",op:"del",name:n}).then(()=>loadTraps())}
+function doMute(off){
+  if(off){act({action:"mute",off:true});return}
+  const m=parseInt($("muteMins").value,10)||60;
+  act({action:"mute",minutes:m});
+}
+function cancelRestart(){act({action:"cancel_restart"}).then(j=>{if(j&&j.ok)toast("Scheduled restart cancelled")})}
 function dotnetDate(s){
   if(!s)return "-";
   const m=/\/Date\((-?\d+)\)\//.exec(String(s));

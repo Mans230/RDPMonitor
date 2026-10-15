@@ -5,7 +5,7 @@
 ### /cancel_restart
 - Purpose: Cancels a scheduled restart/shutdown inside the cancel window.
 - Usage: `/cancel_restart`
-- Panel: bot-only
+- Panel: ctl
 
 **What it does:** Cancels a pending restart/shutdown.
 
@@ -359,7 +359,7 @@
 ### /mute
 - Purpose: Silences non-critical alerts (usage, disk, temp, sessions) for a period. Security and critical alerts always arrive.
 - Usage: `/mute 3h | /mute off`
-- Panel: bot-only
+- Panel: ctl
 
 **What it does:** Silences non-critical alerts for a period.
 
@@ -1403,7 +1403,7 @@
 ### /blocksubnet
 - Purpose: Blocks the whole /24 network of an IP (256 addresses) - for rotating proxies attacking from the same range.
 - Usage: `/blocksubnet <ip> confirm`
-- Panel: bot-only
+- Panel: rdpsec
 - Risk: dangerous (confirmation required)
 
 **What it does:** Blocks the whole /24 network of an IP.
@@ -1549,7 +1549,7 @@
 ### /setrdpport
 - Purpose: Wizard to change the RDP port: edits the registry, opens the new port in the firewall, blocks the old one, restarts the RDP service. Your current RDP connection DROPS the moment it applies - reconnect to IP:newport.
 - Usage: `/setrdpport <port> confirm`
-- Panel: bot-only
+- Panel: rdpsec
 - Risk: dangerous (confirmation required)
 
 **What it does:** Changes the RDP listening port, opens it, verifies it, and closes the old port.
@@ -1592,7 +1592,7 @@
 ### /trap
 - Purpose: Trap usernames: ban an IP immediately on any login attempt using those names.
 - Usage: `/trap list | add <name> | del <name>`
-- Panel: bot-only
+- Panel: sec
 
 **What it does:** Honeypot usernames: any login attempt bans the IP.
 

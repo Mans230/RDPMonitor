@@ -2935,6 +2935,70 @@ def _dispatch_panel(action, args):
                 and not args.get("confirm")):
             return False, "confirmation required for " + key
         return apply_setting(key, value)
+    if action == "block_subnet":
+        if not args.get("confirm"):
+            return False, "confirmation required"
+        return block_subnet(str(args.get("ip", "")))
+    if action == "set_rdp_port":
+        if not args.get("confirm"):
+            return False, "confirmation required"
+        try:
+            port = int(args.get("port"))
+        except (TypeError, ValueError):
+            return False, "invalid port"
+        current = int(config.get("rdp_port", 3389))
+        if not (1024 <= port <= 65535):
+            return False, "port must be between 1024 and 65535"
+        if port == current:
+            return False, "that is already the current port"
+        res = change_rdp_port(port)
+        if res.get("busy"):
+            return False, "port %d is busy; nothing changed" % port
+        if not res.get("reg"):
+            return False, "registry change failed; nothing changed"
+        if not res.get("listen"):
+            return False, "new port did not listen; rolled back to %d" % current
+        return True, "RDP now listens on %d - reconnect to IP:%d" % (port, port)
+    if action == "mute":
+        if args.get("off"):
+            config["muted_until"] = 0
+            save_config()
+            return True, "alerts unmuted"
+        try:
+            minutes = int(args.get("minutes"))
+        except (TypeError, ValueError):
+            return False, "invalid duration"
+        secs = max(60, min(minutes * 60, 7 * 24 * 3600))
+        config["muted_until"] = time.time() + secs
+        save_config()
+        return True, "alerts muted for " + format_duration(secs)
+    if action == "trap":
+        op = str(args.get("op", "list"))
+        traps = [str(t) for t in (config.get("trap_users") or [])]
+        if op == "list":
+            return True, traps
+        name = str(args.get("name", "")).strip()
+        if not name or len(name) > 40:
+            return False, "invalid name"
+        if op == "add":
+            if name.lower() not in [t.lower() for t in traps]:
+                traps.append(name)
+                config["trap_users"] = traps
+                save_config()
+            return True, "trap added: " + name
+        if op == "del":
+            traps = [t for t in traps if t.lower() != name.lower()]
+            config["trap_users"] = traps
+            save_config()
+            return True, "trap removed: " + name
+        return False, "unknown trap operation"
+    if action == "cancel_restart":
+        try:
+            subprocess.run(["shutdown", "/a"], check=True,
+                           capture_output=True, timeout=15, creationflags=NO_WINDOW)
+            return True, "scheduled restart cancelled"
+        except Exception as e:
+            return False, "nothing to cancel (%s)" % e
     return False, "unknown action"
 
 
@@ -3952,15 +4016,15 @@ PANEL_COVERAGE = {
     "/startup": "diagnostics", "/updates": "diagnostics", "/image": "bot-only",
     "/listusers": "users", "/adduser": "users",
     "/disableuser": "users", "/enableuser": "users", "/deluser": "users",
-    "/renameuser": "users", "/mute": "bot-only", "/set": "settings",
-    "/status": "settings", "/blocksubnet": "bot-only", "/whitelist": "bot-only",
+    "/renameuser": "users", "/mute": "ctl", "/set": "settings",
+    "/status": "settings", "/blocksubnet": "rdpsec", "/whitelist": "bot-only",
     "/rdpallow": "rdpsec", "/lockdown": "rdpsec", "/panic": "rdpsec",
-    "/harden": "diagnostics", "/setrdpport": "bot-only", "/firewall": "diagnostics",
+    "/harden": "diagnostics", "/setrdpport": "rdpsec", "/firewall": "diagnostics",
     "/botlog": "diagnostics", "/diagnose": "diagnostics",
     "/logstats": "diagnostics", "/exportlogs": "bot-only", "/dumps": "diagnostics",
     "/watch": "bot-only",
-    "/trap": "bot-only", "/allow": "bot-only", "/update": "bot-only",
-    "/configbackup": "diagnostics", "/cancel_restart": "bot-only",
+    "/trap": "sec", "/allow": "bot-only", "/update": "bot-only",
+    "/configbackup": "diagnostics", "/cancel_restart": "ctl",
     "/nettest": "diagnostics", "/test": "bot-only", "/noop": "bot-only",
     "/start": "bot-only", "/menu": "bot-only", "/help": "bot-only",
     "/docs": "docs",

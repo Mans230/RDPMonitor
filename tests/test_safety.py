@@ -317,5 +317,58 @@ class PanelSettingsTests(unittest.TestCase):
                 self.assertIn(i["type"], ("int", "bool", "text"))
 
 
+class PanelSecurityActionTests(unittest.TestCase):
+    """_dispatch_panel security actions reuse bot logic without Telegram."""
+
+    def setUp(self):
+        self.old_config = rm.config
+        rm.config = {"rdp_port": 3389, "trap_users": [], "muted_until": 0}
+        self._saved = []
+        p = mock.patch.object(rm, "save_config",
+                              lambda: self._saved.append(dict(rm.config)))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def tearDown(self):
+        rm.config = self.old_config
+
+    def test_block_subnet_requires_confirmation(self):
+        ok, out = rm._dispatch_panel("block_subnet", {"ip": "203.0.113.7"})
+        self.assertFalse(ok)
+        self.assertIn("confirmation", out)
+
+    def test_set_rdp_port_rejects_out_of_range(self):
+        ok, out = rm._dispatch_panel("set_rdp_port", {"port": 70000, "confirm": True})
+        self.assertFalse(ok)
+        self.assertIn("between 1024 and 65535", out)
+
+    def test_trap_add_list_remove(self):
+        ok, _ = rm._dispatch_panel("trap", {"op": "add", "name": "admin"})
+        self.assertTrue(ok)
+        self.assertIn("admin", rm.config["trap_users"])
+        ok, items = rm._dispatch_panel("trap", {"op": "list"})
+        self.assertTrue(ok)
+        self.assertEqual(items, ["admin"])
+        rm._dispatch_panel("trap", {"op": "del", "name": "admin"})
+        self.assertEqual(rm.config["trap_users"], [])
+
+    def test_mute_sets_and_clears(self):
+        ok, _ = rm._dispatch_panel("mute", {"minutes": 60})
+        self.assertTrue(ok)
+        self.assertGreater(rm.config["muted_until"], 0)
+        ok, _ = rm._dispatch_panel("mute", {"off": True})
+        self.assertTrue(ok)
+        self.assertEqual(rm.config["muted_until"], 0)
+
+    def test_cancel_restart_uses_shutdown_without_telegram(self):
+        with mock.patch.object(rm.subprocess, "run", return_value=Result()) as run, \
+                mock.patch.object(rm, "send_message") as send:
+            ok, out = rm._dispatch_panel("cancel_restart", {})
+        self.assertTrue(ok)
+        self.assertIn("cancelled", out)
+        send.assert_not_called()
+        self.assertIn("shutdown", run.call_args[0][0][0])
+
+
 if __name__ == "__main__":
     unittest.main()
