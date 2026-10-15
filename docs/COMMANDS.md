@@ -319,7 +319,7 @@
 ### /exportlogs
 - Purpose: Exports the last 7 days of System/Application error events to a ZIP and sends it.
 - Usage: `/exportlogs [all|system|application]`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Exports the last 7 days of error events to a ZIP and sends it.
 
@@ -413,7 +413,7 @@
 ### /test
 - Purpose: Sends a test message to confirm the bot can reach you.
 - Usage: `/test`
-- Panel: bot-only
+- Panel: ctl
 
 **What it does:** Sends a test message to verify the alert channel.
 
@@ -431,7 +431,7 @@
 ### /update
 - Purpose: Self-updates from the configured HTTPS URL and SHA-256 fingerprint.
 - Usage: `/update`
-- Panel: bot-only
+- Panel: ctl
 - Risk: dangerous (confirmation required)
 
 **What it does:** Self-update from the configured HTTPS URL and SHA-256.
@@ -458,7 +458,7 @@
 ### /watch
 - Purpose: Alerts when a program exceeds a RAM limit.
 - Usage: `/watch list | add <name> <MB> | del <name>`
-- Panel: bot-only
+- Panel: automation
 
 **What it does:** Alerts when a program exceeds a RAM limit.
 
@@ -919,7 +919,7 @@
 ### /keepalive
 - Purpose: Lists or manages programs restarted automatically when they stop.
 - Usage: `/keepalive list|add|del`
-- Panel: bot-only
+- Panel: automation
 
 ### /menu
 - Purpose: Shows the interactive button menu.
@@ -977,7 +977,7 @@
 ### /svcwatch
 - Purpose: Lists or manages Windows services restarted automatically when they stop.
 - Usage: `/svcwatch list|add|del`
-- Panel: bot-only
+- Panel: automation
 
 ## Panel & Backup
 

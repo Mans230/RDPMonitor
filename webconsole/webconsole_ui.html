@@ -302,6 +302,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     <div class="tab" data-t="rdpsec" role="tab"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>RDP Security</div>
     <div class="tab" data-t="users" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Users</div>
     <div class="tab" data-t="settings" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>Settings</div>
+    <div class="tab" data-t="automation" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Automation</div>
     <div class="nav-label" role="presentation">Reference</div>
     <div class="tab" data-t="diagnostics" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Diagnostics</div>
     <div class="tab" data-t="docs" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Docs</div>
@@ -611,6 +612,40 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     </div>
   </div>
 
+  <!-- ============ AUTOMATION ============ -->
+  <div id="tab-automation" style="display:none">
+    <div class="card">
+      <h3>Automation <span class="mut" style="text-transform:none;font-weight:400">programs and services the monitor keeps running</span> <button class="btn" style="margin-inline-start:auto" onclick="loadAutomation()">Refresh</button></h3>
+      <div class="setgroup">
+        <div class="setgrouptitle">Watch RAM — alert when a program exceeds a limit</div>
+        <div id="auto-watch" class="cmd-list" style="margin-bottom:8px"></div>
+        <div class="setctl" style="justify-content:flex-start">
+          <input id="watchName" placeholder="process name" style="width:180px">
+          <input id="watchMb" type="number" min="64" placeholder="RAM MB" style="width:120px">
+          <button class="btn primary" onclick="autoAdd('watch')">Add</button>
+        </div>
+      </div>
+      <div class="setgroup">
+        <div class="setgrouptitle">Keep alive — relaunch a program if it stops</div>
+        <div id="auto-keepalive" class="cmd-list" style="margin-bottom:8px"></div>
+        <div class="setctl" style="justify-content:flex-start">
+          <input id="kaName" placeholder="process name" style="width:180px">
+          <input id="kaRun" placeholder="optional run command" style="width:220px">
+          <button class="btn primary" onclick="autoAdd('keepalive')">Add</button>
+        </div>
+      </div>
+      <div class="setgroup">
+        <div class="setgrouptitle">Watch services — restart a service if it stops</div>
+        <div id="auto-svcwatch" class="cmd-list" style="margin-bottom:8px"></div>
+        <div class="setctl" style="justify-content:flex-start">
+          <input id="svcWatchName" placeholder="service name" style="width:180px">
+          <button class="btn primary" onclick="autoAdd('svcwatch')">Add</button>
+        </div>
+      </div>
+      <div class="note">Keep-alive entries with a custom run command need command execution enabled (/set exec on).</div>
+    </div>
+  </div>
+
   <!-- ============ DIAGNOSTICS ============ -->
   <div id="tab-diagnostics" style="display:none">
     <div class="card">
@@ -636,6 +671,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         <button class="btn" onclick="loadDiag('botlog')">Bot log</button>
         <button class="btn" onclick="loadDiag('configbackup')">Config (redacted)</button>
         <button class="btn" onclick="loadDiag('dumps')">Crash dumps</button>
+        <button class="btn" onclick="exportLogs()">Export logs</button>
       </div>
       <h3 style="margin-top:16px">Network tests</h3>
       <div class="cmd-list" style="margin-bottom:12px">
@@ -648,6 +684,10 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
         <input id="diagHost" placeholder="host (for connectivity test)" style="width:220px">
         <button class="btn" onclick="loadDiag('nettest', $('diagHost').value.trim())">Nettest</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <input id="sendFilePath" placeholder="file path to send to Telegram" style="width:280px">
+        <button class="btn" onclick="sendFileToChat()">Send file</button>
       </div>
       <pre id="diagOut" class="mono" style="white-space:pre-wrap;max-height:60vh;overflow:auto;font-size:12px;color:var(--mut)">Pick a report above.</pre>
     </div>
@@ -680,6 +720,9 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
           <button class="btn" onclick="doMute()">Mute alerts</button>
           <button class="btn" onclick="doMute(true)">Unmute</button>
         </div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="sendTest()">Send test message</button>
+        </div>
       </div>
       <div class="card"><h3>Message on screen</h3>
         <input id="msgTxt" placeholder="Message text…" style="width:100%;margin-bottom:10px">
@@ -689,6 +732,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         <button class="btn danger" onclick="confirmAct('reboot')">Restart the server</button>
         <button class="btn danger" style="margin-top:8px" onclick="confirmAct('shutdown')">Shut down the server</button>
         <button class="btn" style="margin-top:8px" onclick="cancelRestart()">Cancel scheduled restart</button>
+        <button class="btn danger" style="margin-top:8px" onclick="updateNow()">Update now</button>
         <div class="note">The action runs after five seconds and cannot be undone.</div>
       </div>
     </div>
@@ -799,6 +843,7 @@ function activateTab(t){
   if(t.dataset.t=="rdpsec")loadRdp();
   if(t.dataset.t=="users")loadUsers();
   if(t.dataset.t=="settings")loadSettings();
+  if(t.dataset.t=="automation")loadAutomation();
   if(t.dataset.t=="diagnostics")loadDiag("diagnose");
   if(t.dataset.t=="docs")loadDocs();
 }
@@ -1024,6 +1069,29 @@ async function applySetting(key,value,confirmFlag){
   const j=await act({action:"settings_set",key:key,value:value,confirm:!!confirmFlag});
   if(j&&j.ok)loadSettings();
 }
+
+/* ---------- automation tab ---------- */
+async function loadAutomation(){
+  for(const which of ["watch","keepalive","svcwatch"]){
+    try{
+      const r=await fetch("/api/automation?list="+which);const d=await r.json();
+      $("auto-"+which).innerHTML=(d.items||[]).map(x=>"<button class='btn' onclick=\"autoDel('"+which+"','"+enc(x.name)+"')\">"+eh(x.name)+(x.ram_mb?(" - "+(x.ram_mb/1024).toFixed(1)+" GB"):"")+" &times;</button>").join("")||"<span class='mut'>None</span>";
+    }catch(e){}
+  }
+}
+function autoAdd(which){
+  const body={action:"automation",list:which,op:"add",name:""};
+  if(which==="watch"){body.name=$("watchName").value.trim();body.ram_mb=parseInt($("watchMb").value,10)||3072}
+  else if(which==="keepalive"){body.name=$("kaName").value.trim();body.run=$("kaRun").value.trim()}
+  else{body.name=$("svcWatchName").value.trim()}
+  if(!body.name)return;
+  act(body).then(j=>{if(j&&j.ok)loadAutomation()});
+}
+function autoDel(which,encName){act({action:"automation",list:which,op:"del",name:decodeURIComponent(encName)}).then(()=>loadAutomation())}
+function sendTest(){act({action:"test_alert"})}
+function updateNow(){if(confirm("Start the software self-update now? The monitor restarts when it finishes."))act({action:"update_now",confirm:true})}
+function exportLogs(){act({action:"exportlogs",scope:"all"}).then(j=>{if(j&&j.ok)toast("Export queued to Telegram")})}
+function sendFileToChat(){const p=$("sendFilePath").value.trim();if(!p)return;act({action:"send_file",path:p}).then(j=>{if(j&&j.ok)toast("File queued to Telegram")})}
 
 /* ---------- live poll ---------- */
 async function poll(){

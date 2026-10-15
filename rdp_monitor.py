@@ -2999,6 +2999,79 @@ def _dispatch_panel(action, args):
             return True, "scheduled restart cancelled"
         except Exception as e:
             return False, "nothing to cancel (%s)" % e
+    if action == "automation":
+        which = str(args.get("list", ""))
+        if which not in ("watch", "keepalive", "svcwatch"):
+            return False, "unknown list"
+        items = [dict(x) for x in (config.get(which) or [])]
+        op = str(args.get("op", "list"))
+        if op == "list":
+            return True, items
+        name = str(args.get("name", "")).strip()
+        if not name or len(name) > 60:
+            return False, "invalid name"
+        if op == "add":
+            if which == "watch":
+                try:
+                    mb = max(64, min(1048576, int(args.get("ram_mb"))))
+                except (TypeError, ValueError):
+                    mb = 3072
+                items = [x for x in items
+                         if str(x.get("name", "")).lower() != name.lower()]
+                items.append({"name": name, "ram_mb": mb})
+            elif which == "keepalive":
+                run = str(args.get("run", "")).strip()
+                if run and not config.get("exec_enabled"):
+                    return False, "a custom run command needs /set exec on"
+                items = [x for x in items
+                         if str(x.get("name", "")).lower() != name.lower()]
+                entry = {"name": name}
+                if run:
+                    entry["run"] = run
+                items.append(entry)
+            else:
+                if not any(str(x.get("name", "")).lower() == name.lower()
+                           for x in items):
+                    items.append({"name": name})
+            config[which] = items
+            save_config()
+            return True, "added " + name
+        if op == "del":
+            items = [x for x in items
+                     if str(x.get("name", "")).lower() != name.lower()]
+            config[which] = items
+            save_config()
+            return True, "removed " + name
+        return False, "unknown operation"
+    if action == "test_alert":
+        send_message("[OK] Test message from the WebConsole panel - the alert channel works.")
+        return True, "test message sent to the configured chat"
+    if action == "update_now":
+        if not args.get("confirm"):
+            return False, "confirmation required"
+        url = str(config.get("update_url") or "")
+        hsh = str(config.get("update_hash") or "")
+        if not url.startswith("https://") or not re.fullmatch(r"[0-9a-fA-F]{64}", hsh):
+            return False, "self-update is not configured (set update_url and update_hash)"
+        threading.Thread(target=update_self, daemon=True).start()
+        return True, "update started; the monitor restarts when it finishes"
+    if action == "exportlogs":
+        scope = str(args.get("scope", "all")).lower()
+        if scope not in ("all", "system", "application"):
+            scope = "all"
+        threading.Thread(target=export_logs_job, args=(scope,), daemon=True).start()
+        return True, "export started; the ZIP will arrive in Telegram"
+    if action == "send_file":
+        path = os.path.expanduser(os.path.expandvars(str(args.get("path", ""))))
+        if not path or not os.path.isfile(path):
+            return False, "file not found"
+        try:
+            if os.path.getsize(path) > 45 * 1024 * 1024:
+                return False, "file is larger than the 45 MB Telegram limit"
+        except OSError:
+            return False, "file not readable"
+        send_document(path, "File requested from the WebConsole panel")
+        return True, "file queued to Telegram"
     return False, "unknown action"
 
 
@@ -4021,11 +4094,11 @@ PANEL_COVERAGE = {
     "/rdpallow": "rdpsec", "/lockdown": "rdpsec", "/panic": "rdpsec",
     "/harden": "diagnostics", "/setrdpport": "rdpsec", "/firewall": "diagnostics",
     "/botlog": "diagnostics", "/diagnose": "diagnostics",
-    "/logstats": "diagnostics", "/exportlogs": "bot-only", "/dumps": "diagnostics",
-    "/watch": "bot-only",
-    "/trap": "sec", "/allow": "bot-only", "/update": "bot-only",
+    "/logstats": "diagnostics", "/exportlogs": "diagnostics", "/dumps": "diagnostics",
+    "/watch": "automation", "/keepalive": "automation", "/svcwatch": "automation",
+    "/trap": "sec", "/allow": "bot-only", "/update": "ctl",
     "/configbackup": "diagnostics", "/cancel_restart": "ctl",
-    "/nettest": "diagnostics", "/test": "bot-only", "/noop": "bot-only",
+    "/nettest": "diagnostics", "/test": "ctl", "/noop": "bot-only",
     "/start": "bot-only", "/menu": "bot-only", "/help": "bot-only",
     "/docs": "docs",
 }
