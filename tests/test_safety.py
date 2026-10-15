@@ -370,5 +370,70 @@ class PanelSecurityActionTests(unittest.TestCase):
         self.assertIn("shutdown", run.call_args[0][0][0])
 
 
+class PanelAutomationTests(unittest.TestCase):
+    """Automation lists, test alert, update gate and file sending."""
+
+    def setUp(self):
+        self.old_config = rm.config
+        rm.config = {"watch": [], "keepalive": [], "svcwatch": [],
+                     "exec_enabled": False, "update_url": "", "update_hash": ""}
+        p = mock.patch.object(rm, "save_config", lambda: None)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def tearDown(self):
+        rm.config = self.old_config
+
+    def test_watch_add_list_del(self):
+        ok, _ = rm._dispatch_panel("automation", {"list": "watch", "op": "add",
+                                                  "name": "chrome", "ram_mb": 4096})
+        self.assertTrue(ok)
+        self.assertEqual(rm.config["watch"], [{"name": "chrome", "ram_mb": 4096}])
+        ok, items = rm._dispatch_panel("automation", {"list": "watch", "op": "list"})
+        self.assertEqual(len(items), 1)
+        rm._dispatch_panel("automation", {"list": "watch", "op": "del", "name": "chrome"})
+        self.assertEqual(rm.config["watch"], [])
+
+    def test_keepalive_custom_run_needs_exec(self):
+        ok, out = rm._dispatch_panel("automation", {"list": "keepalive", "op": "add",
+                                                    "name": "svc", "run": "svc.exe"})
+        self.assertFalse(ok)
+        self.assertIn("exec", out)
+        rm.config["exec_enabled"] = True
+        ok, _ = rm._dispatch_panel("automation", {"list": "keepalive", "op": "add",
+                                                  "name": "svc", "run": "svc.exe"})
+        self.assertTrue(ok)
+        self.assertEqual(rm.config["keepalive"][0]["run"], "svc.exe")
+
+    def test_svcwatch_add(self):
+        ok, _ = rm._dispatch_panel("automation", {"list": "svcwatch", "op": "add",
+                                                  "name": "W32Time"})
+        self.assertTrue(ok)
+        self.assertEqual(rm.config["svcwatch"], [{"name": "W32Time"}])
+
+    def test_unknown_list_rejected(self):
+        ok, _ = rm._dispatch_panel("automation", {"list": "nope", "op": "list"})
+        self.assertFalse(ok)
+
+    def test_update_requires_confirmation_and_config(self):
+        ok, out = rm._dispatch_panel("update_now", {})
+        self.assertFalse(ok)
+        self.assertIn("confirmation", out)
+        ok, out = rm._dispatch_panel("update_now", {"confirm": True})
+        self.assertFalse(ok)
+        self.assertIn("not configured", out)
+
+    def test_send_file_missing(self):
+        ok, out = rm._dispatch_panel("send_file", {"path": "Z:\\nope\\missing.txt"})
+        self.assertFalse(ok)
+        self.assertIn("not found", out)
+
+    def test_test_alert_sends_message(self):
+        with mock.patch.object(rm, "send_message") as send:
+            ok, _ = rm._dispatch_panel("test_alert", {})
+        self.assertTrue(ok)
+        send.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

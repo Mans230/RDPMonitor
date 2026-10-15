@@ -1592,6 +1592,10 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/traps":
             ok, out = panel_request("trap", {"op": "list"}, timeout=10)
             return self._json(200 if ok else 503, {"items": out} if ok else {"error": out})
+        if u.path == "/api/automation":
+            which = (parse_qs(u.query).get("list") or [""])[0]
+            ok, out = panel_request("automation", {"list": which, "op": "list"}, timeout=10)
+            return self._json(200 if ok else 503, {"items": out} if ok else {"error": out})
         if u.path == "/api/users":
             ok, out = panel_request("users_list", timeout=20)
             return self._json(200 if ok else 503,
@@ -1792,6 +1796,34 @@ class Handler(BaseHTTPRequestHandler):
             if act == "cancel_restart":
                 ok, out = panel_request("cancel_restart", {}, timeout=20)
                 audit("cancel_restart", "-> %s" % ok)
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "automation":
+                ok, out = panel_request("automation",
+                                        {"list": str(body.get("list", ""))[:16],
+                                         "op": str(body.get("op", ""))[:8],
+                                         "name": str(body.get("name", ""))[:60],
+                                         "ram_mb": body.get("ram_mb"),
+                                         "run": str(body.get("run", ""))[:300]}, timeout=10)
+                audit("automation", "%s %s %s -> %s"
+                      % (body.get("list"), body.get("op"), body.get("name"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "test_alert":
+                ok, out = panel_request("test_alert", {}, timeout=20)
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "update_now":
+                ok, out = panel_request("update_now",
+                                        {"confirm": bool(body.get("confirm"))}, timeout=20)
+                audit("update_now", "-> %s" % ok)
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "exportlogs":
+                ok, out = panel_request("exportlogs",
+                                        {"scope": str(body.get("scope", "all"))[:16]}, timeout=20)
+                audit("exportlogs", "%s -> %s" % (body.get("scope"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "send_file":
+                ok, out = panel_request("send_file",
+                                        {"path": str(body.get("path", ""))[:300]}, timeout=20)
+                audit("send_file", "%s -> %s" % (body.get("path"), ok))
                 return self._json(200, {"ok": ok, "out": out})
             if act == "block_ip":
                 ok, out = block_ip(body.get("ip", "")); return self._json(200, {"ok": ok, "out": out})
