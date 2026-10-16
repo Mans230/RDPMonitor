@@ -225,6 +225,28 @@ class PanelDiagReadOnlyTests(unittest.TestCase):
         self.assertTrue(data["telegram_token"].startswith("***"))
         self.assertFalse(data["telegram_token"].endswith("secret-token"))
 
+    def test_configbackup_redacts_non_telegram_secrets(self):
+        # Any credential field, not just the Telegram token, must be masked.
+        rm.config = dict(rm.config, api_key="AKIA-SECRET-VALUE",
+                         smtp_password="hunter2", panel_token="tok-123")
+        ok, out = rm.api_diag("configbackup")
+        self.assertTrue(ok)
+        self.assertNotIn("AKIA-SECRET-VALUE", out)
+        self.assertNotIn("hunter2", out)
+        self.assertNotIn("tok-123", out)
+        data = json.loads(out)
+        self.assertEqual(data["api_key"], "***redacted***")
+        self.assertEqual(data["smtp_password"], "***redacted***")
+        self.assertEqual(data["panel_token"], "***redacted***")
+
+    def test_configbackup_redacts_nested_secrets(self):
+        rm.config = dict(rm.config, cloud={"rclone_token": "nested-secret"})
+        ok, out = rm.api_diag("configbackup")
+        self.assertTrue(ok)
+        self.assertNotIn("nested-secret", out)
+        data = json.loads(out)
+        self.assertEqual(data["cloud"]["rclone_token"], "***redacted***")
+
     def test_botlog_reads_tail_without_telegram(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "rdp_monitor.log"
@@ -244,6 +266,23 @@ class PanelDiagReadOnlyTests(unittest.TestCase):
         ok, out = rm.api_diag("nettest", "")
         self.assertFalse(ok)
         self.assertIn("host", out)
+
+    def test_speedtest_captures_job_output(self):
+        def fake_job(silent=False):
+            rm.send_message("DL 100 Mbps")
+        with mock.patch.object(rm, "speedtest_job", side_effect=fake_job):
+            ok, out = rm.api_diag("speedtest")
+        self.assertTrue(ok)
+        self.assertIn("100 Mbps", out)
+
+    def test_speedtest_is_bounded_by_deadline(self):
+        def slow_job(silent=False):
+            time.sleep(3)
+        with mock.patch.object(rm, "_PANEL_JOB_DEADLINE", 0.2), \
+                mock.patch.object(rm, "speedtest_job", side_effect=slow_job):
+            ok, out = rm.api_diag("speedtest")
+        self.assertFalse(ok)
+        self.assertIn("did not finish", out)
 
     def test_logins_captures_job_output(self):
         def fake_job(n):

@@ -2772,6 +2772,81 @@ def _panel_text(value):
     return _strip_tags(str(value)).replace("\u200f", "")
 
 
+# A config key is a credential if its name contains one of these fragments or
+# ends in "_key"/is exactly "key". /configbackup (bot + panel) must never return
+# such values in the clear - not just the Telegram token.
+_SENSITIVE_KEY_HINTS = (
+    "token", "secret", "password", "passphrase", "pwd", "credential",
+    "webhook", "private", "apikey", "api_key",
+)
+_SENSITIVE_KEY_RE = re.compile(r"(^|_)key$", re.IGNORECASE)
+
+
+def _is_sensitive_key(name):
+    text = str(name).lower()
+    if any(hint in text for hint in _SENSITIVE_KEY_HINTS):
+        return True
+    return bool(_SENSITIVE_KEY_RE.search(text))
+
+
+def _redact_config(data):
+    """Deep copy a config value with every credential masked for /configbackup."""
+    if isinstance(data, dict):
+        masked = {}
+        for key, value in data.items():
+            if _is_sensitive_key(key):
+                if isinstance(value, str) and value:
+                    # Keep a short hint for the Telegram token (as before); every
+                    # other credential is fully hidden.
+                    masked[key] = ("***" + value[-4:]
+                                   if str(key).lower() == "telegram_token"
+                                   else "***redacted***")
+                else:
+                    masked[key] = value
+            else:
+                masked[key] = _redact_config(value)
+        return masked
+    if isinstance(data, list):
+        return [_redact_config(item) for item in data]
+    return data
+
+
+# The panel waits 150s for /api/diag, and the monitor services one request at a
+# time, so a slow job must not hold the mailbox longer than this. A job that
+# overruns keeps running in the background; its output is discarded.
+_PANEL_JOB_DEADLINE = 90
+
+
+def _run_captured_job(fn, deadline=None):
+    """Run a bot job capturing its chat output, with a hard wall-clock deadline.
+
+    Same _capture_begin/_capture_end behaviour as the inline jobs, but on a
+    worker thread so a hung job cannot block the serialized monitor mailbox.
+    """
+    if deadline is None:
+        deadline = _PANEL_JOB_DEADLINE
+    box = {}
+
+    def worker():
+        _capture_begin()
+        try:
+            fn()
+            box["out"] = _capture_end()
+        except Exception as exc:  # surfaced to the panel as text
+            _capture_end()
+            box["error"] = repr(exc)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(deadline)
+    if thread.is_alive():
+        return False, ("the job did not finish within %d seconds; it is still "
+                       "running on the machine, try again shortly" % deadline)
+    if "error" in box:
+        return False, box["error"]
+    return True, box.get("out") or "(no result)"
+
+
 def api_diag(op, arg=""):
     """Read-only diagnostics for the WebConsole panel, reusing the bot reports."""
     op = str(op or "").strip().lower()
@@ -2866,12 +2941,7 @@ def api_diag(op, arg=""):
             data = f.read()
         return True, data.decode("utf-8", "replace")
     if op == "configbackup":
-        data = copy.deepcopy(config)
-        tok = str(data.get("telegram_token", "") or "")
-        data["telegram_token"] = ("***" + tok[-4:]) if tok else ""
-        enc = str(data.get("telegram_token_enc", "") or "")
-        data["telegram_token_enc"] = "***redacted***" if enc else ""
-        return True, json.dumps(data, indent=2, ensure_ascii=False)
+        return True, json.dumps(_redact_config(config), indent=2, ensure_ascii=False)
     if op == "dumps":
         dumps = _crash_dumps()
         if not dumps:
@@ -2883,13 +2953,10 @@ def api_diag(op, arg=""):
                 format_size(size), path))
         return True, "\n".join(out)
     if op == "speedtest":
-        _capture_begin()
-        try:
-            speedtest_job(silent=True)
-        except Exception as e:
-            _capture_end()
-            return False, repr(e)
-        return True, _capture_end() or "(no result)"
+        # Runs off-thread: a slow link can spend up to 2x120s inside the speed
+        # test, which used to block the single-slot monitor mailbox well past
+        # the panel's 150s timeout (and held up later RDP safety actions).
+        return _run_captured_job(lambda: speedtest_job(silent=True))
     if op == "nettest":
         parts = arg.split()
         if not parts:
@@ -4849,11 +4916,13 @@ COMMAND_DOCS = {
         "related": ["/rdpallow", "/lockdown"],
     },
     "/image": {
-        "summary": "Full system image into a VHDX with disk2vhd (all volumes, including boot).",
+        "summary": "System image with disk2vhd: captures the volumes while Windows "
+                   "runs; disk2vhd may create one VHDX per physical disk.",
         "steps": [("Run", "disk2vhd.exe -c * <file.vhdx>"),
-                  ("Upload", "rclone copy of the VHDX")],
-        "effect": "One bootable VHDX is produced (needs free space equal to used space).",
-        "output": "Progress and the file.",
+                  ("Upload", "rclone copy of the VHDX file(s)")],
+        "effect": "One VHDX per physical disk is produced (needs free space equal "
+                  "to used space).",
+        "output": "Progress and the file(s).",
         "troubleshoot": "Mount on Hyper-V/Azure directly; for KVM/Proxmox run "
                         "qemu-img convert -f vhdx -O qcow2. Needs admin rights.",
         "related": ["/backup"],
