@@ -1586,6 +1586,16 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/rdp":
             ok, out = panel_request("rdp_status", timeout=10)
             return self._json(200 if ok else 503, out if isinstance(out, dict) else {"error": out})
+        if u.path == "/api/settings":
+            ok, out = panel_request("settings_get", timeout=15)
+            return self._json(200 if ok else 503, out if isinstance(out, dict) else {"error": out})
+        if u.path == "/api/traps":
+            ok, out = panel_request("trap", {"op": "list"}, timeout=10)
+            return self._json(200 if ok else 503, {"items": out} if ok else {"error": out})
+        if u.path == "/api/automation":
+            which = (parse_qs(u.query).get("list") or [""])[0]
+            ok, out = panel_request("automation", {"list": which, "op": "list"}, timeout=10)
+            return self._json(200 if ok else 503, {"items": out} if ok else {"error": out})
         if u.path == "/api/users":
             ok, out = panel_request("users_list", timeout=20)
             return self._json(200 if ok else 503,
@@ -1596,7 +1606,8 @@ class Handler(BaseHTTPRequestHandler):
             arg = (qs.get("arg") or [""])[0]
             if op not in ("diagnose", "logstats", "logs", "firewall", "netstat",
                           "when", "ps", "bigfiles", "temp", "startup", "updates",
-                          "sysinfo", "harden"):
+                          "sysinfo", "harden", "report", "logins", "botlog",
+                          "configbackup", "dumps", "speedtest", "nettest"):
                 return self._json(400, {"error": "invalid diagnostic"})
             ok, out = panel_request("diag", {"op": op, "arg": arg[:64]}, timeout=150)
             return self._json(200 if ok else 503, {"text": out} if ok else {"error": out})
@@ -1750,6 +1761,69 @@ class Handler(BaseHTTPRequestHandler):
                     args["mode"] = str(body.get("mode", "status"))[:16]
                 ok, out = panel_request(op, args)
                 audit("rdp", "%s %s -> %s" % (op, args, ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "settings_set":
+                key = str(body.get("key", ""))[:32]
+                value = str(body.get("value", ""))[:64]
+                ok, out = panel_request("settings_set", {"key": key, "value": value,
+                                                         "confirm": bool(body.get("confirm"))})
+                audit("settings", "%s=%s -> %s" % (key, value, ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "block_subnet":
+                ok, out = panel_request("block_subnet",
+                                        {"ip": str(body.get("ip", ""))[:64],
+                                         "confirm": bool(body.get("confirm"))}, timeout=90)
+                audit("block_subnet", "%s -> %s" % (body.get("ip"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "set_rdp_port":
+                ok, out = panel_request("set_rdp_port",
+                                        {"port": body.get("port"),
+                                         "confirm": bool(body.get("confirm"))}, timeout=300)
+                audit("set_rdp_port", "%s -> %s" % (body.get("port"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "mute":
+                ok, out = panel_request("mute",
+                                        {"minutes": body.get("minutes"),
+                                         "off": bool(body.get("off"))}, timeout=10)
+                audit("mute", "%s -> %s" % (body.get("minutes") or "off", ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "trap":
+                ok, out = panel_request("trap",
+                                        {"op": str(body.get("op", ""))[:12],
+                                         "name": str(body.get("name", ""))[:40]}, timeout=10)
+                audit("trap", "%s %s -> %s" % (body.get("op"), body.get("name"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "cancel_restart":
+                ok, out = panel_request("cancel_restart", {}, timeout=20)
+                audit("cancel_restart", "-> %s" % ok)
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "automation":
+                ok, out = panel_request("automation",
+                                        {"list": str(body.get("list", ""))[:16],
+                                         "op": str(body.get("op", ""))[:8],
+                                         "name": str(body.get("name", ""))[:60],
+                                         "ram_mb": body.get("ram_mb"),
+                                         "run": str(body.get("run", ""))[:300]}, timeout=10)
+                audit("automation", "%s %s %s -> %s"
+                      % (body.get("list"), body.get("op"), body.get("name"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "test_alert":
+                ok, out = panel_request("test_alert", {}, timeout=20)
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "update_now":
+                ok, out = panel_request("update_now",
+                                        {"confirm": bool(body.get("confirm"))}, timeout=20)
+                audit("update_now", "-> %s" % ok)
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "exportlogs":
+                ok, out = panel_request("exportlogs",
+                                        {"scope": str(body.get("scope", "all"))[:16]}, timeout=20)
+                audit("exportlogs", "%s -> %s" % (body.get("scope"), ok))
+                return self._json(200, {"ok": ok, "out": out})
+            if act == "send_file":
+                ok, out = panel_request("send_file",
+                                        {"path": str(body.get("path", ""))[:300]}, timeout=20)
+                audit("send_file", "%s -> %s" % (body.get("path"), ok))
                 return self._json(200, {"ok": ok, "out": out})
             if act == "block_ip":
                 ok, out = block_ip(body.get("ip", "")); return self._json(200, {"ok": ok, "out": out})

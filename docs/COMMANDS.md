@@ -5,7 +5,7 @@
 ### /cancel_restart
 - Purpose: Cancels a scheduled restart/shutdown inside the cancel window.
 - Usage: `/cancel_restart`
-- Panel: bot-only
+- Panel: ctl
 
 **What it does:** Cancels a pending restart/shutdown.
 
@@ -217,7 +217,7 @@
 ### /botlog
 - Purpose: Sends the tail of the tool's own log file (rdp_monitor.log) - use it when the tool itself misbehaves.
 - Usage: `/botlog`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** The tool's own recent log.
 
@@ -257,7 +257,7 @@
 ### /configbackup
 - Purpose: Sends a copy of the configuration with secrets hidden.
 - Usage: `/configbackup`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Sends a copy of the configuration with secrets hidden.
 
@@ -297,7 +297,7 @@
 ### /dumps
 - Purpose: Sends the newest Windows crash dump (minidump) file.
 - Usage: `/dumps`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Sends the newest Windows crash dump.
 
@@ -319,7 +319,7 @@
 ### /exportlogs
 - Purpose: Exports the last 7 days of System/Application error events to a ZIP and sends it.
 - Usage: `/exportlogs [all|system|application]`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Exports the last 7 days of error events to a ZIP and sends it.
 
@@ -359,7 +359,7 @@
 ### /mute
 - Purpose: Silences non-critical alerts (usage, disk, temp, sessions) for a period. Security and critical alerts always arrive.
 - Usage: `/mute 3h | /mute off`
-- Panel: bot-only
+- Panel: ctl
 
 **What it does:** Silences non-critical alerts for a period.
 
@@ -377,7 +377,7 @@
 ### /set
 - Purpose: Detailed settings guide with current values and examples.
 - Usage: `/set`
-- Panel: bot-only
+- Panel: settings
 
 **What it does:** Detailed settings guide and value changes.
 
@@ -395,7 +395,7 @@
 ### /status
 - Purpose: Current value of every setting in one message.
 - Usage: `/status`
-- Panel: bot-only
+- Panel: settings
 
 **What it does:** Current value of every setting.
 
@@ -413,7 +413,7 @@
 ### /test
 - Purpose: Sends a test message to confirm the bot can reach you.
 - Usage: `/test`
-- Panel: bot-only
+- Panel: ctl
 
 **What it does:** Sends a test message to verify the alert channel.
 
@@ -431,7 +431,7 @@
 ### /update
 - Purpose: Self-updates from the configured HTTPS URL and SHA-256 fingerprint.
 - Usage: `/update`
-- Panel: bot-only
+- Panel: ctl
 - Risk: dangerous (confirmation required)
 
 **What it does:** Self-update from the configured HTTPS URL and SHA-256.
@@ -458,7 +458,7 @@
 ### /watch
 - Purpose: Alerts when a program exceeds a RAM limit.
 - Usage: `/watch list | add <name> <MB> | del <name>`
-- Panel: bot-only
+- Panel: automation
 
 **What it does:** Alerts when a program exceeds a RAM limit.
 
@@ -554,7 +554,7 @@
 ### /logins
 - Purpose: Last successful RDP logins from the Security event log: time, username, source IP. Use it after any suspicion - it shows who actually got in.
 - Usage: `/logins`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Last successful RDP logins with source IPs.
 
@@ -608,7 +608,7 @@
 ### /nettest
 - Purpose: Tests connectivity and latency to a host.
 - Usage: `/nettest <host>`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Connectivity and latency to a host.
 
@@ -670,7 +670,7 @@
 ### /report
 - Purpose: Today's report: average and peak CPU/RAM since midnight with the chart, plus today's transferred data. The same report is sent automatically every day at the configured hour.
 - Usage: `/report`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Today's averages and peaks.
 
@@ -688,7 +688,7 @@
 ### /speedtest
 - Purpose: Measures real internet speed via Cloudflare (~20 seconds): ping, download and upload Mbps.
 - Usage: `/speedtest`
-- Panel: bot-only
+- Panel: diagnostics
 
 **What it does:** Real internet speed test.
 
@@ -919,7 +919,7 @@
 ### /keepalive
 - Purpose: Lists or manages programs restarted automatically when they stop.
 - Usage: `/keepalive list|add|del`
-- Panel: bot-only
+- Panel: automation
 
 ### /menu
 - Purpose: Shows the interactive button menu.
@@ -977,7 +977,7 @@
 ### /svcwatch
 - Purpose: Lists or manages Windows services restarted automatically when they stop.
 - Usage: `/svcwatch list|add|del`
-- Panel: bot-only
+- Panel: automation
 
 ## Panel & Backup
 
@@ -1119,7 +1119,7 @@
 **Related:** /restore /restorelist /backupstatus
 
 ### /image
-- Purpose: Full system image: captures every volume (Windows, programs, users, and the boot partition) into one VHDX while running, so the disk can be mounted and booted on another VM/VPS. Needs free space equal to the used space; if no second disk is present the image is written to the system disk. Optionally uploads via rclone.
+- Purpose: System image attempt: captures selected volumes into one or more VHDX files while Windows runs. Verify the complete file set and test a restore in a VM before relying on it. Needs free space equal to the used space; if no second disk is present the image is written to the system disk. Optionally uploads via rclone.
 - Usage: `/image start|list|upload|status|progress|stop`
 - Panel: bot-only
 
@@ -1403,7 +1403,7 @@
 ### /blocksubnet
 - Purpose: Blocks the whole /24 network of an IP (256 addresses) - for rotating proxies attacking from the same range.
 - Usage: `/blocksubnet <ip> confirm`
-- Panel: bot-only
+- Panel: rdpsec
 - Risk: dangerous (confirmation required)
 
 **What it does:** Blocks the whole /24 network of an IP.
@@ -1549,7 +1549,7 @@
 ### /setrdpport
 - Purpose: Wizard to change the RDP port: edits the registry, opens the new port in the firewall, blocks the old one, restarts the RDP service. Your current RDP connection DROPS the moment it applies - reconnect to IP:newport.
 - Usage: `/setrdpport <port> confirm`
-- Panel: bot-only
+- Panel: rdpsec
 - Risk: dangerous (confirmation required)
 
 **What it does:** Changes the RDP listening port, opens it, verifies it, and closes the old port.
@@ -1592,7 +1592,7 @@
 ### /trap
 - Purpose: Trap usernames: ban an IP immediately on any login attempt using those names.
 - Usage: `/trap list | add <name> | del <name>`
-- Panel: bot-only
+- Panel: sec
 
 **What it does:** Honeypot usernames: any login attempt bans the IP.
 
