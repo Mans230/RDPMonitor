@@ -264,7 +264,7 @@
 **Steps (backend commands):**
 1. Redact
    ```
-   remove token/secret fields
+   remove credential fields by key name (any type)
    ```
 2. Send
    ```
@@ -1123,7 +1123,7 @@
 - Usage: `/image start|list|upload|status|progress|stop`
 - Panel: bot-only
 
-**What it does:** Full system image into a VHDX with disk2vhd (all volumes, including boot).
+**What it does:** System image with disk2vhd: captures the volumes while Windows runs; disk2vhd may create one VHDX per physical disk.
 
 **Steps (backend commands):**
 1. Run
@@ -1132,11 +1132,11 @@
    ```
 2. Upload
    ```
-   rclone copy of the VHDX
+   rclone copy of the VHDX file(s)
    ```
 
-**Effect:** One bootable VHDX is produced (needs free space equal to used space).
-**Output:** Progress and the file.
+**Effect:** One VHDX per physical disk is produced (needs free space equal to used space).
+**Output:** Progress and the file(s).
 **Troubleshoot:** Mount on Hyper-V/Azure directly; for KVM/Proxmox run qemu-img convert -f vhdx -O qcow2. Needs admin rights.
 **Related:** /backup
 

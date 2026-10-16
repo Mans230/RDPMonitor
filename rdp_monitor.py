@@ -2772,6 +2772,118 @@ def _panel_text(value):
     return _strip_tags(str(value)).replace("\u200f", "")
 
 
+# A config key is a credential if its name contains one of these fragments or
+# ends in "_key"/is exactly "key". /configbackup (bot + panel) must never return
+# such values in the clear - not just the Telegram token.
+_SENSITIVE_KEY_HINTS = (
+    "token", "secret", "password", "passphrase", "pwd", "credential",
+    "webhook", "private", "apikey", "api_key",
+)
+_SENSITIVE_KEY_RE = re.compile(r"(^|_)key$", re.IGNORECASE)
+
+
+def _is_sensitive_key(name):
+    text = str(name).lower()
+    if any(hint in text for hint in _SENSITIVE_KEY_HINTS):
+        return True
+    return bool(_SENSITIVE_KEY_RE.search(text))
+
+
+def _mask_secret(key, value):
+    """Hide a credential whatever its type (str, dict, list, number...).
+
+    An unset value is returned unchanged so a redacted config still shows which
+    fields are empty. The Telegram token keeps its historical 4-char hint.
+    """
+    if value is None or value == "":
+        return value
+    if isinstance(value, str):
+        return ("***" + value[-4:] if str(key).lower() == "telegram_token"
+                else "***redacted***")
+    # A non-string credential is hidden whole: descending would echo the shape
+    # of the secret, and for a container would leak the values inside it.
+    return "***redacted***"
+
+
+def _redact_config(data):
+    """Deep copy a config value with every credential masked for /configbackup."""
+    if isinstance(data, dict):
+        masked = {}
+        for key, value in data.items():
+            if _is_sensitive_key(key):
+                masked[key] = _mask_secret(key, value)
+            else:
+                masked[key] = _redact_config(value)
+        return masked
+    if isinstance(data, list):
+        return [_redact_config(item) for item in data]
+    return data
+
+
+# The panel waits 150s for /api/diag, and the monitor services one request at a
+# time, so a slow job must not hold the mailbox longer than this. A job that
+# overruns keeps running in the background; its output is discarded.
+_PANEL_JOB_DEADLINE = 90
+
+# One lock per job name: an overrunning job holds its lock until it really
+# finishes, so a retried request is refused instead of starting a second copy.
+_JOB_LOCKS = {}
+_JOB_LOCKS_GUARD = threading.Lock()
+
+
+def _job_lock(name):
+    with _JOB_LOCKS_GUARD:
+        lock = _JOB_LOCKS.get(name)
+        if lock is None:
+            lock = threading.Lock()
+            _JOB_LOCKS[name] = lock
+        return lock
+
+
+def _run_captured_job(fn, deadline=None, single_flight=None):
+    """Run a bot job capturing its chat output, with a hard wall-clock deadline.
+
+    Same _capture_begin/_capture_end behaviour as the inline jobs, but on a
+    worker thread so a hung job cannot block the serialized monitor mailbox.
+    With single_flight (a job name) the job runs at most once at a time: a
+    second request while it is still running, even past the deadline, is
+    refused instead of piling a concurrent copy onto the machine.
+    """
+    if deadline is None:
+        deadline = _PANEL_JOB_DEADLINE
+    lock = _job_lock(single_flight) if single_flight else None
+    if lock is not None and not lock.acquire(blocking=False):
+        return False, "the job is already running, try again shortly"
+    box = {}
+
+    def worker():
+        _capture_begin()
+        try:
+            fn()
+            box["out"] = _capture_end()
+        except Exception as exc:  # surfaced to the panel as text
+            _capture_end()
+            box["error"] = repr(exc)
+        finally:
+            if lock is not None:
+                lock.release()
+
+    try:
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+    except Exception:
+        if lock is not None:
+            lock.release()
+        raise
+    thread.join(deadline)
+    if thread.is_alive():
+        return False, ("the job did not finish within %d seconds; it is still "
+                       "running on the machine, try again shortly" % deadline)
+    if "error" in box:
+        return False, box["error"]
+    return True, box.get("out") or "(no result)"
+
+
 def api_diag(op, arg=""):
     """Read-only diagnostics for the WebConsole panel, reusing the bot reports."""
     op = str(op or "").strip().lower()
@@ -2826,13 +2938,7 @@ def api_diag(op, arg=""):
         "harden": lambda: harden_report(False),
     }
     if op in jobs:
-        _capture_begin()
-        try:
-            jobs[op]()
-        except Exception as e:
-            _capture_end()
-            return False, repr(e)
-        return True, _capture_end() or "(no output)"
+        return _run_captured_job(jobs[op], single_flight="diag:" + op)
     if op == "report":
         midnight = datetime.now().replace(hour=0, minute=0, second=0,
                                           microsecond=0).timestamp()
@@ -2850,13 +2956,8 @@ def api_diag(op, arg=""):
         return True, "\n".join(lines)
     if op == "logins":
         n = int(arg) if arg.isdigit() and 1 <= int(arg) <= 30 else 10
-        _capture_begin()
-        try:
-            _logins_job(n)
-        except Exception as e:
-            _capture_end()
-            return False, repr(e)
-        return True, _capture_end() or "(no logins recorded)"
+        return _run_captured_job(lambda: _logins_job(n),
+                                 single_flight="diag:logins")
     if op == "botlog":
         if not os.path.isfile(LOG_FILE):
             return True, "No log file yet."
@@ -2866,12 +2967,7 @@ def api_diag(op, arg=""):
             data = f.read()
         return True, data.decode("utf-8", "replace")
     if op == "configbackup":
-        data = copy.deepcopy(config)
-        tok = str(data.get("telegram_token", "") or "")
-        data["telegram_token"] = ("***" + tok[-4:]) if tok else ""
-        enc = str(data.get("telegram_token_enc", "") or "")
-        data["telegram_token_enc"] = "***redacted***" if enc else ""
-        return True, json.dumps(data, indent=2, ensure_ascii=False)
+        return True, json.dumps(_redact_config(config), indent=2, ensure_ascii=False)
     if op == "dumps":
         dumps = _crash_dumps()
         if not dumps:
@@ -2883,24 +2979,19 @@ def api_diag(op, arg=""):
                 format_size(size), path))
         return True, "\n".join(out)
     if op == "speedtest":
-        _capture_begin()
-        try:
-            speedtest_job(silent=True)
-        except Exception as e:
-            _capture_end()
-            return False, repr(e)
-        return True, _capture_end() or "(no result)"
+        # Runs off-thread with a single-flight guard: a slow link can spend up
+        # to 15s+120s+120s inside the speed test, which used to block the
+        # single-slot monitor mailbox well past the panel's 150s timeout (and
+        # held up later RDP safety actions). The deadline keeps the mailbox
+        # free; a retry while the worker is still going is refused.
+        return _run_captured_job(lambda: speedtest_job(silent=True),
+                                 single_flight="diag:speedtest")
     if op == "nettest":
         parts = arg.split()
         if not parts:
             return False, "provide a host, for example: 1.1.1.1"
-        _capture_begin()
-        try:
-            nettest_job(parts[0])
-        except Exception as e:
-            _capture_end()
-            return False, repr(e)
-        return True, _capture_end() or "(no result)"
+        return _run_captured_job(lambda: nettest_job(parts[0]),
+                                 single_flight="diag:nettest")
     return False, "unknown diagnostic %r" % op
 
 
@@ -4625,7 +4716,8 @@ COMMAND_DOCS = {
     },
     "/configbackup": {
         "summary": "Sends a copy of the configuration with secrets hidden.",
-        "steps": [("Redact", "remove token/secret fields"), ("Send", "sendDocument")],
+        "steps": [("Redact", "remove credential fields by key name (any type)"),
+                  ("Send", "sendDocument")],
         "effect": "A redacted config copy is sent.",
         "output": "The JSON file.",
         "troubleshoot": "Secrets are never included.",
@@ -4849,11 +4941,13 @@ COMMAND_DOCS = {
         "related": ["/rdpallow", "/lockdown"],
     },
     "/image": {
-        "summary": "Full system image into a VHDX with disk2vhd (all volumes, including boot).",
+        "summary": "System image with disk2vhd: captures the volumes while Windows "
+                   "runs; disk2vhd may create one VHDX per physical disk.",
         "steps": [("Run", "disk2vhd.exe -c * <file.vhdx>"),
-                  ("Upload", "rclone copy of the VHDX")],
-        "effect": "One bootable VHDX is produced (needs free space equal to used space).",
-        "output": "Progress and the file.",
+                  ("Upload", "rclone copy of the VHDX file(s)")],
+        "effect": "One VHDX per physical disk is produced (needs free space equal "
+                  "to used space).",
+        "output": "Progress and the file(s).",
         "troubleshoot": "Mount on Hyper-V/Azure directly; for KVM/Proxmox run "
                         "qemu-img convert -f vhdx -O qcow2. Needs admin rights.",
         "related": ["/backup"],
@@ -8636,12 +8730,7 @@ def updates_job():
 
 def config_backup_job():
     """Sends a copy of your settings to the chat — Tokens and computer secrets are hidden"""
-    data = copy.deepcopy(config)
-    tok = str(data.get("telegram_token", "") or "")
-    data["telegram_token"] = ("***" + tok[-4:]) if tok else ""
-    enc = str(data.get("telegram_token_enc", "") or "")
-    # Fully redact the DPAPI blob; showing any prefix leaks key material context.
-    data["telegram_token_enc"] = "***redacted***" if enc else ""
+    data = _redact_config(config)
     p = os.path.join(tempfile.gettempdir(), "rdpm_config_backup.json")
     queued = False
     try:
