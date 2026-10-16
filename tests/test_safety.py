@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -247,6 +248,43 @@ class PanelDiagReadOnlyTests(unittest.TestCase):
         data = json.loads(out)
         self.assertEqual(data["cloud"]["rclone_token"], "***redacted***")
 
+    def test_configbackup_redacts_secrets_of_any_type(self):
+        # A credential is a credential whatever its JSON type: a non-string
+        # value used to slip past the masking unchanged.
+        rm.config = dict(rm.config, password=12345,
+                         credentials={"nested": "deep-secret"},
+                         rclone_tokens=["t1", "t2"])
+        ok, out = rm.api_diag("configbackup")
+        self.assertTrue(ok)
+        self.assertNotIn("deep-secret", out)
+        self.assertNotIn("t1", out)
+        data = json.loads(out)
+        self.assertEqual(data["password"], "***redacted***")
+        self.assertEqual(data["credentials"], "***redacted***")
+        self.assertEqual(data["rclone_tokens"], "***redacted***")
+
+    def test_bot_configbackup_redacts_secrets(self):
+        # The bot command sends a real file to the chat, so it must use the same
+        # redaction as the panel; it used to mask only the Telegram token.
+        rm.config = dict(rm.config, api_key="AKIA-BOT-LEAK",
+                         smtp_password="hunter2",
+                         cloud={"rclone_token": "nested-bot-secret"})
+        captured = {}
+
+        def fake_send_document(path, caption=""):
+            with open(path, "r", encoding="utf-8") as f:
+                captured["blob"] = f.read()
+            return True
+
+        with mock.patch.object(rm, "send_document",
+                               side_effect=fake_send_document):
+            rm.config_backup_job()
+        blob = captured["blob"]
+        self.assertNotIn("AKIA-BOT-LEAK", blob)
+        self.assertNotIn("hunter2", blob)
+        self.assertNotIn("nested-bot-secret", blob)
+        self.assertEqual(json.loads(blob)["api_key"], "***redacted***")
+
     def test_botlog_reads_tail_without_telegram(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "rdp_monitor.log"
@@ -283,6 +321,32 @@ class PanelDiagReadOnlyTests(unittest.TestCase):
             ok, out = rm.api_diag("speedtest")
         self.assertFalse(ok)
         self.assertIn("did not finish", out)
+
+    def test_job_refuses_a_second_concurrent_run(self):
+        release = threading.Event()
+
+        def slow_job(silent=False):
+            release.wait(5)
+
+        with mock.patch.object(rm, "_PANEL_JOB_DEADLINE", 0.2), \
+                mock.patch.object(rm, "speedtest_job", side_effect=slow_job):
+            try:
+                # The worker overruns the deadline but keeps its slot, so a
+                # retry must be refused rather than pile on a second copy.
+                first_ok, first_out = rm.api_diag("speedtest")
+                self.assertFalse(first_ok)
+                self.assertIn("did not finish", first_out)
+                second_ok, second_out = rm.api_diag("speedtest")
+                self.assertFalse(second_ok)
+                self.assertIn("already running", second_out)
+            finally:
+                release.set()
+                lock = rm._job_lock("diag:speedtest")
+                for _ in range(200):
+                    if lock.acquire(blocking=False):
+                        lock.release()
+                        break
+                    time.sleep(0.01)
 
     def test_logins_captures_job_output(self):
         def fake_job(n):

@@ -264,7 +264,7 @@
 **Steps (backend commands):**
 1. Redact
    ```
-   remove token/secret fields
+   remove credential fields by key name (any type)
    ```
 2. Send
    ```
