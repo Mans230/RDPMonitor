@@ -12,6 +12,7 @@ import datetime
 import secrets
 import subprocess
 import threading
+import warnings
 
 from i18n import tr
 import secrets_store
@@ -40,16 +41,23 @@ def config_revision(cfg):
 
 
 def harden_path(path, directory=False):
-    """Restrict a file or folder to Administrators and SYSTEM (best effort)."""
+    """Report protection failures; optional nonexistent assets are skipped."""
     if os.name != "nt" or not os.path.exists(path):
-        return
+        return True
     perms = "(OI)(CI)F" if directory else "F"
     try:
-        subprocess.run(["icacls", path, "/inheritance:r",
+        result = subprocess.run(["icacls", path, "/inheritance:r",
                         "/grant:r", f"*S-1-5-32-544:{perms}", f"*S-1-5-18:{perms}"],
                        capture_output=True, timeout=15, creationflags=_NO_WINDOW)
-    except Exception:
-        pass
+    except Exception as exc:
+        warnings.warn(f"ACL hardening failed for {path}: {type(exc).__name__}", RuntimeWarning,
+                      stacklevel=2)
+        return False
+    if result.returncode != 0:
+        warnings.warn(f"ACL hardening failed for {path}: icacls exit {result.returncode}",
+                      RuntimeWarning, stacklevel=2)
+        return False
+    return True
 
 
 def harden_backup_assets(cfg=None):
@@ -59,15 +67,16 @@ def harden_backup_assets(cfg=None):
     decrypt, so filesystem ACLs are the primary protection.
     """
     root = os.path.dirname(os.path.abspath(CONFIG_FILE))
-    harden_path(CONFIG_FILE)
+    results = [harden_path(CONFIG_FILE)]
     if cfg:
         rclone_conf = (cfg.get("cloud", {}) or {}).get("rclone_config") or ""
         if rclone_conf:
-            harden_path(rclone_conf)
+            results.append(harden_path(rclone_conf))
     for name in ("bot_session_gui.session", "bot_session_pyro.session"):
-        harden_path(os.path.join(root, name))
+        results.append(harden_path(os.path.join(root, name)))
     for name in ("control", "local_backups", "logs"):
-        harden_path(os.path.join(root, name), directory=True)
+        results.append(harden_path(os.path.join(root, name), directory=True))
+    return all(results)
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.json")
 
