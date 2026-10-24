@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 RDP Monitor - A comprehensive device monitoring tool Windows (Suitable for devices RDP) With Telegram
 
@@ -41,13 +41,18 @@ import tempfile
 import threading
 import time
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import psutil
 import requests
 from account_safety import serialized_account_action, serialized_user_command
 from diagnostic_runtime import deadline_scope, remaining_timeout
 from audit_store import append_event
+from bot_catalog import (build_menus, category_title, canonical_command, help_text,
+                         telegram_menu, PAGE_ALIASES, OWNERS)
+from resource_alerts import ResourceAlertPolicy, usage_level as resource_usage_level
+from security_events import (canonical_ip, canonical_target, event_timestamp,
+                             account_query, failed_query, protected_target, success_query, usable_source)
 
 # Prefer IPv4 for outbound connections. Some hosts advertise an IPv6 address
 # without a working IPv6 route, which makes requests hang until timeout.
@@ -227,11 +232,6 @@ _net_speed = {"down": 0.0, "up": 0.0}
 _last_net_time = 0.0
 _last_net_counters = (0, 0)
 
-_short = deque(maxlen=24)          # ~5s samples used for 60-second spike detection
-_was_over = False
-_last_alert_time = 0.0
-_last_alert_level = "ok"          # Suppress repeats of the same level; escalate immediately
-_last_spike = 0.0
 
 _auto_streak = 0                   # Consecutive minutes above the auto-replay limit
 _last_auto_check = 0.0
@@ -2692,7 +2692,8 @@ def api_rdp_allow_apply():
 def api_rdp_allow_clear():
     if lockdown_active():
         return False, "a lockdown is active; release it first"
-    apply_rdp_allow([])
+    if not apply_rdp_allow([]):
+        return False, "allow-list release failed; recorded restriction retained; inspect /firewall"
     config["rdp_allow_active"] = False
     config["rdp_allowed_ips"] = []
     save_config()
@@ -2705,18 +2706,20 @@ def api_lockdown(mode):
         ok = lockdown_start(manual=True)
         return (bool(ok), "lockdown started" if ok else "could not start the lockdown")
     if mode == "off":
-        lockdown_release()
-        return True, "lockdown released"
+        ok = lockdown_release()
+        return bool(ok), "lockdown released" if ok else "lockdown release failed; inspect firewall"
     return True, "lockdown is active" if lockdown_active() else "no lockdown"
 
 
 def api_panic(mode):
     if mode == "on":
         panic_on()
-        return True, "panic mode activated (RDP closed)"
+        ok = bool(config.get("panic_active"))
+        return ok, "panic mode activated (RDP closed)" if ok else "panic activation failed"
     if mode == "off":
         panic_off()
-        return True, "panic mode released"
+        ok = not config.get("panic_active")
+        return ok, "panic mode released" if ok else "panic release could not be verified"
     return True, "panic mode is active" if config.get("panic_active") else "panic mode is off"
 
 
@@ -3010,6 +3013,11 @@ def _api_diag_inline(op, arg=""):
 
 
 def _dispatch_panel(action, args):
+    if action == "block_ip":
+        return block_ip(args.get("ip", ""))
+    if action == "unblock_ip":
+        ok = unblock_ip(args.get("ip", ""))
+        return ok, "rule removal verified" if ok else "rule removal could not be verified; tracking retained"
     if action == "users_list":
         return api_users_list()
     if action == "diag":
@@ -3873,81 +3881,7 @@ def backup_relay_loop():
 
 # ----------------------------- List of buttons (/menu) -----------------------------
 
-MENU_PAGES = {
-    "root": ("<b>MAIN MENU</b> - pick a section:",
-             [("Monitoring", "menu:mon"), ("Control", "menu:ctrl"),
-              ("Users", "menu:users"), ("Security", "menu:sec"),
-              ("Maintenance", "menu:maint"), ("Panel & Backup", "menu:panel"),
-              ("Documentation", "menu:docs"), ("Full /help reference", "cmd:/help")]),
-    "panel": ("<b>PANEL, BACKUP AND CLOUD</b> - the browser panel and the backup engine:",
-              [("Open the panel", "run:/panel"), ("Show login token", "panel:token"),
-               ("Panel status", "run:/panelstatus"), ("Panel remote access", "cmd:/panelremote"),
-               ("Back up now", "run:/backup"), ("Backup progress", "run:/backupprogress"),
-               ("Backup status", "run:/backupstatus"), ("Local backup files", "run:/backuplist"),
-               ("What gets backed up", "run:/backsrc"),
-               ("Browse to add a source", "run:/backsrc browse"),
-               ("Backup schedule", "run:/backupschedule"),
-               ("Cloud destinations", "run:/cloud"),
-               ("Cloud setup (rclone)", "cmd:/rclone"),
-               ("Image the whole system (VHDX)", "cmd:/image"),
-               ("Restore an archive", "cmd:/restore"),
-               ("Restore list", "run:/restorelist"), ("Restore drill", "cmd:/drill")]),
-    "docs": ("<b>DOCUMENTATION</b> - full written docs: what each command does, the exact "
-             "backend commands, the effect, and troubleshooting:",
-             [("Command index", "run:/docs"),
-              ("setrdpport", "run:/docs setrdpport"),
-              ("rdpallow", "run:/docs rdpallow"),
-              ("lockdown", "run:/docs lockdown"),
-              ("panic", "run:/docs panic"),
-              ("harden", "run:/docs harden"),
-              ("backup", "run:/docs backup"),
-              ("restore", "run:/docs restore"),
-              ("drill", "run:/docs drill"),
-              ("exec", "run:/docs exec")]),
-    "mon": ("<b>MONITORING</b> - read-only, nothing is changed on the machine:",
-            [("Live snapshot", "cmd:/view"), ("Top processes", "cmd:/top"),
-             ("24-hour chart", "cmd:/chart"), ("Today's report", "cmd:/report"),
-             ("Temperatures", "cmd:/temp"), ("Network speed", "cmd:/net"),
-             ("Data usage", "cmd:/traffic"), ("Internet speed test", "cmd:/speedtest"),
-             ("Active RDP sessions", "cmd:/rdp"), ("Recent logins", "cmd:/logins"),
-             ("Process detail", "cmd:/ps"), ("Peak times", "cmd:/when"),
-             ("Local users", "cmd:/listusers"), ("Biggest files", "cmd:/bigfiles"),
-             ("Active connections", "cmd:/netstat"), ("System info", "cmd:/sysinfo"),
-             ("Startup items", "cmd:/startup"), ("Windows updates", "cmd:/updates"),
-             ("Connectivity test", "cmd:/nettest"), ("Firewall status", "cmd:/firewall")]),
-    "ctrl": ("<b>CONTROL</b> - tap a command to see what it does. "
-             "Dangerous ones show a Confirm/Cancel button before anything runs:",
-             [("Screenshot", "cmd:/screenshot"), ("Run a command", "cmd:/exec"),
-              ("Kill a process", "cmd:/kill"), ("Launch a program", "cmd:/run"),
-              ("Show a message", "cmd:/msg"), ("Download a file", "cmd:/download"),
-              ("Full disk image", "cmd:/image"),
-              ("Restart the machine", "cmd:/restart"), ("Shut down", "cmd:/shutdown"),
-              ("Restart a service", "cmd:/svc"),
-              ("Cancel restart/shutdown", "cmd:/cancel_restart")]),
-    "users": ("<b>USERS</b> - manage local Windows accounts:",
-              [("List users", "cmd:/listusers"), ("Add user", "cmd:/adduser"),
-               ("Disable user", "cmd:/disableuser"), ("Enable user", "cmd:/enableuser"),
-               ("Rename user", "cmd:/renameuser"), ("Delete user", "cmd:/deluser"),
-               ("Recent logins", "cmd:/logins"), ("Log off a session", "cmd:/logoff")]),
-    "sec": ("<b>SECURITY</b> - protection and hardening tools:",
-            [("RDP status", "cmd:/rdp"), ("Command history", "cmd:/audit"),
-             ("Blocked IPs", "cmd:/blocklist"), ("Block an IP", "cmd:/block"),
-             ("Block a /24 subnet", "cmd:/blocksubnet"), ("Unblock an IP", "cmd:/unblock"),
-             ("RDP allow-list", "cmd:/whitelist"), ("Apply allow-list", "cmd:/rdpallow"),
-             ("Lockdown", "cmd:/lockdown"), ("Panic (close RDP)", "cmd:/panic"),
-             ("Security audit", "cmd:/harden"), ("Change RDP port", "cmd:/setrdpport"),
-             ("Firewall status", "cmd:/firewall"),
-             ("Trusted Telegram accounts", "cmd:/allow"),
-             ("Trap usernames", "cmd:/trap")]),
-    "maint": ("<b>MAINTENANCE AND SETTINGS</b>:",
-              [("Clean temp files", "cmd:/clean"), ("Mute alerts", "cmd:/mute"),
-               ("Settings guide", "cmd:/set"), ("Current settings", "cmd:/status"),
-               ("Bot log", "cmd:/botlog"), ("Diagnose errors", "cmd:/diagnose"),
-               ("Error sources", "cmd:/logstats"), ("Export logs (zip)", "cmd:/exportlogs"),
-               ("Crash dumps", "cmd:/dumps"), ("RAM watch", "cmd:/watch"),
-               ("Test alerts", "cmd:/test"), ("Export settings", "cmd:/configbackup"),
-               ("Update the tool", "cmd:/update"), ("Documentation", "run:/docs")]),
-}
+MENU_PAGES = build_menus()
 
 # command -> (what it does in detail, usage, needs confirm?)
 COMMAND_INFO = {
@@ -4974,11 +4908,11 @@ COMMAND_DOCS = {
         "related": ["/configbackup"],
     },
     "/logins": {
-        "summary": "Last successful RDP logins with source IPs.",
+        "summary": "Successful remote-interactive RDP logins from the last three days (up to 5,000 events scanned).",
         "steps": [("Query", "Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624}")],
         "effect": "Read-only.",
-        "output": "A login list.",
-        "troubleshoot": "Needs audit logon events enabled.",
+        "output": "UTC event time, domain/account, source IP and event record ID.",
+        "troubleshoot": "Needs Security log read permission and successful Logon auditing. Query failure is reported separately from an empty result.",
         "related": ["/rdp", "/blocklist"],
     },
     "/panel": {
@@ -5130,17 +5064,7 @@ COMMAND_DOCS = {
 
 
 def _command_section(cmd):
-    for page, (_title, items) in MENU_PAGES.items():
-        for _lbl, cb in items:
-            if cb == "cmd:" + cmd:
-                return {"mon": "Monitoring", "ctrl": "Control", "users": "Users",
-                        "sec": "Security", "maint": "Maintenance",
-                        "panel": "Panel & Backup"}.get(page, page)
-    if cmd in ("/backup", "/backupstatus", "/backuplist", "/backsrc",
-               "/backupprogress", "/restorelist", "/restore", "/drill",
-               "/panel", "/panelstatus", "/paneltoken", "/panelremote", "/token"):
-        return "Panel & Backup"
-    return "Other"
+    return category_title(cmd)
 
 
 def docs_index_text():
@@ -5244,6 +5168,7 @@ def generate_docs_file():
 
 def show_menu_page(page):
     """Sends a page from a list of buttons"""
+    page = PAGE_ALIASES.get(page, page)
     title, items = MENU_PAGES.get(page) or MENU_PAGES["root"]
     rows = [[(lbl, cb) for lbl, cb in items[i:i + 2]]
             for i in range(0, len(items), 2)]
@@ -5268,61 +5193,66 @@ def setrdpport_wizard():
         + rtl(" Dedicated port? Write: /setrdpport No"), rows)
 
 
-SAFE_EXEC = {
+READ_ONLY_COMMANDS = {
     "/view", "/top", "/chart", "/report", "/temp", "/net", "/traffic",
     "/speedtest", "/rdp", "/logins", "/listusers", "/screenshot",
     "/bigfiles", "/netstat", "/firewall", "/sysinfo", "/startup",
-    "/updates", "/audit", "/blocklist", "/whitelist", "/botlog",
-    "/clean", "/status", "/harden", "/test",
-    "/panel", "/panelstatus", "/paneltoken", "/panelremote", "/backup", "/backupstatus", "/backuplist",
-    "/restorelist", "/backsrc", "/backupprogress",
+    "/updates", "/audit", "/blocklist", "/botlog", "/status", "/test",
+    "/panelstatus", "/backupstatus", "/backuplist", "/restorelist",
+    "/backupprogress", "/diagnose", "/logstats", "/dumps", "/docs", "/help", "/menu",
 }
 
 
-# Icon for each command according to its section in the list (For unified command explanation cards)
-_SECTION_ICON = {"mon": "", "ctrl": "", "users": "",
-                 "sec": "", "maint": "", "root": ""}
-_CMD_EMOJI = {}
-for _page, (_t, _items) in MENU_PAGES.items():
-    for _lbl, _cb in _items:
-        if _cb.startswith("cmd:"):
-            _CMD_EMOJI.setdefault(_cb[4:], _SECTION_ICON.get(_page, ""))
-
-
-def show_command_info(cmd):
-    """Explain a command from the menu: Unified card (Icon, title, description, use, warning)
-    - Fixed base: English line or <code> On a separate line — Without Arabic in the same line
-      (Confusion breaks a trend RTL, and Telegram He was swallowing <name> As a tag HTML Unknown)"""
-    if cmd in SAFE_EXEC:
-        handle_command(cmd)  # It’s safe — Executes immediately from the button without confirmation
+def show_command_info(cmdline):
+    """Opening a card never executes an action. Review, then run or confirm."""
+    parts = cmdline.strip().split()
+    if not parts:
         return
-    if cmd == "/setrdpport":
-        return setrdpport_wizard()
-    desc, usage, dangerous = COMMAND_INFO.get(cmd, ("A known matter", cmd, False))
-    icon = _CMD_EMOJI.get(cmd, "")
-    text = (f"{icon} <b>{cmd}</b>\n"
-            f"{esc(desc)}\n\n"
-            "Use:\n"
-            f"<code>{esc(usage)}</code>")
-    # Commands have special buttons (General formula | Confirm button is disabled)
-    if cmd == "/panic":
-        return send_buttons(text, [[("Panic ON", "run:/panic on"),
-                                    ("Panic OFF", "run:/panic off")]])
-    if cmd == "/lockdown":
-        return send_buttons(text, [[("Lockdown NOW", "run:/lockdown now"),
-                                    ("Status", "run:/lockdown")]])
-    if cmd == "/rdpallow":
-        return send_buttons(text, [[("List", "run:/rdpallow"),
-                                    ("Apply allowlist", "run:/rdpallow apply")]])
-    if dangerous:
-        text += "\n\nDangerous matter — Implementation requires confirmation"
-        # Danger commands without arguments: Direct execution button (After confirming the button)
-        btns = (confirm_buttons(usage) if "<" not in usage and " | " not in usage
-                and cmd not in ("/kill", "/run") else None)
-        if btns:
-            send_buttons(text, btns)
-            return
-    send_message(text)
+    cmd = canonical_command(parts[0].lower().split("@")[0])
+    args = [part for part in parts[1:] if part.lower() != "confirm"]
+    command = " ".join([cmd] + args)
+    if cmd not in COMMAND_INFO:
+        return send_message("Unknown command. Open /menu for the command list.")
+    desc, usage, dangerous = COMMAND_INFO[cmd]
+    doc = COMMAND_DOCS.get(cmd, {})
+    text = (f"<b>{esc(cmd)}</b> ? {esc(_command_section(cmd))}\n"
+            f"{esc(desc)}\n\nUsage:\n<code>{esc(usage)}</code>")
+    if doc.get("effect"):
+        text += "\n\nEffect: " + esc(doc["effect"])
+    needs_confirmation = dangerous or cmd not in READ_ONLY_COMMANDS or bool(args)
+    if needs_confirmation:
+        text += "\n\nReview the target and effect. Confirming may change this device or its access."
+    rows = []
+    if not any(mark in command for mark in ("<", ">", "|")):
+        text += "\n\nSelected: <code>" + esc(command) + "</code>"
+        if needs_confirmation:
+            rows.extend(confirm_buttons(command))
+        else:
+            pid = pend_store({"reviewed_command": command})
+            rows.append([("Run command", "rv:" + pid)])
+    if cmd == "/setrdpport" and not args:
+        rows.append([("Choose a port", "port:wizard")])
+    if cmd == "/panic" and not args:
+        rows.append([("Review panic ON", "cmd:/panic on"), ("Review panic OFF", "cmd:/panic off")])
+    if cmd == "/lockdown" and not args:
+        rows.append([("Review lockdown NOW", "cmd:/lockdown now")])
+    if cmd == "/rdpallow" and not args:
+        rows.append([("Review allowlist apply", "cmd:/rdpallow apply")])
+    rows.append([("Back to category", "menu:" + OWNERS[cmd]), ("Home", "menu:root")])
+    send_buttons(text, rows)
+
+
+def handle_run_callback(cmdline):
+    """Old run buttons also enter review; no embedded confirm can bypass it."""
+    return show_command_info(cmdline)
+
+
+def handle_reviewed_command(pid):
+    pending = pend_take(pid)
+    command = pending.get("reviewed_command") if pending else None
+    if not command:
+        return send_message("This Run button expired or was already used. Open the command again.")
+    handle_command(command)
 
 
 def handle_menu_callback(data):
@@ -5340,8 +5270,12 @@ def handle_menu_callback(data):
                 p["fn"](*p.get("args", ()))
             except Exception as e:
                 send_message(f"[X] {esc(str(e))}")
+    elif data == "port:wizard":
+        setrdpport_wizard()
+    elif data.startswith("rv:"):
+        handle_reviewed_command(data[3:])
     elif data.startswith("run:"):
-        handle_command(data[4:])
+        handle_run_callback(data[4:])
 
 
 def send_photo(path, caption=None, *, cleanup=False):
@@ -5443,14 +5377,18 @@ def get_top_processes(n=10):
     return top_cpu, top_ram
 
 
-def get_rdp_sessions():
+def get_rdp_sessions(strict=False):
     """Active user sessions: qwinsta If available, otherwise psutil.users()"""
     # method 1: qwinsta (Available on Windows Pro It gives the session status and number)
     try:
         try:
-            raw = subprocess.run(["qwinsta"], capture_output=True, timeout=10, creationflags=NO_WINDOW).stdout
+            query_result = subprocess.run(["qwinsta"], capture_output=True, timeout=10, creationflags=NO_WINDOW)
+            raw = query_result.stdout
         except FileNotFoundError:
-            raw = subprocess.run(["query", "session"], capture_output=True, timeout=10, creationflags=NO_WINDOW).stdout
+            query_result = subprocess.run(["query", "session"], capture_output=True, timeout=10, creationflags=NO_WINDOW)
+            raw = query_result.stdout
+        if query_result.returncode != 0 or (strict and not _decode_out(raw).strip()):
+            raise RuntimeError("session snapshot unavailable")
         sessions = []
         for line in _decode_out(raw).splitlines():
             toks = line.split()
@@ -5472,8 +5410,11 @@ def get_rdp_sessions():
             })
         return sessions
     except FileNotFoundError:
-        pass
+        if strict:
+            raise
     except Exception as e:
+        if strict:
+            raise
         print(f"[sessions] qwinsta error: {e}")
 
     # method 2 (Alternative for Windows Home): psutil.users()
@@ -6286,36 +6227,7 @@ def clean_temp_files(max_age_hours=24):
 
 
 def _failed_logon_ps():
-    """Inquiry 4625 For specified entry types only.
-    - Presumption 10 = RDP Interactive only. LogonType 3 Includes SMB And network services as well
-      Its inclusion may ban innocent people — Only add it if you understand the trade-off (Attempts NLA Before
-      Authentication is shown by type 3): /set logontypes 3,10"""
-    types = ",".join(f"'{t.strip()}'" for t in
-                     str(config.get("failed_logon_types", "10") or "10").split(",")
-                     if t.strip() in ("3", "10"))
-    if not types:
-        types = "'10'"
-    return (
-        "$st=(Get-Date).AddMinutes(-3); "
-        "Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625;StartTime=$st} "
-        "-ErrorAction SilentlyContinue | ForEach-Object { "
-        "try { $x=[xml]$_.ToXml(); $d=@{}; "
-        "$x.Event.EventData.Data | ForEach-Object { $d[$_.Name]=$_.'#text' }; "
-        "$ip=$d['IpAddress']; "
-        "if ($ip -and $ip -ne '-' -and $ip -ne '::1' -and $ip -ne '127.0.0.1' "
-        f"-and @({types}) -contains $d['LogonType'] "
-        # Type 3 Includes SMB — We accept it only with a fingerprint NLA Discretionary. NtLmSsp It is located in
-        # LogonProcessName And not ProcessName, andKerberos/NTLM In the Authentication Package field.
-        # The type remains 3 Optionally because Windows does not give a flag RDP Conclusive in every version.
-        "-and ($d['LogonType'] -ne '3' "
-        "-or ((($d['LogonProcessName'] -like 'NtLmSsp*') "
-        "-or (@('NTLM','Negotiate','Kerberos') -contains "
-        "$d['AuthenticationPackageName'])) "
-        "-and (-not $d['WorkstationName']))) "
-        "{ Write-Output ($d['TargetUserName']+'|'+$ip+'|'"
-        "+$_.TimeCreated.ToString('yyyy-MM-ddTHH:mm:ss.fff')) } "
-        "} catch {} }"
-    )
+    return failed_query(config.get("failed_login_window", 15), config.get("failed_logon_types", "10"))
 
 
 def load_blocked():
@@ -6329,18 +6241,23 @@ def load_blocked():
 
 
 def save_blocked():
-    _atomic_write_json(BLOCKED_FILE, _blocked, ensure_ascii=False, indent=1)
+    if not _atomic_write_json(BLOCKED_FILE, _blocked, ensure_ascii=False, indent=1):
+        raise OSError("blocked.json could not be saved")
 
 
 @contextlib.contextmanager
 def _blocked_file_guard():
     """Cross-process mutex shared with the optional hardened WebConsole."""
     handle = None
+    acquired = False
     try:
         name = "Global\\RDPMonitorBlocked_" + hashlib.sha256(
             BASE_DIR.lower().encode()).hexdigest()[:20]
         kernel32 = ctypes.windll.kernel32
         kernel32.CreateMutexW.restype = ctypes.c_void_p
+        kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        kernel32.ReleaseMutex.argtypes = [ctypes.c_void_p]
         kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
         handle = kernel32.CreateMutexW(None, False, name)
         if not handle:
@@ -6349,32 +6266,17 @@ def _blocked_file_guard():
         # WAIT_OBJECT_0 (0) and WAIT_ABANDONED (0x80) both grant ownership.
         if wait not in (0, 0x80):
             raise TimeoutError("blocked.json lock timeout")
+        acquired = True
         yield
     finally:
         if handle:
-            ctypes.windll.kernel32.ReleaseMutex(handle)
+            if acquired:
+                ctypes.windll.kernel32.ReleaseMutex(handle)
             ctypes.windll.kernel32.CloseHandle(handle)
 
 
 def _valid_ip(ip):
-    """Accept only a real IPv4 or IPv6 address (no hostnames or junk)."""
-    ip = (ip or "").strip()
-    if not ip or len(ip) > 45:
-        return False
-    if ":" in ip:
-        import ipaddress
-        try:
-            ipaddress.IPv6Address(ip)
-            return True
-        except ValueError:
-            return False
-    parts = ip.split(".")
-    if len(parts) != 4:
-        return False
-    for part in parts:
-        if not part.isdigit() or len(part) > 3 or int(part) > 255:
-            return False
-    return True
+    return canonical_ip(ip) is not None
 
 
 def _netsh(args):
@@ -6390,51 +6292,73 @@ def _netsh(args):
         return False, str(e)[:160]
 
 
-def block_ip(ip):
-    """Permanent ban on IP Via base in Windows Firewall
-    - He comes back (succeeded?, status): "added" block now, "exists" Already blocked, otherwise error text netsh
-    - He was coming back False For previously banned, it says alerts 'Blocking failed' Wrong"""
-    if not _valid_ip(ip):
-        return False, "IP Invalid"
+def _firewall_rule_count(name):
+    try:
+        script = ("$ErrorActionPreference='Stop'; $rules=@(Get-NetFirewallRule -ErrorAction Stop | "
+                  "Where-Object { $_.DisplayName -eq '" + _ps_quote(name) + "' }); Write-Output $rules.Count")
+        result = subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                                capture_output=True, timeout=60, creationflags=NO_WINDOW)
+        text = _decode_out(result.stdout).strip()
+        return int(text) if result.returncode == 0 and text.isdigit() else None
+    except Exception:
+        return None
+
+
+def _add_block_target(target):
+    if protected_target(target, config.get("rdp_allowed_ips", [])):
+        return False, "refused: target contains a trusted management, loopback or unsafe address"
     try:
         with _blocked_file_guard():
             load_blocked()
-            if ip in _blocked:
-                return True, "exists"
-            ok, err = _netsh(["advfirewall", "firewall", "add", "rule",
-                              f"name=RDPMonitor Block {ip}", "dir=in", "action=block",
-                              f"remoteip={ip}"])
-            if ok:
-                _blocked[ip] = time.time()
+            if target in _blocked:
+                count = _firewall_rule_count("RDPMonitor Block " + target)
+                if count is None:
+                    return False, "cannot verify existing firewall rule"
+                if count > 0:
+                    return True, "exists"
+            previous = dict(_blocked)
+            ok, error = _netsh(["advfirewall", "firewall", "add", "rule",
+                                f"name=RDPMonitor Block {target}", "dir=in", "action=block", f"remoteip={target}"])
+            if not ok:
+                return False, error or "firewall rule creation failed"
+            _blocked[target] = time.time()
+            try:
                 save_blocked()
-                return True, "added"
+            except Exception:
+                _blocked.clear()
+                _blocked.update(previous)
+                rolled_back, _ = _netsh(["advfirewall", "firewall", "delete", "rule", f"name=RDPMonitor Block {target}"])
+                return False, ("tracking write failed; new firewall rule rolled back" if rolled_back else
+                               "tracking write and rollback failed; inspect firewall manually")
+            return True, "added"
     except TimeoutError:
-        # Another process holds the block list; fail this IP only instead of
-        # aborting the whole failed-login scan.
         return False, "block list is busy (lock timeout)"
-    print(f"[block] netsh error ({ip}): {err}")
-    return False, (err or "Failed netsh Without a message")
+
+
+def block_ip(ip):
+    ip = canonical_ip(ip)
+    return _add_block_target(ip) if ip else (False, "invalid IP")
 
 
 def unblock_ip(ip):
-    """Lifting the ban with actual verification that the rule has been removed — He was deleting it from blocked.json
-    And he says 'Done' Even if the rule remains in the firewall"""
-    if not _valid_ip(ip):
-        return False, "IP Invalid"
+    target = canonical_target(ip)
+    if not target:
+        return False
     with _blocked_file_guard():
         load_blocked()
-        _netsh(["advfirewall", "firewall", "delete", "rule",
-                f"name=RDPMonitor Block {ip}"])
-        r = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"(Get-NetFirewallRule -DisplayName 'RDPMonitor Block {ip}' "
-             "-ErrorAction SilentlyContinue).Count"],
-            capture_output=True, timeout=60, creationflags=NO_WINDOW)
-        gone = _decode_out(r.stdout).strip() in ("", "0")
-        if gone:
-            _blocked.pop(ip, None)
+        _netsh(["advfirewall", "firewall", "delete", "rule", f"name=RDPMonitor Block {target}"])
+        count = _firewall_rule_count("RDPMonitor Block " + target)
+        if count != 0:
+            return False
+        previous = dict(_blocked)
+        _blocked.pop(target, None)
+        try:
             save_blocked()
-    return gone
+        except Exception:
+            _blocked.clear()
+            _blocked.update(previous)
+            return False
+        return True
 
 
 def check_failed_logons():
@@ -6451,199 +6375,130 @@ def check_failed_logons():
 def _check_failed_logons_impl():
     global _seen_4625
     try:
-        r = subprocess.run(["powershell", "-NoProfile", "-Command",
-                            _failed_logon_ps()],
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", _failed_logon_ps()],
                            capture_output=True, timeout=90, creationflags=NO_WINDOW)
-    except Exception as e:
-        print(f"[failed-logons] error: {e}")
+        if r.returncode != 0:
+            raise RuntimeError("Security event query failed; no protection state was changed")
+    except Exception as exc:
+        print(f"[failed-logons] {exc}")
         return
+    now = time.time()
+    window_min = max(1, int(config.get("failed_login_window", 15)))
+    window = window_min * 60
+    # Event time, not polling time, determines the failure window.
+    _seen_4625 = {key: stamp for key, stamp in _seen_4625.items()
+                  if isinstance(stamp, (float, int)) and not isinstance(stamp, bool)
+                  and now - window <= stamp <= now + 60}
     new_by_ip = {}
-    for ln in _decode_out(r.stdout).splitlines():
-        parts = ln.strip().split("|")
-        if len(parts) != 3:
+    for line in _decode_out(r.stdout).splitlines():
+        parts = line.strip().split("|")
+        if len(parts) not in (3, 4):
             continue
-        user, ip, ts = parts
-        key = f"{user}|{ip}|{ts}"
+        user, raw_ip, stamp = parts[:3]
+        ip = usable_source(raw_ip)
+        event_time = event_timestamp(stamp)
+        if not ip or event_time is None or not now - window <= event_time <= now + 60:
+            continue
+        key = "record:" + parts[3] if len(parts) == 4 and parts[3].isdigit() else f"{user}|{ip}|{stamp}"
         if key in _seen_4625:
             continue
-        _seen_4625[key] = True
-        new_by_ip.setdefault(ip, {"users": set(), "count": 0})
-        new_by_ip[ip]["users"].add(user)
-        new_by_ip[ip]["count"] += 1
-    if len(_seen_4625) > 2000:
-        # dict Listed in order: We grab the newest and effectively throw away the oldest (It was set In no order)
-        _seen_4625 = dict(list(_seen_4625.items())[-1000:])
+        _seen_4625[key] = event_time
+        info = new_by_ip.setdefault(ip, {"users": set(), "times": []})
+        info["users"].add(user)
+        info["times"].append(event_time)
+    if len(_seen_4625) > 50000:
+        _seen_4625 = dict(sorted(_seen_4625.items(), key=lambda item: (
+            item[1], int(item[0][7:]) if item[0].startswith("record:") else 0))[-50000:])
+    for ip, entry in list(_failed_logins.items()):
+        entry["times"] = [t for t in entry["times"] if now - window <= t <= now + 60]
+        if not entry["times"]:
+            _failed_logins.pop(ip, None)
     if not new_by_ip:
         return
-    # User traps: Any login attempt is a trap = Permanent ban on the first attempt
-    traps = [str(t).lower() for t in (config.get("trap_users") or [])]
-    if traps:
-        trap_alerts = []
-        for ip, info in new_by_ip.items():
-            hit = [u for u in info["users"] if u.lower() in traps]
-            if hit and ip not in _blocked:
-                bok, _st = block_ip(ip)
-                if bok:
-                    trap_alerts.append((ip, hit))
-                    if config.get("subnetblock"):
-                        block_subnet(ip)
-        if trap_alerts:
-            audit_record("User trap: "
-                         + "; ".join(f"{ip} ({','.join(u)})" for ip, u in trap_alerts))
-            send_message(
-                rtl(" <b>User trap!</b>") + "\n"
-                + rtl("Try names: " + ", ".join(sorted({u for _ip, us in trap_alerts for u in us}))) + "\n"
-                + "\n".join(rtl(f" Blocked {ip} Immediately and permanently") for ip, _u in trap_alerts))
-    threshold = int(config.get("failed_login_block_threshold", 10))
-    # During lock: Yes IP New Banned on first attempt - Against proxies that change IP Constantly
-    if lockdown_active():
-        threshold = 1
-    window_min = int(config.get("failed_login_window", 15))
-    window = window_min * 60
-    now = time.time()
-    lines = [" <b>Failed login attempts on the device!</b>",
-             "Looks like someone is trying passwords on RDP:\n"]
+    traps = {str(name).casefold() for name in config.get("trap_users", [])}
+    threshold = 1 if lockdown_active() else max(1, int(config.get("failed_login_block_threshold", 10)))
+    lines = ["<b>Failed RDP login attempts</b>", f"Event window: {window_min} minutes (UTC event timestamps)."]
     for ip, info in new_by_ip.items():
-        e = _failed_logins.setdefault(ip, {"times": []})
-        e["times"] = [t for t in e["times"] if now - t <= window] \
-            + [now] * info["count"]
-        total = len(e["times"])
-        lines.append(f"• User: {', '.join(sorted(info['users']))} "
-                     f"| IP: {ip}\n"
-                     f"  Another attempts {window_min} Minute: {total}")
+        entry = _failed_logins.setdefault(ip, {"times": []})
+        entry["times"].extend(info["times"])
+        total = len(entry["times"])
+        latest = datetime.fromtimestamp(max(info["times"]), timezone.utc).isoformat(timespec="seconds")
+        lines.append(f"Account: {esc(', '.join(sorted(info['users'])))} | Source: {esc(ip)} | Attempts: {total} | Latest: {latest}")
+        protected = protected_target(ip, config.get("rdp_allowed_ips", []))
+        trap = any(name.casefold() in traps for name in info["users"])
+        if protected:
+            lines.append("  Trusted management address: alerted, never automatically blocked.")
+            continue
         already = ip in _blocked
-        if already:
-            # Banned from a previous session and new attempts are still being made (His appearance here means
-            # 4625 New!) = A proxy that runs within the same network or base as affected
-            lines.append("   Previously blocked and still trying"
-                         " — Automatic escalation of network ban /24 Complete")
-            sok, sst = block_subnet(ip)
-            if sok and sst == "added":
-                audit_record(f"Automatic escalation to ban /24 (Blocked and keep trying): {ip}")
-        elif config.get("failed_login_block") and total >= threshold:
-            bok, bstat = block_ip(ip)
-            if bok:
-                lines.append(f"   <b>has been blocked {ip} permanently in the firewall</b>")
-                if config.get("subnetblock"):
-                    block_subnet(ip)
-            else:
-                lines.append(f"   Blocking failed: {esc(bstat)}")
-    audit_record("Failed login attempts: "
-                 + "; ".join(f"{ip} x{len(_failed_logins[ip]['times'])}"
-                             for ip in new_by_ip))
-    # Drop IPs whose attempts have aged out of the window so the map cannot
-    # grow without bound over a long-running process.
-    for stale_ip in [k for k, v in _failed_logins.items()
-                     if not any(now - t <= window for t in v["times"])]:
-        _failed_logins.pop(stale_ip, None)
-    # Auto lock: Total distributed to each IP It is a residential proxy fingerprint
-    # - We scan all records for the current window first: They were old attempts from days gone by
-    #   It accumulates forever and the lock works "After hours" It’s not okay 15 Minute
-    if config.get("lockdown") and not lockdown_active():
-        now3 = time.time()
-        total_all = sum(len([t for t in e["times"] if now3 - t <= window])
-                        for e in _failed_logins.values())
-        if total_all >= int(config.get("lockdown_limit", 30)):
-            audit_record(f"Auto lock: {total_all} Failed attempt distributed throughout the window")
-            lockdown_start()
-            return
-    # Quick response buttons: Block without typing any command
+        if not already and (trap or (config.get("failed_login_block") and total >= threshold)):
+            ok, status = block_ip(ip)
+            lines.append("  IP blocked." if ok else "  Block failed: " + esc(status))
+            already = ok
+        if already and config.get("subnetblock", False) and (trap or config.get("failed_login_block")):
+            ok, status = block_subnet(ip)
+            if ok and status == "added":
+                lines.append("  Explicit subnet policy: /24 blocked.")
+    audit_record("Failed RDP attempts: " + "; ".join(f"{ip} x{len(info['times'])}" for ip, info in new_by_ip.items()))
+    total_all = sum(len(e["times"]) for ip, e in _failed_logins.items()
+                    if not protected_target(ip, config.get("rdp_allowed_ips", [])))
+    if config.get("lockdown") and not lockdown_active() and total_all >= int(config.get("lockdown_limit", 30)):
+        lockdown_start()
     rows = []
-    for atk_ip in list(new_by_ip.keys())[:3]:
-        rows.append([(f"Block {atk_ip}", f"run:/block {atk_ip} confirm"),
-                     ("Block /24", f"run:/blocksubnet {atk_ip} confirm")])
-    rows.append([("Lockdown now", "run:/lockdown now confirm"),
-                 ("Mute 3h", "run:/mute 3h"),
-                 ("Whitelist", "run:/whitelist")])
-    send_buttons("\n".join(lines), rows)
+    for ip in list(new_by_ip)[:3]:
+        if not protected_target(ip, config.get("rdp_allowed_ips", [])):
+            rows.append([(f"Review {ip}", f"cmd:/block {ip}")])
+    rows.append([("Review lockdown", "cmd:/lockdown"), ("Recent logins", "cmd:/logins")])
+    if config.get("failed_login_alerts", True) or any(name.casefold() in traps for info in new_by_ip.values() for name in info["users"]):
+        send_buttons("\n".join(lines), rows)
 
 
 # ----------------------------- Whitelist and auto lock -----------------------------
 
-PS_SUCCESS_LOGON = (
-    "$st=(Get-Date).AddDays(-14); "
-    "Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624;StartTime=$st} "
-    "-MaxEvents 2000 -ErrorAction SilentlyContinue | ForEach-Object { "
-    "try { $x=[xml]$_.ToXml(); $d=@{}; "
-    "$x.Event.EventData.Data | ForEach-Object { $d[$_.Name]=$_.'#text' }; "
-    "$ip=$d['IpAddress']; "
-    "if ($d['LogonType'] -eq '10' -and $ip -and $ip -ne '-' -and $ip -ne '::1' "
-    "-and $ip -ne '127.0.0.1') "
-    "{ Write-Output ($ip+'|'+$d['TargetUserName']+'|'+$_.TimeCreated.ToString('yyyy-MM-dd')) } "
-    "} catch {} }"
-)
+PS_SUCCESS_LOGON = success_query(14)
 
 
 def learn_successful_ips():
-    """He learns IP Whoever succeeded in entering RDP Actually during 14 day (Of events 4624)
-    - This is the safety net that prevents the lock from blocking you
-    - It will alert you if it enters IP New, never seen before (Successful intrusion detection)"""
     global _learn_alerts_ready
     try:
-        r = subprocess.run(["powershell", "-NoProfile", "-Command",
-                            PS_SUCCESS_LOGON],
-                           capture_output=True, timeout=120, creationflags=NO_WINDOW)
-    except Exception as e:
-        print(f"[learn] error: {e}")
+        result = subprocess.run(["powershell", "-NoProfile", "-Command", PS_SUCCESS_LOGON],
+                                capture_output=True, timeout=120, creationflags=NO_WINDOW)
+        if result.returncode != 0:
+            raise RuntimeError("Security login query failed; learned history was preserved")
+    except Exception as exc:
+        print(f"[learn] {exc}")
         return None
     learned = dict(config.get("learned_ips") or {})
     now = time.time()
-    n_new = 0
-    new_rows = []
-    for ln in _decode_out(r.stdout).splitlines():
-        parts = ln.strip().split("|")
-        if len(parts) < 3:
+    new_ips = set()
+    for line in _decode_out(result.stdout).splitlines():
+        parts = line.strip().split("|")
+        if len(parts) != 3:
             continue
-        ip, user = parts[0].strip(), parts[1].strip()
-        if not _valid_ip(ip):
+        ip = usable_source(parts[0])
+        stamp = event_timestamp(parts[2])
+        if not ip or stamp is None or not now - 14*86400 <= stamp <= now + 60:
             continue
-        # Actual event time from the log — It’s not time for examination: His age happened 14 About a day
-        # He was taking a new history and remaining almost reliable 28 One day
-        try:
-            ev_t = datetime.strptime(parts[2].strip(), "%Y-%m-%d").timestamp()
-        except Exception:
-            ev_t = now
         if ip not in learned:
-            n_new += 1
-            new_rows.append((ip, user))
-        val = learned.get(ip)
-        if not isinstance(val, dict):
-            val = {"t": 0, "u": user}
-        val["t"] = max(val.get("t", 0) or 0, ev_t)
-        if user:
-            val["u"] = user
-        learned[ip] = val
-    # Cleaning: We keep another 14 Just a day
-    learned = {ip: v for ip, v in learned.items()
-               if now - (v["t"] if isinstance(v, dict) else v) <= 14 * 86400}
+            new_ips.add(ip)
+        previous = learned.get(ip)
+        previous_time = previous.get("t", 0) if isinstance(previous, dict) else 0
+        if not isinstance(previous_time, (int, float)):
+            previous_time = 0
+        if stamp >= previous_time:
+            learned[ip] = {"t": stamp, "u": parts[1]}
+    learned = {ip: item for ip, item in learned.items() if isinstance(item, dict)
+               and isinstance(item.get("t"), (float, int)) and now - 14*86400 <= item["t"] <= now+60}
     config["learned_ips"] = learned
     save_config()
-    # Successful intrusion alarm: IP He entered successfully and the first time we saw him
-    if new_rows and _learn_alerts_ready and config.get("new_ip_alerts", True):
-        rows = "\n".join(rtl(f"• {esc(ip)} — {esc(u or '?')}")
-                         for ip, u in new_rows[:10])
-        kb = [[(f"It was me - trust {ip}", f"run:/whitelist add {ip}")
-               for ip, _u in new_rows[:2]]]
-        kb.append([("NOT me - PANIC", "run:/panic on confirm"),
-                   ("/logins", "run:/logins")])
-        send_buttons(
-            rtl(" <b>Successful login from IP New!</b>") + "\n"
-            + rtl("First time we see this IP Enters successfully:") + "\n" + rows + "\n"
-            + rtl("Aren’t you? Press PANIC Immediately - Verify your entry with /logins"), kb)
-    if not _learn_alerts_ready:
-        _learn_alerts_ready = True
-        # Baseline silently documents nothing: We announce what we have learned from another 14 One day
-        base = sorted(learned.keys()) if config.get("baseline_alerts", False) else []
-        if base:
-            rows = "\n".join(rtl(f"• {esc(ip)} — {esc(learned[ip].get('u', '?') if isinstance(learned[ip], dict) else '?')}")
-                             for ip in base[:10])
-            send_buttons(
-                rtl("<b>Baseline: IP Successfully entered during post 14 One day</b>") + "\n"
-                + rtl("(From the Windows registry upon first startup — It was considered reliable for locking)") + "\n"
-                + rows + (rtl(f"\nAnd {len(base) - 10} Other") if len(base) > 10 else ""),
-                [[("Whitelist", "run:/whitelist")],
-                 [("What is this?", "run:/noop")]])
-    return n_new
+    if new_ips and _learn_alerts_ready and config.get("new_ip_alerts", True):
+        rows = [f"? {esc(ip)} | {esc(learned[ip]['u'])} | "
+                + datetime.fromtimestamp(learned[ip]['t'], tz=timezone.utc).isoformat()
+                for ip in sorted(new_ips) if ip in learned]
+        send_buttons("<b>New successful RDP source observed</b>\nSource | account | Windows event time (UTC)\n"
+                     + "\n".join(rows[:10]),
+                     [[("Review recent logins", "cmd:/logins"), ("Review panic", "cmd:/panic")]])
+    _learn_alerts_ready = True
+    return len(new_ips)
 
 
 def lockdown_active():
@@ -6713,12 +6568,13 @@ def lockdown_release(auto=False):
     manual_ips = [str(i) for i in (config.get("rdp_allowed_ips") or [])]
     was_active = bool(config.get("rdp_allow_pre_active",
                                  _pre_lockdown_allow_active))
-    if was_active and manual_ips:
-        apply_rdp_allow(manual_ips)
-        config["rdp_allow_active"] = True
-    else:
-        apply_rdp_allow([])
-        config["rdp_allow_active"] = False
+    if was_active and not manual_ips:
+        send_message("[X] Lockdown release refused: the previous allow-list is empty. Review /rdpallow.")
+        return False
+    if not apply_rdp_allow(manual_ips if was_active else []):
+        send_message("[X] Lockdown release failed; recorded lockdown state retained. Review /firewall before retrying.")
+        return False
+    config["rdp_allow_active"] = was_active
     config["lockdown_until"] = 0
     config["rdp_allow_pre_active"] = False
     _pre_lockdown_allow_active = None
@@ -6726,6 +6582,7 @@ def lockdown_release(auto=False):
     audit_record("Security lock expired" + (" (Auto)" if auto else " (Manual)"))
     send_message((" <b>The lock ended automatically</b> - " if auto else " <b>I lifted the lock</b> - ")
                  + "The firewall is back to before the lock")
+    return True
 
 
 def ps_ok(ps, timeout=90):
@@ -6740,18 +6597,8 @@ def ps_ok(ps, timeout=90):
 
 # ----------------------------- Monitor account management events -----------------------------
 
-PS_ACCOUNT_EVENTS = (
-    "$st=(Get-Date).AddMinutes(-3); "
-    "$ids=4720,4722,4724,4725,4726,4732,4728; "
-    "Get-WinEvent -FilterHashtable @{LogName='Security';Id=$ids;StartTime=$st} "
-    "-ErrorAction SilentlyContinue | ForEach-Object { "
-    "try { $x=[xml]$_.ToXml(); $d=@{}; "
-    "$x.Event.EventData.Data | ForEach-Object { $d[$_.Name]=$_.'#text' }; "
-    "$m = if ($d['MemberName']) { $d['MemberName'].Split('\\')[-1] } else { $d['TargetUserName'] }; "
-    "$t = if ($d['MemberName']) { $d['TargetUserName'] } else { '-' }; "
-    "Write-Output ($_.Id.ToString()+'|'+$m+'|'+$t+'|'+$d['SubjectUserName']+'|' "
-    "+$_.TimeCreated.ToString('MM-dd HH:mm')) } catch {} }"
-)
+PS_ACCOUNT_EVENTS = account_query()
+
 
 ACCT_EVENT_INFO = {
     "4720": ("", "A new account has been created", "Account created"),
@@ -6781,26 +6628,27 @@ def _check_account_events_impl():
         r = subprocess.run(["powershell", "-NoProfile", "-Command",
                             PS_ACCOUNT_EVENTS],
                            capture_output=True, timeout=90, creationflags=NO_WINDOW)
+        if r.returncode != 0:
+            raise RuntimeError("Security account query failed; baseline preserved")
     except Exception as e:
         print(f"[acct-events] error: {e}")
         return
     rows = []
     for ln in _decode_out(r.stdout).splitlines():
         parts = ln.strip().split("|")
-        if len(parts) != 5:
+        if len(parts) != 7:
             continue
         rows.append(parts)
     if not _acct_baseline:
         _acct_baseline = True
-        _seen_acct = {f"{a}|{b}|{c}|{d}|{e}": True
-                      for a, b, c, d, e in rows}
+        _seen_acct = {"|".join(row): True for row in rows}
         return
     new = []
-    for eid, member, group, subj, ts in rows:
-        key = f"{eid}|{member}|{group}|{subj}|{ts}"
+    for eid, member, group, subj, ts, record, sid in rows:
+        key = "|".join((eid, member, group, subj, ts, record, sid))
         if key not in _seen_acct:
             _seen_acct[key] = True
-            new.append((eid, member, group, subj, ts))
+            new.append((eid, member, group, subj, ts, record, sid))
     if len(_seen_acct) > 2000:
         _seen_acct = dict(list(_seen_acct.items())[-1000:])
     if not new:
@@ -6810,19 +6658,19 @@ def _check_account_events_impl():
     sensitive = [n for n in new
                  if n[0] == "4720"
                  or (n[0] in ("4728", "4732")
-                     and "admin" in (n[2] or "").lower())]
+                     and (n[6] == "S-1-5-32-544" or "admin" in (n[2] or "").lower()))]
     prefix = " <b>Change to device accounts!</b>" if sensitive \
         else " <b>Activity on accounts</b>"
     lines = [rtl(prefix)]
-    for eid, member, group, subj, ts in new:
+    for eid, member, group, subj, ts, record, sid in new:
         icon, ar, en = ACCT_EVENT_INFO.get(eid, ("•", "Account event", "Account event"))
         detail = f"{member}" + (f" → {group}" if group != "-" else "")
         lines.append(rtl(f"{icon} {ar} / {en}\n"
-                         f"    <b>{esc(detail)}</b> — By {esc(subj)} — {ts}"))
+                         f"    <b>{esc(detail)}</b> — By {esc(subj)} — {esc(ts)} UTC — record {esc(record)}"))
     if sensitive:
         lines.append(rtl("[WARN] If you weren’t the one who did it — Review the list of buttons or think of PANIC"))
     audit_record("Accounts events: "
-                 + "; ".join(f"#{e}:{m}" for e, m, _g, _s, _t in new[:5]))
+                 + "; ".join(f"#{e}:{m}" for e, m, _g, _s, _t, _r, _sid in new[:5]))
     if sensitive:
         send_buttons("\n".join(lines),
                      [[("List users", "run:/listusers"),
@@ -6980,39 +6828,37 @@ def _scan_broad_rules(port, trusted):
     Editing is done later rule by rule in order to keep a record rollback Before moving on to the next.
     """
     ps = (
-        "$port='" + str(port) + "'; "
+        "$ErrorActionPreference='Stop'; $port='" + str(port) + "'; "
         "$mine=@('" + RDP_ALLOW_RULE + "','" + RDP_ALLOW_TCP_RULE +
         "','" + RDP_ALLOW_UDP_RULE + "','" + RDP_STAGE_TCP_RULE +
         "','" + RDP_STAGE_UDP_RULE + "'); "
         "$trust=@(" + ",".join(f"'{i}'" for i in trusted) + "); "
         "$out=@(); $warn=@(); "
         "Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow "
-        "-ErrorAction SilentlyContinue | "
+        "-ErrorAction Stop | "
         "Where-Object { $mine -notcontains $_.DisplayName } | ForEach-Object { "
-        "$pf = $_ | Get-NetFirewallPortFilter -ErrorAction SilentlyContinue; "
+        "$pf = $_ | Get-NetFirewallPortFilter -ErrorAction Stop; "
         "if ($pf) { $hit = $false; $protOk = $false; "
         "if (-not $pf.Protocol -or $pf.Protocol -eq 'Any') { $protOk = $true } "
-        "elseif ($pf.Protocol -eq 'TCP') { $protOk = $true } "
-        "elseif ($pf.Protocol -eq 'UDP' -and (@($pf.LocalPort) -contains $port)) { $protOk = $true }; "
+        "elseif (@('TCP','UDP','6','17') -contains [string]$pf.Protocol) { $protOk = $true }; "
         "if ($protOk) { "
         "if (@($pf.LocalPort) -contains $port) { $hit = $true } "
-        "elseif (@($pf.LocalPort) -contains 'Any' -and (-not $pf.Protocol "
-        "-or $pf.Protocol -eq 'Any' -or $pf.Protocol -eq 'TCP')) { $hit = $true } "
+        "elseif (@($pf.LocalPort) -contains 'Any') { $hit = $true } "
         "else { foreach ($lp in @($pf.LocalPort)) { "
         "if ($lp -match '^(\\d+)-(\\d+)$') { "
         "if ($port -ge [int]$Matches[1] -and $port -le [int]$Matches[2]) "
         "{ $hit = $true } } } } }; "
         "if ($hit) { "
         "$scoped = $false; $rdpScoped = $false; "
-        "$apf = $_ | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue; "
+        "$apf = $_ | Get-NetFirewallApplicationFilter -ErrorAction Stop; "
         "if ($apf -and $apf.Program -and $apf.Program -ne 'Any') { "
         "$scoped = $true; if ($apf.Program -match '(?i)(\\\\svchost\\.exe$|^System$)') "
         "{ $rdpScoped = $true } }; "
-        "$svf = $_ | Get-NetFirewallServiceFilter -ErrorAction SilentlyContinue; "
+        "$svf = $_ | Get-NetFirewallServiceFilter -ErrorAction Stop; "
         "if ($svf -and $svf.Service -and $svf.Service -ne 'Any') { "
         "$scoped = $true; if ($svf.Service -eq 'TermService') { $rdpScoped = $true } }; "
         "if ($scoped -and -not $rdpScoped) { $warn += $_.DisplayName } else { "
-        "$af = $_ | Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue; "
+        "$af = $_ | Get-NetFirewallAddressFilter -ErrorAction Stop; "
         "$broad = $false; "
         "if (-not $af) { $broad = $true } else { "
         "foreach ($ra in @($af.RemoteAddress)) { "
@@ -7137,9 +6983,19 @@ def apply_rdp_allow(ips):
     """Application transactional To limit RDP With TCP AndUDP And he scored rollback Permanent."""
     global _allow_fail_info
     _allow_fail_info = ""
+    if any(canonical_ip(ip) is None for ip in ips):
+        _allow_fail_info = "invalid allow-list address; firewall unchanged"
+        return False
+    ips = list(dict.fromkeys(canonical_ip(ip) for ip in ips))
     port = int(config.get("rdp_port", 3389))
     if not ips:
         _delete_allow_rules(port)
+        counts = [_firewall_rule_count(name) for name in
+                  (RDP_ALLOW_RULE, RDP_ALLOW_TCP_RULE, RDP_ALLOW_UDP_RULE,
+                   RDP_STAGE_TCP_RULE, RDP_STAGE_UDP_RULE, RDP_BLOCK_RULE)]
+        if any(count != 0 for count in counts):
+            _allow_fail_info = "allow-list rule removal could not be verified"
+            return False
         ok, _ = _create_general_rdp_rule(port)
         all_ok = ok
         remaining = []
@@ -8198,34 +8054,15 @@ SCHED_RULE = "RDPMonitor Schedule"
 
 
 def block_subnet(ip):
-    """Network blocked /24 Complete - Against corrupted proxies within the same domain
-    - He comes back (succeeded?, status) Like block_ip"""
-    if not _valid_ip(ip) or "." not in ip:
+    ip = canonical_ip(ip)
+    if not ip or ":" in ip:
         return False, "requires IPv4"
-    net = ".".join(ip.split(".")[:3]) + ".0/24"
-    with _blocked_file_guard():
-        load_blocked()
-        if net in _blocked:
-            return True, "exists"
-        ok, err = _netsh(["advfirewall", "firewall", "add", "rule",
-                          f"name=RDPMonitor Block {net}", "dir=in",
-                          "action=block", f"remoteip={net}"])
-        if ok:
-            _blocked[net] = time.time()
-            save_blocked()
-            return True, "added"
-    print(f"[block-subnet] netsh error ({net}): {err}")
-    return False, (err or "Failed netsh Without a message")
+    return _add_block_target(canonical_target(ip + "/24"))
 
 
 def _panic_rule_exists():
-    """Return True only when the panic block rule actually exists."""
-    r = subprocess.run(
-        ["powershell", "-NoProfile", "-Command",
-         f"(Get-NetFirewallRule -DisplayName '{PANIC_RULE}' "
-         "-ErrorAction SilentlyContinue).Count"],
-        capture_output=True, timeout=60, creationflags=NO_WINDOW)
-    return _decode_out(r.stdout).strip() not in ("", "0")
+    count = _firewall_rule_count(PANIC_RULE)
+    return count is not None and count > 0
 
 
 def panic_on():
@@ -8243,13 +8080,7 @@ def panic_on():
                f"-Protocol TCP -LocalPort {port} -Action Block -ErrorAction Stop",
                timeout=60)
     if not ok:
-        # Second check: Does the rule really exist? (You may encounter a format error in the output)
-        r = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"(Get-NetFirewallRule -DisplayName '{PANIC_RULE}' "
-             "-ErrorAction SilentlyContinue).Count"],
-            capture_output=True, timeout=60, creationflags=NO_WINDOW)
-        ok = _decode_out(r.stdout).strip() not in ("", "0")
+        ok = _panic_rule_exists()
     if not ok:
         # The status is recorded and success is announced only if the rule actually exists
         audit_record("Failed to activate panic mode - The closing rule has not been established")
@@ -8273,12 +8104,7 @@ def panic_off():
         return
     _netsh(["advfirewall", "firewall", "delete", "rule", f"name={PANIC_RULE}"])
     # Verify that the rule has actually been deleted — He was announcing "The panic is over" It remains busy
-    r = subprocess.run(
-        ["powershell", "-NoProfile", "-Command",
-         f"(Get-NetFirewallRule -DisplayName '{PANIC_RULE}' "
-         "-ErrorAction SilentlyContinue).Count"],
-        capture_output=True, timeout=60, creationflags=NO_WINDOW)
-    if _decode_out(r.stdout).strip() not in ("", "0"):
+    if _firewall_rule_count(PANIC_RULE) != 0:
         send_message(rtl("[X] The lockdown rule has not been removed — Panic mode "
                          "<b>It’s still activated</b>! Repeat /panic off Or see permissions"))
         return
@@ -8545,19 +8371,7 @@ def ps_detail(name):
     return "\n".join(lines)
 
 
-PS_LOGIN_LOG = (
-    "$st=(Get-Date).AddDays(-3); "
-    "Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624;StartTime=$st} "
-    "-MaxEvents 500 -ErrorAction SilentlyContinue | ForEach-Object { "
-    "try { $x=[xml]$_.ToXml(); $d=@{}; "
-    "$x.Event.EventData.Data | ForEach-Object { $d[$_.Name]=$_.'#text' }; "
-    "$ip=$d['IpAddress']; "
-    "if ($d['LogonType'] -eq '10' -and $ip -and $ip -ne '-' -and $ip -ne '::1' "
-    "-and $ip -ne '127.0.0.1') "
-    "{ Write-Output ($_.TimeCreated.ToString('MM-dd HH:mm')+'|'"
-    "+$d['TargetUserName']+'|'+$ip) } "
-    "} catch {} }"
-)
+PS_LOGIN_LOG = success_query(3, report=True)
 
 
 def _logins_job(n):
@@ -8565,6 +8379,8 @@ def _logins_job(n):
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command", PS_LOGIN_LOG],
                            capture_output=True, timeout=120, creationflags=NO_WINDOW)
+        if r.returncode != 0:
+            raise RuntimeError("Security event query failed; login history is unavailable")
         rows = [ln.strip() for ln in _decode_out(r.stdout).splitlines()
                 if "|" in ln][:n]
     except Exception as e:
@@ -8575,7 +8391,7 @@ def _logins_job(n):
         return
     send_message(rtl(f"<b>Latest successful logins</b> ({len(rows)})") + "\n<pre>"
                  + esc("\n".join(rows)) + "</pre>"
-                 + rtl("Ranking: time | User | IP"))
+                 + rtl("Columns: UTC event time | Account | Source IP | Event record ID"))
 
 
 PS_STARTUP = (
@@ -8778,14 +8594,10 @@ def config_backup_job():
 # ----------------------------- Monitoring -----------------------------
 
 def usage_level(cpu, ram):
-    m = max(cpu, ram)
-    if m >= config["critical_threshold"]:
-        return "critical"
-    if m >= config["danger_threshold"]:
-        return "danger"
-    if cpu >= config["cpu_alert_threshold"] or ram >= config["ram_alert_threshold"]:
-        return "warning"
-    return "ok"
+    return resource_usage_level(cpu, ram, config)
+
+
+_resource_alert_policy = ResourceAlertPolicy()
 
 
 LEVEL_INFO = {
@@ -8828,7 +8640,7 @@ def alerts_muted():
         return False
 
 
-def send_usage_alert(cpu, ram_pct, used_gb, total_gb, level):
+def send_usage_alert(cpu, ram_pct, used_gb, total_gb, level, spike=None):
     if alerts_muted():
         return
     _icon, title = LEVEL_INFO[level]
@@ -8837,6 +8649,8 @@ def send_usage_alert(cpu, ram_pct, used_gb, total_gb, level):
             f"limits  warn {config['cpu_alert_threshold']}  "
             f"danger {config['danger_threshold']}  "
             f"critical {config['critical_threshold']}")
+    if spike:
+        body += f"\nSudden spike: CPU {spike['cpu_delta']:+.0f}, RAM {spike['ram_delta']:+.0f} percentage points"
     send_message(f"<b>{title}</b>\n<pre>{esc(body)}</pre>")
 
 
@@ -8877,26 +8691,37 @@ def check_watched_processes():
 
 
 def check_sessions():
-    """Entry statement/Users log out of the device"""
+    """Report verified session changes; observation time is not a Windows logon time."""
     global _known_sessions
+    if not _check_start("sessions"):
+        return
     try:
-        users = {s["user"] for s in get_rdp_sessions() if s.get("user")}
+        sessions = get_rdp_sessions(strict=True)
+        current = {(str(item.get("user", "")), str(item.get("id", "")), str(item.get("session", ""))):
+                   str(item.get("state", "unknown")) for item in sessions if item.get("user")}
         if _known_sessions is None:
-            _known_sessions = users  # First reading = Reference point without alerts
+            _known_sessions = current
             return
-        new = users - _known_sessions
-        gone = _known_sessions - users
-        if new and not alerts_muted():
-            send_buttons(rtl("<b>New user logged in:</b> ")
-                         + esc(", ".join(new)),
-                         [[("Recent logins", "run:/logins"),
-                           ("Screenshot", "run:/screenshot")]])
-        if gone and not alerts_muted():
-            send_message(rtl("<b>User logged out:</b> ")
-                         + esc(", ".join(gone)))
-        _known_sessions = users
-    except Exception as e:
-        print(f"[sessions-check] error: {e}")
+        previous = _known_sessions if isinstance(_known_sessions, dict) else {}
+        observed = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        lines = []
+        for key in current.keys() - previous.keys():
+            lines.append(f"Session appeared: {esc(key[0])} | session {esc(key[1] or key[2])} | {esc(current[key])}")
+        for key in previous.keys() - current.keys():
+            lines.append(f"Session disappeared: {esc(key[0])} | session {esc(key[1] or key[2])}")
+        for key in current.keys() & previous.keys():
+            if current[key] != previous[key]:
+                lines.append(f"Session state changed: {esc(key[0])} | session {esc(key[1] or key[2])} | "
+                             f"{esc(previous[key])} -> {esc(current[key])}")
+        if lines and not alerts_muted():
+            send_buttons("<b>RDP session changes</b>\nObserved at " + observed + "\n" + "\n".join(lines)
+                         + "\nUse login history for the Windows event time and source IP.",
+                         [[("Login event history", "cmd:/logins"), ("Current sessions", "cmd:/rdp")]])
+        _known_sessions = current
+    except Exception as exc:
+        print(f"[sessions] verified snapshot unavailable: {exc}")
+    finally:
+        _check_end("sessions")
 
 
 def speedtest_job(silent=False):
@@ -8915,7 +8740,7 @@ def speedtest_job(silent=False):
 
 def monitor_loop():
     """Main episode: Graduated alerts + Anomaly + Tablets + Programs + Sessions + Reports"""
-    global _was_over, _last_alert_time, _last_alert_level, _last_spike, _auto_streak, _last_auto_check
+    global _auto_streak, _last_auto_check
     global _last_auto_restart, _last_disk_check, _last_watch_check, _last_session_check
     global _last_history_append, _last_history_save, _last_speedtest, _last_daily, _last_weekly
     global _session_locked, _last_lock_time, _last_temp_check
@@ -8943,44 +8768,20 @@ def monitor_loop():
                 _last_history_save = now_ts
                 save_history()
 
-            # --- Sudden surge detection (Jump in a minute) ---
-            _short.append((now_ts, cpu, ram_pct))
-            # Compare against the oldest sample inside the last 60 seconds, not
-            # against _short[0] which can be ~2 minutes old once the deque fills.
-            old = next((s for s in _short if now_ts - s[0] <= 60), None)
-            if old is not None and now_ts - old[0] >= 45 \
-                    and now_ts - _last_spike >= config["spike_cooldown"]:
-                d_cpu = cpu - old[1]
-                d_ram = ram_pct - old[2]
-                if d_cpu >= config["spike_threshold"] or d_ram >= config["spike_threshold"]:
-                    _last_spike = now_ts
-                    if not alerts_muted():
-                        body = (f"CPU  {old[1]:.0f}% -> {cpu:.0f}%   (+{d_cpu:.0f})\n"
-                                f"RAM  {old[2]:.0f}% -> {ram_pct:.0f}%   (+{d_ram:.0f})")
-                        send_buttons("<b>SUDDEN SPIKE</b>\n<pre>" + esc(body) + "</pre>",
-                                     [[("Top processes", "run:/top")]])
-
-            # --- Tiered alerts + Back to normal ---
-            # Escalations fire immediately; a repeat of the same level is limited
-            # to at most once every 15 minutes to avoid noisy repeats.
-            level = usage_level(cpu, ram_pct)
-            if level != "ok":
-                escalated = (level != _last_alert_level)
-                due = (now_ts - _last_alert_time) >= max(config["alert_interval"], 900)
-                if escalated or due:
-                    _last_alert_time = now_ts
-                    _last_alert_level = level
-                    send_usage_alert(cpu, ram_pct, used_gb, total_gb, level)
-                _was_over = True
-            else:
-                if _was_over:
-                    _was_over = False
-                    _last_alert_time = 0
-                    _last_alert_level = "ok"
-                    if not alerts_muted():
-                        send_message("<b>Usage back to normal</b>\n<pre>"
-                                     + esc(f"CPU  {cpu:.1f}%\nRAM  {ram_pct:.1f}%")
-                                     + "</pre>")
+            # One decision for each system sample: combine threshold and spike context.
+            notice = _resource_alert_policy.observe(cpu, ram_pct, now_ts, config, muted=alerts_muted())
+            if notice:
+                if notice["kind"] == "threshold":
+                    send_usage_alert(cpu, ram_pct, used_gb, total_gb, notice["level"], notice["spike"])
+                elif notice["kind"] == "recovery":
+                    send_message("<b>Usage back to normal</b>\n<pre>"
+                                 + esc(f"CPU {cpu:.1f}%\nRAM {ram_pct:.1f}%") + "</pre>")
+                else:
+                    spike = notice["spike"]
+                    send_buttons("<b>SUDDEN SPIKE</b>\n<pre>" + esc(
+                        f"CPU {cpu:.1f}% ({spike['cpu_delta']:+.0f} points)\n"
+                        f"RAM {ram_pct:.1f}% ({spike['ram_delta']:+.0f} points)") + "</pre>",
+                        [[("Review top processes", "cmd:/top")]])
 
             # --- Automatic restart (Check every minute) ---
             if now_ts - _last_auto_check >= 60:
@@ -9641,135 +9442,9 @@ def apply_setting(key, val):
         return True, "Setting saved - " + details
     return True, "No change; the setting already has that value."
 
-HELP_TEXT = (
-    "<b>RDP MONITOR - COMMAND REFERENCE</b>\n"
-    "Tip: /menu gives the same commands as buttons. /docs &lt;command&gt; gives the full "
-    "document (exact backend commands, effect, troubleshooting).\n"
-    "\n"
-    "<b>MONITORING (read-only, safe to run anytime)</b>\n"
-    "/view - live snapshot: CPU %, RAM GB, network speed, disk, sessions, uptime\n"
-    "/top - top 10 processes by CPU and by RAM, with PIDs\n"
-    "/chart - graph image of CPU/RAM over the last 24h\n"
-    "/report - today's averages and peaks so far\n"
-    "/temp - CPU/GPU temperature (needs sensors on the machine)\n"
-    "/net - current DL/UL speed + totals since boot\n"
-    "/traffic - bandwidth accounting: today, billing cycle, quota bar, daily table\n"
-    "/speedtest - real internet speed test via Cloudflare\n"
-    "/rdp - active RDP sessions + remote IPs connected to the RDP port\n"
-    "/logins [n] - last successful RDP logins: time, user, source IP\n"
-    "/listusers - all local accounts, administrators marked\n"
-    "/bigfiles - 20 largest files on the system drive (disk-full detective)\n"
-    "/netstat - active connections + listening ports with owning process\n"
-    "/firewall - firewall profiles status + open inbound ports\n"
-    "/sysinfo - OS version, hardware, pagefile, pending reboot\n"
-    "/startup - autostart inventory: Run keys + non-Microsoft tasks\n"
-    "/updates - pending Windows updates + reboot pending flag\n"
-    "/ps <name> - details for processes matching a name\n"
-    "/when cpu 80 - timestamps when CPU exceeded 80% in the last 24h\n"
-    "/nettest <host> - connectivity and latency to a host\n"
-    "/diagnose - analyzes recent error logs and explains likely causes\n"
-    "/logstats - which components produce the most errors\n"
-    "/exportlogs - sends recent error logs as a zip file\n"
-    "/dumps - sends the latest BSOD crash dump file\n"
-    "\n"
-    "<b>PANEL, BACKUP AND CLOUD</b>\n"
-    "/panel - shows the WebConsole URL (the browser panel)\n"
-    "/paneltoken (/token) - reveals the panel login token\n"
-    "/panelstatus - checks whether the panel is reachable\n"
-    "/panelremote on|off|status - reachable from outside: HTTPS on 0.0.0.0 + firewall/IP allow-list\n"
-    "/backup - runs a backup now: archive, verify, cloud upload, and a download link\n"
-    "/backupprogress - live progress of a running backup (percent + phase)\n"
-    "/backupschedule - view/change the automatic schedule (daily HH:MM | interval HOURS | times HH:MM,HH:MM | on | off)\n"
-    "/cloud - choose cloud destinations from your rclone remotes (buttons) and test them\n"
-    "/rclone - set up cloud upload from chat: install, add/token remotes, test, set target\n"
-    "/backupstatus - worker state, last run, schedule, recent archives\n"
-    "/backuplist - local backup archives with size and time\n"
-    "/backsrc list|add <path>|remove <index|path>|browse [path]|drives - manage what gets backed up\n"
-    "/restorelist - archives available to restore\n"
-    "/restore <name> - restore one archive into an isolated folder and verify it\n"
-    "/drill - restore drill of the newest archive (proves it is restorable)\n"
-    "Backups run automatically (daily by default); each run is tagged manual or scheduled.\n"
-    "\n"
-    "<b>CONTROL (these change the machine)</b>\n"
-    "/screenshot - captures all screens and sends the image\n"
-    "/exec <cmd> - runs a real CMD command with admin rights. Most dangerous "
-    "command; disable when unused: /set exec off\n"
-    "/kill <name> - force-kills every matching process (unsaved work lost)\n"
-    "/run <app> - launches a program\n"
-    "/msg <text> - popup on the machine's screen\n"
-    "/download <path> - sends a file up to 45MB\n"
-    "/restart - reboot with a 30s cancel window\n"
-    "/shutdown confirm - full power off (30s cancel window)\n"
-    "/svc restart <name> - restarts a Windows service\n"
-    "/cancel_restart - cancels a pending restart/shutdown\n"
-    "/image start - full system image to a bootable VHDX (all volumes)\n"
-    "/image list - images on the machine | /image upload [n|path] - upload one\n"
-    "/update - self-update the tool from update_url\n"
-    "\n"
-    "<b>USERS</b>\n"
-    "/adduser <name> <pass> [admin] - creates account (password visible in chat)\n"
-    "/renameuser <old> <new> - renames an account\n"
-    "/disableuser <name> - blocks login without deleting\n"
-    "/enableuser <name> - re-enables\n"
-    "/deluser <name> - permanent delete (last-admin protected)\n"
-    "\n"
-    "<b>SECURITY</b>\n"
-    "/audit - command history + rejected access attempts\n"
-    "/blocklist - blocked IPs | /unblock <ip> - unblock\n"
-    "/block <ip> | /blocksubnet <ip> - block now (button confirm)\n"
-    "/allow list|add|del - extra authorized Telegram accounts\n"
-    "/whitelist - RDP allow list (manual + auto-learned IPs)\n"
-    "/lockdown on|now|release - whitelist-only RDP mode, new IPs blocked instantly\n"
-    "/panic on|off - closes the RDP port completely until you turn it off\n"
-    "/trap add <name> - honeypot username: first attempt = permanent block\n"
-    "/harden [fix] - audits NLA, lockout policy, admin rename\n"
-    "/setrdpport <port> - wizard to change the RDP port (connection drops)\n"
-    "/rdpallow apply - restrict RDP to the list permanently\n"
-    "\n"
-    "<b>MAINTENANCE</b>\n"
-    "/clean - frees TEMP + Recycle Bin, reports freed space\n"
-    "/mute 3h - silences non-critical alerts (security always arrives)\n"
-    "/selfheal is set via /set selfheal on - auto-clean at 95% disk\n"
-    "/botlog - the tool's own log\n"
-    "/test - verify the alert channel | /nettest <host> - connectivity test\n"
-    "/configbackup - your settings as a file (token hidden)\n"
-    "/set - full settings guide | /status - current values\n"
-    "\n"
-    "<b>DOCUMENTATION</b>\n"
-    "/docs - command index grouped by section\n"
-    "/docs <command> - full document: what it does, backend commands, effect, troubleshooting\n"
-)
-HELP_TEXT = re.sub(r"<(?!/?b>)([^<>]+)>",
-                   lambda match: "&lt;" + match.group(1) + "&gt;", HELP_TEXT)
+HELP_TEXT = help_text(COMMAND_INFO)
 
-BOT_MENU = [
-    {"command": "menu", "description": "List of interactive buttons"},
-    {"command": "view", "description": "Instant consumption report"},
-    {"command": "top", "description": "Highest consuming processes"},
-    {"command": "diagnose", "description": "Diagnose log errors"},
-    {"command": "logstats", "description": "More sources of errors"},
-    {"command": "rdp", "description": "Sessions RDP And IP Callers"},
-    {"command": "screenshot", "description": "Screenshot"},
-    {"command": "temp", "description": "Processor and card temperature"},
-    {"command": "net", "description": "Internet speed"},
-    {"command": "traffic", "description": "Account for transferred data"},
-    {"command": "clean", "description": "Cleaning TEMP And recycle bin"},
-    {"command": "mute", "description": "Temporarily mute alerts"},
-    {"command": "panel", "description": "WebConsole link and login token"},
-    {"command": "backup", "description": "Run a backup now"},
-    {"command": "backupstatus", "description": "Backup worker status"},
-    {"command": "backuplist", "description": "Local backup archives"},
-    {"command": "backsrc", "description": "List/add/remove backup sources"},
-    {"command": "backupschedule", "description": "View or change the backup schedule"},
-    {"command": "cloud", "description": "Choose cloud destinations and test them"},
-    {"command": "rclone", "description": "Set up cloud upload (install, remotes, target)"},
-    {"command": "backupprogress", "description": "Live backup progress"},
-    {"command": "restorelist", "description": "List archives for restore"},
-    {"command": "restore", "description": "Restore an archive to an isolated folder"},
-    {"command": "drill", "description": "Run a restore drill"},
-    {"command": "docs", "description": "Command documentation and troubleshooting"},
-    {"command": "help", "description": "All commands"},
-]
+BOT_MENU = telegram_menu(COMMAND_INFO)
 
 
 @serialized_user_command
@@ -10859,12 +10534,8 @@ def handle_command(text):
                 send_message("[X] A security lockdown is active - RDP is intentionally restricted. "
                              "Release it first with /lockdown release, then clear the allow-list.")
             elif len(args) >= 2 and args[1].lower() == "confirm":
-                apply_rdp_allow([])
-                config["rdp_allow_active"] = False
-                config["rdp_allowed_ips"] = []
-                save_config()
-                audit_record("Cancel restriction RDP")
-                send_message("[OK] The restriction was cancelled - RDP Available for any IP Again")
+                ok, message = api_rdp_allow_clear()
+                send_message(("[OK] " if ok else "[X] ") + esc(message))
             else:
                 msg = (rtl("[WARN] <b>Unblocking opens RDP For any IP In the world!</b>") + "\n"
                        + rtl("Limitation protection is removed from the firewall immediately.") + "\n"
@@ -11421,7 +11092,7 @@ def record_usage(uid, action, status, request_id, duration_ms=None):
 
 
 def _queued_action(fn, args):
-    if fn is handle_command and args:
+    if fn in (handle_command, handle_run_callback) and args:
         command = (str(args[0]).strip().split() or ["unknown"])[0].lower().split("@")[0]
         return command if command in COMMAND_INFO else "unknown"
     if fn is handle_incoming_file:
@@ -11500,9 +11171,9 @@ def telegram_loop():
                     d = cb.get("data", "")
                     audit_record(f"{uid}: [button] {_scrub_secrets(d)[:60]}")
                     if d.startswith("run:"):
-                        queued = _enqueue_command(handle_command, (d[4:],), uid)
+                        queued = _enqueue_command(handle_run_callback, (d[4:],), uid)
                         tg_api("answerCallbackQuery", callback_query_id=cbid,
-                               text="Queued for execution" if queued else "Server busy - try again shortly")
+                               text="Queued for review" if queued else "Server busy - try again shortly")
                     elif d.startswith("cf:"):
                         queued = _enqueue_command(handle_pending, (d[3:],), uid)
                         tg_api("answerCallbackQuery", callback_query_id=cbid,

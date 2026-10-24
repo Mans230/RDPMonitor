@@ -167,13 +167,16 @@ tbody tr:hover{background:var(--color-surface-hover)}
 button.btn{background:var(--color-surface-raised);color:var(--tx);border:1px solid var(--bd);border-radius:var(--r-sm);
   min-height:38px;padding:8px 14px;cursor:pointer;font-size:var(--text-sm);font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
   transition:background var(--motion-micro) var(--ease),border-color var(--motion-micro) var(--ease),color var(--motion-micro) var(--ease),transform var(--motion-micro) var(--ease)}
-button.btn:hover{border-color:var(--bd2);background:var(--g-700)}
-button.btn:active{transform:scale(.98)}
+button.btn:hover:not(:disabled){border-color:var(--bd2);background:var(--g-700)}
+button.btn:active:not(:disabled){transform:translateY(1px);border-color:var(--acc)}
+button.btn:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
 button.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
 button.btn.danger{color:var(--bad);border-color:rgba(236,122,111,.32);background:transparent}
-button.btn.danger:hover{border-color:var(--bad);background:rgba(236,122,111,.1)}
+button.btn.danger:hover:not(:disabled){border-color:var(--bad);background:rgba(236,122,111,.1)}
 button.btn.primary{background:var(--color-primary-bg);color:var(--color-primary-fg);border-color:transparent;font-weight:600}
-button.btn.primary:hover{background:#fff}
+button.btn.primary:hover:not(:disabled){background:#fff}
+button.btn[aria-busy="true"]{opacity:1;border-color:var(--acc);cursor:wait}
+@media(max-width:620px){button.btn,.cmd-list button.btn{min-height:44px}}
 input,select,textarea{background:var(--color-surface-sunken);border:1px solid var(--bd);color:var(--tx);border-radius:var(--r-sm);
   padding:8px 12px;font-size:var(--text-sm);font-family:var(--mono);
   transition:border-color var(--motion-micro) var(--ease),box-shadow var(--motion-micro) var(--ease)}
@@ -1028,9 +1031,7 @@ function userAdd(){
 }
 async function confirmedUserAct(args){
   const payload={op:args.op,name:args.name,value:args.value||""};
-  const prepared=await act({action:"prepare",target:"user",...payload},true);
-  if(!prepared||!prepared.nonce)return prepared||{ok:false};
-  return act({action:"user",...payload,nonce:prepared.nonce});
+  return act({action:"user",...payload});
 }
 async function loadDiag(op,arg){
   const box=$("diagOut");
@@ -1166,11 +1167,36 @@ function requiresActionConfirmation(body){
   if(["automation","trap"].includes(body.action)&&(body.op||"list")==="list")return false;
   return true;
 }
-async function act(body,silent){
+const pendingActions=new Map();
+let actionControl=null;
+if(typeof document!=="undefined")document.addEventListener("click",event=>{
+  const control=event.target.closest?.("button.btn");
+  actionControl=control||null;
+  queueMicrotask(()=>{if(actionControl===control)actionControl=null});
+},true);
+function act(body,silent){
+  const {nonce,...identity}=body;
+  const key=JSON.stringify(identity);
+  if(pendingActions.has(key))return pendingActions.get(key);
+  const control=actionControl;
+  actionControl=null;
+  const original=control?{html:control.innerHTML,disabled:control.disabled,busy:control.getAttribute("aria-busy")}:null;
+  if(control){control.disabled=true;control.setAttribute("aria-busy","true");control.textContent="Working…"}
+  const request=performAction(body,silent).finally(()=>{
+    pendingActions.delete(key);
+    if(control){
+      control.innerHTML=original.html;control.disabled=original.disabled;
+      if(original.busy===null)control.removeAttribute("aria-busy");else control.setAttribute("aria-busy",original.busy);
+    }
+  });
+  pendingActions.set(key,request);
+  return request;
+}
+async function performAction(body,silent){
   try{
     if(requiresActionConfirmation(body)&&!body.nonce){
       const {action,...args}=body;
-      const prepared=await act({...args,action:"prepare",target:action},true);
+      const prepared=await performAction({...args,action:"prepare",target:action},true);
       if(!prepared||!prepared.nonce)return prepared||{ok:false};
       body={...body,nonce:prepared.nonce};
     }
@@ -1200,7 +1226,7 @@ function unblockIp(ip){if(confirm("Unblock "+ip+"?"))act({action:"unblock_ip",ip
 function unblockIpEnc(ip){unblockIp(decodeURIComponent(ip))}
 async function confirmAct(kind){
   if(!confirm("Are you sure you want to "+(kind=="reboot"?"restart":"shut down")+" the server in five seconds?"))return;
-  const p=await act({action:"prepare",target:kind},true);if(p&&p.nonce)await act({action:kind,nonce:p.nonce});
+  await act({action:kind});
 }
 function doRun(){const c=$("cmdInput").value.trim();if(!c)return;
   $("cmdOut").textContent="Running…";

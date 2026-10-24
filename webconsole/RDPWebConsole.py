@@ -314,40 +314,10 @@ def valid_ip(value):
         return None
 
 def block_ip(ip):
-    ip = valid_ip(ip)
-    if not ip:
-        return False, "invalid IP address"
-    rc, out = run_cmd(["netsh", "advfirewall", "firewall", "add", "rule",
-                       "name=RDPMonitor Block %s" % ip, "dir=in", "action=block", "remoteip=%s" % ip])
-    if rc == 0:
-        try:
-            with blocked_file_guard():
-                b = rdpm_blocked(); b[ip] = time.time()
-                atomic_write(os.path.join(RDPDIR, "blocked.json"), b)
-        except Exception as e:
-            run_cmd(["netsh", "advfirewall", "firewall", "delete", "rule",
-                     "name=RDPMonitor Block %s" % ip])
-            audit("block_ip_rollback", "%s %r" % (ip, e))
-            return False, "tracking update failed; firewall rule rolled back"
-    audit("block_ip", ip)
-    return rc == 0, out[:200]
+    return panel_request("block_ip", {"ip": str(ip)}, timeout=90)
 
 def unblock_ip(ip):
-    ip = valid_ip(ip)
-    if not ip:
-        return False, "invalid IP address"
-    rc, out = run_cmd(["netsh", "advfirewall", "firewall", "delete", "rule",
-                       "name=RDPMonitor Block %s" % ip])
-    qrc, count = run_cmd(["powershell", "-NoProfile", "-Command",
-                          "(Get-NetFirewallRule -DisplayName 'RDPMonitor Block %s' "
-                          "-ErrorAction SilentlyContinue).Count" % ip])
-    gone = qrc == 0 and count.strip() in ("", "0")
-    if gone:
-        with blocked_file_guard():
-            b = rdpm_blocked(); b.pop(ip, None)
-            atomic_write(os.path.join(RDPDIR, "blocked.json"), b)
-    audit("unblock_ip", ip)
-    return gone, out[:200] if gone else "firewall rule still exists"
+    return panel_request("unblock_ip", {"ip": str(ip)}, timeout=90)
 
 def rdp_sessions():
     rc, out = run_cmd(["qwinsta"]) if IS_WIN else (1, "")
