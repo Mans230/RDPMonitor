@@ -1,5 +1,14 @@
 # Security
 
+See [security changes](docs/SECURITY-CHANGES.md) for confirmations, account safety,
+resource bounds and remaining limits, and [usage/operator docs](docs/USAGE-AUDIT.md)
+for personal credentials and attribution.
+
+Backup secrets use **machine-scoped DPAPI** for the SYSTEM worker, unlike the
+user-scoped monitor/owner token storage. File ACLs are their primary local access
+boundary. Personal operator tokens are stored as hashes of random credentials in
+the protected panel state, not plaintext.
+
 ## Secrets are never committed
 
 This project keeps all secrets and runtime state out of source control (see `.gitignore`):
