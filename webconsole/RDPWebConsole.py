@@ -12,19 +12,23 @@ Remove:        python RDPWebConsole.py uninstall
 Commands: install | install-remote | uninstall | url | token | rotate-token | (default: run server)
 Env: RDPWC_PORT (8399), RDPWC_BIND, RDPWC_TOKEN, RDPWC_RDPDIR (C:\\RDPMonitor)
 """
-import os, sys, json, time, socket, threading, subprocess
+import os, sys, json, time, socket, threading, subprocess, re
 import collections, webbrowser, tempfile, base64, secrets, ssl, hmac, ipaddress, shlex, ctypes, hashlib, contextlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from http.cookies import SimpleCookie
+from action_policy import CONFIRMED_ACTIONS, audit_action, confirmation_arguments, requires_confirmation
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(BASE_DIR))
+from audit_store import append_event, read_events, summarize
 # Default to the suite root (parent of this webconsole folder) instead of a
 # hard-coded C:\RDPMonitor, so the panel follows wherever the suite is installed.
 RDPDIR = os.environ.get("RDPWC_RDPDIR") or os.path.dirname(BASE_DIR)
 STATE_FILE = os.path.join(BASE_DIR, "webconsole_state.json")
 HIST_FILE = os.path.join(BASE_DIR, "webconsole_history.json")
 AUDIT_FILE = os.path.join(BASE_DIR, "webconsole_audit.jsonl")
+USAGE_FILE = os.path.join(BASE_DIR, "usage_audit.jsonl")
 PID_FILE = os.path.join(BASE_DIR, "webconsole.pid")
 HTML_PATH = os.path.join(BASE_DIR, "webconsole_ui.html")
 SHOT_DIR = os.path.join(BASE_DIR, "screenshots")
@@ -573,7 +577,7 @@ def act_clean_temp():
 
 def act_msg(text):
     if IS_WIN: run_cmd(["msg", "*", text])
-    audit("msg", text[:80]); return True
+    audit("msg", "characters=%d" % len(text)); return True
 
 def act_logoff(sid):
     sid = str(sid).strip()
@@ -612,7 +616,7 @@ def act_list_services():
 
 def act_run_command(cmd, timeout=30):
     if not EXEC_ENABLED:
-        audit("run_command BLOCKED", cmd[:100]); return False, "exec disabled in webconsole_state.json"
+        audit("run_command BLOCKED", "sha256=" + hashlib.sha256(cmd.encode()).hexdigest()[:16]); return False, "exec disabled in webconsole_state.json"
     audit("run_command", "sha256=" + hashlib.sha256(cmd.encode()).hexdigest()[:16])
     try:
         timeout = max(1, min(60, int(timeout)))
@@ -1335,7 +1339,51 @@ def login_clear_failures(addr):
         _login_attempts.pop(addr, None)
 
 
-def create_session(addr):
+def user_action_arguments(body):
+    """Canonical arguments used for both confirmation and eventual dispatch."""
+    op = str(body.get("op", ""))
+    if op not in ("add", "enable", "disable", "delete", "password", "rename"):
+        raise ValueError("invalid user operation")
+    name = str(body.get("name", ""))
+    value = str(body.get("value", ""))
+    if not name or len(name) > 40 or len(value) > 64:
+        raise ValueError("invalid user arguments")
+    return {"op": op, "name": name, "value": value}
+
+
+def user_confirmation_digest(args):
+    """Bind a nonce to exact arguments without retaining plaintext passwords."""
+    data = json.dumps(args, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hmac.new(current_token().encode("utf-8"), data, hashlib.sha256).hexdigest()
+
+
+def action_confirmation_digest(action, body):
+    args = user_action_arguments(body) if action == "user" else confirmation_arguments(body)
+    return user_confirmation_digest({"action": action, "arguments": args})
+
+
+def operator_records():
+    state = STATE if _NO_INIT else load_json(STATE_FILE, {})
+    records = (state or {}).get("operators", {})
+    if not isinstance(records, dict):
+        return {}
+    return {name: record for name, record in list(records.items())[:64]
+            if isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", name)
+            and isinstance(record, dict)
+            and re.fullmatch(r"[0-9a-f]{64}", str(record.get("token_sha256", "")))}
+
+
+def authenticate_login(token):
+    if hmac.compare_digest(str(token).encode("utf-8"), current_token().encode("utf-8")):
+        return "owner", ""
+    fingerprint = hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+    for name, record in operator_records().items():
+        if isinstance(record, dict) and hmac.compare_digest(str(record.get("token_sha256", "")), fingerprint):
+            return "operator:" + str(name), fingerprint
+    return None, ""
+
+
+def create_session(addr, actor="owner", credential_hash=""):
     sid, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
     with _session_lock:
         now = time.time()
@@ -1346,7 +1394,8 @@ def create_session(addr):
             del _sessions[oldest]
         _sessions[sid] = {"csrf": csrf, "created": now,
                           "expires": now + SESSION_TTL,
-                          "addr": addr, "confirm": {}}
+                          "addr": addr, "confirm": {}, "actor": actor,
+                          "credential_hash": credential_hash}
     return sid, csrf
 
 
@@ -1428,6 +1477,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
     def _json(self, code, obj):
+        self._finish_usage(code, obj)
         body = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1436,6 +1486,21 @@ class Handler(BaseHTTPRequestHandler):
         self._security_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def _finish_usage(self, code, obj):
+        context = getattr(self, "_usage_context", None)
+        if context is None:
+            return
+        self._usage_context = None
+        status = "ok" if code < 400 and obj.get("ok") is not False and not obj.get("error") else (
+            "failed" if code >= 500 or obj.get("ok") is False else "denied")
+        try:
+            append_event(USAGE_FILE, source="webconsole", actor=context["actor"],
+                         action=context["action"], status=status, session=context.get("session", ""),
+                         request_id=context["request_id"],
+                         duration_ms=(time.monotonic() - context["started"]) * 1000)
+        except Exception as exc:
+            print(f"[audit] Usage recording failed: {type(exc).__name__}", file=sys.stderr)
 
     def _security_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -1488,6 +1553,13 @@ class Handler(BaseHTTPRequestHandler):
                     or sess["addr"] != self.client_address[0]:
                 _sessions.pop(sid, None)
                 return None, None
+            actor = sess.get("actor", "owner")
+            if actor.startswith("operator:"):
+                record = operator_records().get(actor.split(":", 1)[1], {})
+                expected = record.get("token_sha256", "") if isinstance(record, dict) else ""
+                if not expected or not hmac.compare_digest(str(expected), sess.get("credential_hash", "")):
+                    _sessions.pop(sid, None)
+                    return None, None
             sess["expires"] = time.time() + SESSION_TTL
             return sid, sess
 
@@ -1516,6 +1588,7 @@ class Handler(BaseHTTPRequestHandler):
         return body
 
     def do_GET(self):
+        self._usage_context = None
         u = urlparse(self.path)
         if not self._host_ok(): return self._json(421, {"error": "invalid Host header"})
         if not client_allowed(self.client_address[0]):
@@ -1618,6 +1691,8 @@ class Handler(BaseHTTPRequestHandler):
                     items = [json.loads(x) for x in lines if x.strip()]
                 return self._json(200, {"items": items})
             except FileNotFoundError: return self._json(200, {"items": []})
+        if u.path == "/api/usage":
+            return self._json(200, summarize(read_events(USAGE_FILE)))
         if u.path == "/api/file":
             if not DOWNLOADS_ENABLED:
                 return self._json(403, {"error": "file downloads are disabled"})
@@ -1657,6 +1732,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
+        self._usage_context = {"action": "login" if u.path == "/api/login" else "request",
+                               "actor": "unauthenticated", "request_id": secrets.token_hex(16),
+                               "started": time.monotonic()}
         if not self._host_ok(): return self._json(421, {"error": "invalid Host header"})
         if not client_allowed(self.client_address[0]):
             return self._json(403, {"error": "client IP not allowed"})
@@ -1670,13 +1748,16 @@ class Handler(BaseHTTPRequestHandler):
             addr = self.client_address[0]
             if login_rate_limited(addr):
                 return self._json(429, {"error": "too many login attempts"})
-            if not hmac.compare_digest(str(body.get("token", "")).encode("utf-8"),
-                                       current_token().encode("utf-8")):
+            actor, credential_hash = authenticate_login(body.get("token", ""))
+            if actor is None:
                 login_record_failure(addr)
                 time.sleep(0.25)
                 return self._json(401, {"error": "invalid token"})
             login_clear_failures(addr)
-            sid, csrf = create_session(addr)
+            sid, csrf = create_session(addr, actor, credential_hash)
+            self._usage_context["actor"] = actor
+            self._usage_context["session"] = hashlib.sha256(sid.encode()).hexdigest()[:16]
+            self._finish_usage(200, {"ok": True})
             self.send_response(200)
             payload = json.dumps({"ok": True, "csrf": csrf}).encode()
             self.send_header("Content-Type", "application/json")
@@ -1688,6 +1769,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         sid, sess = self._session()
         if not sess: return self._json(401, {"error": "authentication required"})
+        self._usage_context["actor"] = sess.get("actor", "owner")
+        self._usage_context["session"] = hashlib.sha256(sid.encode()).hexdigest()[:16]
         if not hmac.compare_digest(self.headers.get("X-CSRF-Token", "").encode("utf-8"),
                                    sess["csrf"].encode("utf-8")):
             return self._json(403, {"error": "CSRF check failed"})
@@ -1695,19 +1778,39 @@ class Handler(BaseHTTPRequestHandler):
             with _session_lock: _sessions.pop(sid, None)
             return self._json(200, {"ok": True})
         if u.path != "/api/action": return self._json(404, {"error": "not found"})
-        act = body.get("action", "")
+        act = str(body.get("action", ""))
+        self._usage_context["action"] = audit_action(act, body)
         try:
             if act == "prepare":
                 target = str(body.get("target", ""))
-                if target not in ("reboot", "shutdown"):
+                if target not in CONFIRMED_ACTIONS:
                     return self._json(400, {"error": "invalid confirmation target"})
+                try:
+                    digest = action_confirmation_digest(target, body)
+                except ValueError as exc:
+                    return self._json(400, {"error": str(exc)})
                 nonce = secrets.token_urlsafe(24)
                 with _session_lock:
                     now = time.time()
                     sess["confirm"] = {k: v for k, v in sess["confirm"].items()
                                        if v["expires"] > now}
-                    sess["confirm"][nonce] = {"target": target, "expires": now + 60}
+                    full = len(sess["confirm"]) >= 16
+                    if not full:
+                        sess["confirm"][nonce] = {"target": target, "expires": now + 60,
+                                                  "digest": digest}
+                if full:
+                    return self._json(429, {"error": "too many pending confirmations"})
                 return self._json(200, {"ok": True, "nonce": nonce})
+            if requires_confirmation(act, body):
+                try:
+                    digest = action_confirmation_digest(act, body)
+                except ValueError as exc:
+                    return self._json(400, {"error": str(exc)})
+                with _session_lock:
+                    rec = sess["confirm"].pop(str(body.get("nonce", "")), None)
+                if (not rec or rec["target"] != act or rec["expires"] < time.time()
+                        or not hmac.compare_digest(rec.get("digest", ""), digest)):
+                    return self._json(400, {"error": "fresh confirmation required"})
             if act == "kill":
                 n, errs = act_kill(body.get("pids", [])); return self._json(200, {"ok": n > 0, "killed": n, "errors": errs})
             if act == "kill_app":
@@ -1741,13 +1844,12 @@ class Handler(BaseHTTPRequestHandler):
             if act == "drill":
                 ok, out = act_drill(); return self._json(200, {"ok": ok, "out": out})
             if act == "user":
-                op = str(body.get("op", ""))
-                if op not in ("add", "enable", "disable", "delete", "password", "rename"):
-                    return self._json(400, {"error": "invalid user operation"})
-                args = {"op": op, "name": str(body.get("name", ""))[:40],
-                        "value": str(body.get("value", ""))[:64]}
+                try:
+                    args = user_action_arguments(body)
+                except ValueError as exc:
+                    return self._json(400, {"error": str(exc)})
                 ok, out = panel_request("user_action", args)
-                audit("user", "%s %s -> %s" % (op, args.get("name"), ok))
+                audit("user", "%s %s -> %s" % (args["op"], args.get("name"), ok))
                 return self._json(200, {"ok": ok, "out": out})
             if act == "rdp":
                 op = str(body.get("op", ""))
@@ -1767,7 +1869,7 @@ class Handler(BaseHTTPRequestHandler):
                 value = str(body.get("value", ""))[:64]
                 ok, out = panel_request("settings_set", {"key": key, "value": value,
                                                          "confirm": bool(body.get("confirm"))})
-                audit("settings", "%s=%s -> %s" % (key, value, ok))
+                audit("settings", "%s -> %s" % (key, ok))
                 return self._json(200, {"ok": ok, "out": out})
             if act == "block_subnet":
                 ok, out = panel_request("block_subnet",
@@ -1830,10 +1932,6 @@ class Handler(BaseHTTPRequestHandler):
             if act == "unblock_ip":
                 ok, out = unblock_ip(body.get("ip", "")); return self._json(200, {"ok": ok, "out": out})
             if act in ("reboot", "shutdown"):
-                with _session_lock:
-                    rec = sess["confirm"].pop(str(body.get("nonce", "")), None)
-                if not rec or rec["target"] != act or rec["expires"] < time.time():
-                    return self._json(400, {"error": "fresh confirmation required"})
                 return self._json(200, {"ok": act_reboot() if act == "reboot" else act_shutdown()})
             return self._json(400, {"error": "unknown action %r" % act})
         except Exception as e:
@@ -1842,6 +1940,36 @@ class Handler(BaseHTTPRequestHandler):
 
 # ---------------------------------------------------------------- main
 def main():
+    if sys.argv[1:2] and sys.argv[1] in ("operator-add", "operator-remove", "operator-list"):
+        operation = sys.argv[1]
+        records = STATE.setdefault("operators", {})
+        if operation == "operator-list":
+            print("\n".join(sorted(records)))
+            return 0
+        name = sys.argv[2] if len(sys.argv) == 3 else ""
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", name) or name == "owner":
+            print("Use operator-add NAME or operator-remove NAME (1-40 ASCII letters/digits/_.-).")
+            return 1
+        if operation == "operator-add":
+            if name in records or len(records) >= 64:
+                print("Operator already exists or the 64-operator limit was reached.")
+                return 1
+            token = secrets.token_urlsafe(32)
+            records[name] = {"token_sha256": hashlib.sha256(token.encode()).hexdigest(), "created": time.time()}
+        else:
+            if name not in records:
+                print("Operator not found.")
+                return 1
+            del records[name]
+        atomic_write(STATE_FILE, STATE)
+        if not harden_file(STATE_FILE):
+            print("Operator state was saved, but its ACL could not be protected; no credential is displayed.")
+            return 1
+        if operation == "operator-add":
+            print("Store this personal administrator token securely: " + token)
+        else:
+            print("Operator removed; their sessions are revoked on the next request.")
+        return 0
     if "--install" in sys.argv or "install" in sys.argv[1:2]:
         return do_install(PORT, remote=False)
     if "install-remote" in sys.argv[1:2]:

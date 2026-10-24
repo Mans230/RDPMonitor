@@ -265,7 +265,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 </head>
 <body>
 <div class="loginbg" id="loginBg">
-  <div class="loginbox"><h1>RDPWebConsole</h1><p>Enter the login token. The token is not placed in the link, and a secure, time-limited session is created.</p>
+  <div class="loginbox"><h1>RDPWebConsole</h1><p>Enter your personal operator token or the owner token. A secure, time-limited session is created.</p>
     <label for="loginToken" class="field-label">Login token</label>
     <input id="loginToken" type="password" autocomplete="current-password" placeholder="Enter your token" aria-describedby="loginErr">
     <button class="btn primary" id="loginBtn">Login</button><div class="loginerr" id="loginErr" role="alert"></div>
@@ -1006,22 +1006,31 @@ async function loadUsers(){
 function userAct(op,encName){
   const name=decodeURIComponent(encName);
   if(!confirm(op+" user "+name+"?"))return;
-  act({action:"user",op:op,name:name}).then(j=>{toast(j&&j.ok?("Done: "+op):("Failed: "+((j&&j.out)||"")),!(j&&j.ok));setTimeout(loadUsers,600)});
+  confirmedUserAct({op:op,name:name}).then(j=>{toast(j&&j.ok?("Done: "+op):("Failed: "+((j&&j.out)||"")),!(j&&j.ok));setTimeout(loadUsers,600)});
 }
 function userPass(encName){
   const name=decodeURIComponent(encName);
   const pw=prompt("New password for "+name+":");if(!pw)return;
-  act({action:"user",op:"password",name:name,value:pw}).then(j=>{toast(j&&j.ok?"Password set":"Failed",!(j&&j.ok))});
+  if(!confirm("Set a new password for "+name+"?"))return;
+  confirmedUserAct({op:"password",name:name,value:pw}).then(j=>{toast(j&&j.ok?"Password set":"Failed",!(j&&j.ok))});
 }
 function userRename(encName){
   const name=decodeURIComponent(encName);
   const nn=prompt("New name for "+name+":");if(!nn)return;
-  act({action:"user",op:"rename",name:name,value:nn}).then(j=>{toast(j&&j.ok?"Renamed":"Failed",!(j&&j.ok));setTimeout(loadUsers,600)});
+  if(!confirm("Rename "+name+" to "+nn+"?"))return;
+  confirmedUserAct({op:"rename",name:name,value:nn}).then(j=>{toast(j&&j.ok?"Renamed":"Failed",!(j&&j.ok));setTimeout(loadUsers,600)});
 }
 function userAdd(){
   const n=$("newUserName").value.trim();const p=$("newUserPass").value;
   if(!n||!p){toast("Name and password required",true);return}
-  act({action:"user",op:"add",name:n,value:p}).then(j=>{toast(j&&j.ok?"User created":"Failed",!(j&&j.ok));$("newUserName").value="";$("newUserPass").value="";setTimeout(loadUsers,600)});
+  if(!confirm("Create user "+n+"?"))return;
+  confirmedUserAct({op:"add",name:n,value:p}).then(j=>{toast(j&&j.ok?"User created":"Failed",!(j&&j.ok));if(j&&j.ok){$("newUserName").value="";$("newUserPass").value=""}setTimeout(loadUsers,600)});
+}
+async function confirmedUserAct(args){
+  const payload={op:args.op,name:args.name,value:args.value||""};
+  const prepared=await act({action:"prepare",target:"user",...payload},true);
+  if(!prepared||!prepared.nonce)return prepared||{ok:false};
+  return act({action:"user",...payload,nonce:prepared.nonce});
 }
 async function loadDiag(op,arg){
   const box=$("diagOut");
@@ -1149,8 +1158,22 @@ async function loadDay(){
 }
 
 /* ---------- actions ---------- */
+const CONFIRMED_ACTIONS=new Set(["user","reboot","shutdown","kill","kill_app","clean_temp","msg","logoff","service","run_command","start_program","screenshot","backup_now","backup_gui","restore","drill","rdp","settings_set","block_subnet","set_rdp_port","mute","trap","cancel_restart","automation","update_now","exportlogs","send_file","block_ip","unblock_ip","test_alert"]);
+function requiresActionConfirmation(body){
+  if(!CONFIRMED_ACTIONS.has(body.action))return false;
+  if(body.action==="service"&&(body.mode||"status")==="status")return false;
+  if(body.action==="rdp"&&body.op==="rdp_status")return false;
+  if(["automation","trap"].includes(body.action)&&(body.op||"list")==="list")return false;
+  return true;
+}
 async function act(body,silent){
   try{
+    if(requiresActionConfirmation(body)&&!body.nonce){
+      const {action,...args}=body;
+      const prepared=await act({...args,action:"prepare",target:action},true);
+      if(!prepared||!prepared.nonce)return prepared||{ok:false};
+      body={...body,nonce:prepared.nonce};
+    }
     const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":CSRF},body:JSON.stringify(body)});
     if(r.status===401){showLogin("The session has ended");return {error:"authentication required"}}
     const j=await r.json();
