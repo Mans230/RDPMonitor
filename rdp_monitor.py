@@ -31,6 +31,7 @@ import html
 import json
 import os
 import queue
+import secrets
 import re
 import shutil
 import socket
@@ -44,6 +45,9 @@ from datetime import datetime, timedelta
 
 import psutil
 import requests
+from account_safety import serialized_account_action, serialized_user_command
+from diagnostic_runtime import deadline_scope, remaining_timeout
+from audit_store import append_event
 
 # Prefer IPv4 for outbound connections. Some hosts advertise an IPv6 address
 # without a working IPv6 route, which makes requests hang until timeout.
@@ -73,6 +77,9 @@ _orig_sub_popen = subprocess.Popen
 
 def _quiet_run(*args, **kwargs):
     kwargs.setdefault("creationflags", NO_WINDOW)
+    timeout = remaining_timeout(kwargs.get("timeout"))
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     return _orig_sub_run(*args, **kwargs)
 
 
@@ -99,6 +106,7 @@ CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
 ALERT_QUEUE_FILE = os.path.join(BASE_DIR, "alert_queue.json")
 FILE_QUEUE_FILE = os.path.join(BASE_DIR, "file_queue.json")
+USAGE_FILE = os.path.join(BASE_DIR, "usage_audit.jsonl")
 IMAGE_STATE_FILE = os.path.join(BASE_DIR, "image_state.json")
 
 DEFAULT_CONFIG = {
@@ -2738,10 +2746,23 @@ def api_users_list():
     return True, items
 
 
+@serialized_account_action
 def api_user_action(action, name, value=""):
+    if not config.get("user_management", False):
+        return False, "user management is disabled"
     name = str(name or "").strip()
     if not _valid_user_name(name):
         return False, "invalid user name"
+    if action not in ("enable", "disable", "delete", "password", "rename", "add"):
+        return False, "unknown action"
+    if action in ("delete", "disable", "password"):
+        allowed, warning = last_admin_guard(name)
+        if not allowed:
+            return False, _panel_text(warning)
+    if action in ("add", "password"):
+        weak = _password_weak(str(value))
+        if weak:
+            return False, "weak password: " + weak
     q = _ps_quote(name)
     if action == "enable":
         ok = ps_ok(f"Enable-LocalUser -Name '{q}' -ErrorAction Stop")
@@ -2777,7 +2798,7 @@ def _panel_text(value):
 # such values in the clear - not just the Telegram token.
 _SENSITIVE_KEY_HINTS = (
     "token", "secret", "password", "passphrase", "pwd", "credential",
-    "webhook", "private", "apikey", "api_key",
+    "webhook", "private", "apikey", "api_key", "api_hash", "authorization", "connection_string",
 )
 _SENSITIVE_KEY_RE = re.compile(r"(^|_)key$", re.IGNORECASE)
 
@@ -2790,18 +2811,11 @@ def _is_sensitive_key(name):
 
 
 def _mask_secret(key, value):
-    """Hide a credential whatever its type (str, dict, list, number...).
-
-    An unset value is returned unchanged so a redacted config still shows which
-    fields are empty. The Telegram token keeps its historical 4-char hint.
-    """
+    """Match upstream credential masking for strings, containers and numbers."""
     if value is None or value == "":
         return value
-    if isinstance(value, str):
-        return ("***" + value[-4:] if str(key).lower() == "telegram_token"
-                else "***redacted***")
-    # A non-string credential is hidden whole: descending would echo the shape
-    # of the secret, and for a container would leak the values inside it.
+    if isinstance(value, str) and str(key).lower() == "telegram_token":
+        return "***" + value[-4:]
     return "***redacted***"
 
 
@@ -2822,58 +2836,42 @@ def _redact_config(data):
 
 # The panel waits 150s for /api/diag, and the monitor services one request at a
 # time, so a slow job must not hold the mailbox longer than this. A job that
-# overruns keeps running in the background; its output is discarded.
+# overruns holds its capacity slot until it exits; further jobs are rejected.
 _PANEL_JOB_DEADLINE = 90
-
-# One lock per job name: an overrunning job holds its lock until it really
-# finishes, so a retried request is refused instead of starting a second copy.
-_JOB_LOCKS = {}
-_JOB_LOCKS_GUARD = threading.Lock()
+_PANEL_JOB_SLOTS = threading.BoundedSemaphore(1)
 
 
-def _job_lock(name):
-    with _JOB_LOCKS_GUARD:
-        lock = _JOB_LOCKS.get(name)
-        if lock is None:
-            lock = threading.Lock()
-            _JOB_LOCKS[name] = lock
-        return lock
-
-
-def _run_captured_job(fn, deadline=None, single_flight=None):
-    """Run a bot job capturing its chat output, with a hard wall-clock deadline.
+def _run_captured_job(fn, deadline=None):
+    """Bound the response wait and admit at most one running captured job.
 
     Same _capture_begin/_capture_end behaviour as the inline jobs, but on a
     worker thread so a hung job cannot block the serialized monitor mailbox.
-    With single_flight (a job name) the job runs at most once at a time: a
-    second request while it is still running, even past the deadline, is
-    refused instead of piling a concurrent copy onto the machine.
     """
     if deadline is None:
         deadline = _PANEL_JOB_DEADLINE
-    lock = _job_lock(single_flight) if single_flight else None
-    if lock is not None and not lock.acquire(blocking=False):
-        return False, "the job is already running, try again shortly"
+    slots = _PANEL_JOB_SLOTS
+    if not slots.acquire(blocking=False):
+        return False, "Diagnostics busy: a job is already running; try again after it finishes."
     box = {}
 
     def worker():
-        _capture_begin()
         try:
-            fn()
-            box["out"] = _capture_end()
+            _capture_begin()
+            with deadline_scope(deadline):
+                box["result"] = fn()
         except Exception as exc:  # surfaced to the panel as text
-            _capture_end()
             box["error"] = repr(exc)
         finally:
-            if lock is not None:
-                lock.release()
+            try:
+                box["out"] = _capture_end()
+            finally:
+                slots.release()
 
     try:
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
-    except Exception:
-        if lock is not None:
-            lock.release()
+    except BaseException:
+        slots.release()
         raise
     thread.join(deadline)
     if thread.is_alive():
@@ -2881,10 +2879,17 @@ def _run_captured_job(fn, deadline=None, single_flight=None):
                        "running on the machine, try again shortly" % deadline)
     if "error" in box:
         return False, box["error"]
+    result = box.get("result")
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], bool):
+        return result
     return True, box.get("out") or "(no result)"
 
 
 def api_diag(op, arg=""):
+    return _run_captured_job(lambda: _api_diag_inline(op, arg))
+
+
+def _api_diag_inline(op, arg=""):
     """Read-only diagnostics for the WebConsole panel, reusing the bot reports."""
     op = str(op or "").strip().lower()
     arg = str(arg or "").strip()
@@ -2936,9 +2941,16 @@ def api_diag(op, arg=""):
         "updates": updates_job,
         "sysinfo": _sysinfo_job,
         "harden": lambda: harden_report(False),
+        "speedtest": lambda: speedtest_job(silent=True),
     }
     if op in jobs:
-        return _run_captured_job(jobs[op], single_flight="diag:" + op)
+        _capture_begin()
+        try:
+            value = jobs[op]()
+        except Exception as e:
+            _capture_end()
+            return False, repr(e)
+        return True, _capture_end() or (_panel_text(value) if value is not None else "(no output)")
     if op == "report":
         midnight = datetime.now().replace(hour=0, minute=0, second=0,
                                           microsecond=0).timestamp()
@@ -2956,8 +2968,13 @@ def api_diag(op, arg=""):
         return True, "\n".join(lines)
     if op == "logins":
         n = int(arg) if arg.isdigit() and 1 <= int(arg) <= 30 else 10
-        return _run_captured_job(lambda: _logins_job(n),
-                                 single_flight="diag:logins")
+        _capture_begin()
+        try:
+            _logins_job(n)
+        except Exception as e:
+            _capture_end()
+            return False, repr(e)
+        return True, _capture_end() or "(no logins recorded)"
     if op == "botlog":
         if not os.path.isfile(LOG_FILE):
             return True, "No log file yet."
@@ -2978,20 +2995,17 @@ def api_diag(op, arg=""):
                 datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
                 format_size(size), path))
         return True, "\n".join(out)
-    if op == "speedtest":
-        # Runs off-thread with a single-flight guard: a slow link can spend up
-        # to 15s+120s+120s inside the speed test, which used to block the
-        # single-slot monitor mailbox well past the panel's 150s timeout (and
-        # held up later RDP safety actions). The deadline keeps the mailbox
-        # free; a retry while the worker is still going is refused.
-        return _run_captured_job(lambda: speedtest_job(silent=True),
-                                 single_flight="diag:speedtest")
     if op == "nettest":
         parts = arg.split()
         if not parts:
             return False, "provide a host, for example: 1.1.1.1"
-        return _run_captured_job(lambda: nettest_job(parts[0]),
-                                 single_flight="diag:nettest")
+        _capture_begin()
+        try:
+            nettest_job(parts[0])
+        except Exception as e:
+            _capture_end()
+            return False, repr(e)
+        return True, _capture_end() or "(no result)"
     return False, "unknown diagnostic %r" % op
 
 
@@ -4716,8 +4730,7 @@ COMMAND_DOCS = {
     },
     "/configbackup": {
         "summary": "Sends a copy of the configuration with secrets hidden.",
-        "steps": [("Redact", "remove credential fields by key name (any type)"),
-                  ("Send", "sendDocument")],
+        "steps": [("Redact", "remove credential fields by key name (any type)"), ("Send", "sendDocument")],
         "effect": "A redacted config copy is sent.",
         "output": "The JSON file.",
         "troubleshoot": "Secrets are never included.",
@@ -5593,17 +5606,17 @@ def get_local_users():
 def run_speedtest():
     """Measure internet speed via Cloudflare: (ping ms, Download Mbps, Raise Mbps)"""
     t0 = time.time()
-    requests.get("https://speed.cloudflare.com/__down?bytes=1000", timeout=15)
+    requests.get("https://speed.cloudflare.com/__down?bytes=1000", timeout=remaining_timeout(15))
     ping_ms = (time.time() - t0) * 1000
 
     t0 = time.time()
-    r = requests.get("https://speed.cloudflare.com/__down?bytes=25000000", timeout=120)
+    r = requests.get("https://speed.cloudflare.com/__down?bytes=25000000", timeout=remaining_timeout(120))
     dl_secs = max(0.001, time.time() - t0)
     down_mbps = len(r.content) * 8 / dl_secs / 1e6
 
     payload = b"0" * 8_000_000
     t0 = time.time()
-    requests.post("https://speed.cloudflare.com/__up", data=payload, timeout=120)
+    requests.post("https://speed.cloudflare.com/__up", data=payload, timeout=remaining_timeout(120))
     ul_secs = max(0.001, time.time() - t0)
     up_mbps = len(payload) * 8 / ul_secs / 1e6
 
@@ -5808,9 +5821,10 @@ def format_rdp_report():
 
 
 PS_LOCAL_USERS_DETAIL = (
-    "$admins=@{}; "
-    "try { Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop | "
-    "ForEach-Object { $admins[$_.Name.Split('\\')[-1].ToLower()] = $true } } catch {} "
+    "$ErrorActionPreference='Stop'; $admins=@{}; "
+    "try { Get-LocalGroup -SID 'S-1-5-32-544' -ErrorAction Stop | "
+    "Get-LocalGroupMember -ErrorAction Stop | "
+    "ForEach-Object { $admins[$_.Name.Split('\\')[-1].ToLower()] = $true } } catch { throw } "
     "Get-LocalUser | ForEach-Object { "
     "$a = if ($admins.ContainsKey($_.Name.ToLower())) { 1 } else { 0 }; "
     "$pls = if ($_.PasswordLastSet) { $_.PasswordLastSet.ToString('yyyy-MM-dd') } else { '-' }; "
@@ -5821,18 +5835,25 @@ PS_LOCAL_USERS_DETAIL = (
 )
 
 
-def _local_users_detail():
+def _local_users_detail(strict=False):
     """Accounts details: [{name, enabled, admin, pwlastset, pwexpires, lastlogon}]
     - Cross Get-LocalUser (More accurate than net user): Status and password dates"""
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command",
                             PS_LOCAL_USERS_DETAIL],
                            capture_output=True, timeout=60, creationflags=NO_WINDOW)
+        if strict and r.returncode != 0:
+            raise RuntimeError("Windows account inventory failed")
         users = []
         for ln in _decode_out(r.stdout).splitlines():
             parts = ln.strip().split("|")
             if len(parts) != 6:
+                if strict and ln.strip():
+                    raise RuntimeError("invalid Windows account inventory")
                 continue
+            if strict and (not parts[0] or parts[1] not in ("0", "1")
+                           or parts[2] not in ("0", "1")):
+                raise RuntimeError("incomplete Windows account inventory")
             users.append({
                 "name": parts[0], "enabled": parts[1] == "1",
                 "admin": parts[2] == "1", "pwlastset": parts[3],
@@ -5840,7 +5861,11 @@ def _local_users_detail():
             })
         if users:
             return users
+        if strict:
+            raise RuntimeError("Windows account inventory is empty")
     except Exception as e:
+        if strict:
+            raise
         print(f"[users-detail] error: {e}")
     # Precaution: Who net user No details
     return [{"name": n, "enabled": True, "admin": a,
@@ -5865,11 +5890,11 @@ def last_admin_guard(name):
     """Deletion is prohibited/Disable/Change the password of the last activated admin = Protect yourself from being locked out of your device
     - He comes back (Allowed?, warning message or None)"""
     try:
-        users = _local_users_detail()
+        users = _local_users_detail(strict=True)
         target = next((u for u in users
                        if u["name"].lower() == name.lower()), None)
         if target is None:
-            return True, None
+            return False, "Cannot verify the target account; no change was made."
         admins = [u for u in users if u["admin"] and u["enabled"]]
         if target["admin"] and target["enabled"] and len(admins) <= 1:
             return False, (
@@ -5886,7 +5911,7 @@ def last_admin_guard(name):
                              "make sure you have another way in.")
         return True, None
     except Exception:
-        return True, None
+        return False, "Cannot verify administrator safety; no change was made. Try again when account inventory is available."
 
 
 def format_users_report():
@@ -6117,6 +6142,7 @@ def handle_incoming_file(msg):
 # ----------------------------- Additional safety and maintenance -----------------------------
 
 AUDIT_FILE = os.path.join(BASE_DIR, "audit.json")
+_legacy_audit_lock = threading.RLock()
 BLOCKED_FILE = os.path.join(BASE_DIR, "blocked.json")
 
 
@@ -6131,10 +6157,11 @@ def load_audit():
 
 
 def audit_record(entry):
-    _audit.append({"t": time.time(), "e": entry})
-    if len(_audit) > 300:
-        del _audit[:len(_audit) - 300]
-    _atomic_write_json(AUDIT_FILE, _audit, ensure_ascii=False)
+    with _legacy_audit_lock:
+        _audit.append({"t": time.time(), "e": entry})
+        if len(_audit) > 300:
+            del _audit[:len(_audit) - 300]
+        _atomic_write_json(AUDIT_FILE, _audit, ensure_ascii=False)
 
 
 def format_size(n):
@@ -8731,16 +8758,17 @@ def updates_job():
 def config_backup_job():
     """Sends a copy of your settings to the chat — Tokens and computer secrets are hidden"""
     data = _redact_config(config)
-    p = os.path.join(tempfile.gettempdir(), "rdpm_config_backup.json")
+    p = None
     queued = False
     try:
-        with open(p, "w", encoding="utf-8") as f:
+        fd, p = tempfile.mkstemp(prefix="rdpm_config_backup_", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         queued = send_document(p, rtl(" Settings copy (Tokens and secrets are hidden)"))
     except Exception as e:
         send_message(rtl(f"[X] Copy failed: {e}"))
     finally:
-        if not queued:
+        if p and not queued:
             try:
                 os.remove(p)
             except OSError:
@@ -9744,6 +9772,7 @@ BOT_MENU = [
 ]
 
 
+@serialized_user_command
 def handle_command(text):
     parts = text.strip().split()
     if not parts:
@@ -11354,16 +11383,15 @@ _cmd_rate = {}                     # {user_id: [ts]} To specify the command rate
 _cmd_queue = None                  # Order execution queue (Prevents disabling reception)
 RATE_LIMIT_CMDS = 30               # Maximum number of commands per minute per user
 RATE_LIMIT_WINDOW = 60
+MAX_COMMAND_QUEUE = 100            # Bound waiting work; never block Telegram polling.
 
 
 def _scrub_secrets(text):
     """Hides passwords from the command text before writing them to the audit log
     - Everything after the username becomes *** (Only the first word was replaced with a password
       There are spaces that remain exposed in audit.json)"""
-    t = re.sub(r"(/adduser\s+\S+\s+)\S+(.*)", r"\1***\2", text, flags=re.I)
-    t = re.sub(r"(/rclone\s+(?:add|token)\s+\S+\s+\S+\s+).+", r"\1***", t, flags=re.I)
-    t = re.sub(r"(/rclone\s+client\s+\S+\s+\S+\s+).+", r"\1***", t, flags=re.I)
-    return t
+    return re.sub(r"(/(?:adduser|pass(?:word)?|exec|run|rclone)\b).*", r"\1 ***",
+                  str(text), flags=re.I | re.S)
 
 
 def _rate_limited(uid):
@@ -11383,25 +11411,63 @@ def _rate_limited(uid):
     return False
 
 
+def record_usage(uid, action, status, request_id, duration_ms=None):
+    try:
+        return append_event(USAGE_FILE, source="telegram", actor="telegram:" + str(uid),
+                            action=action, status=status, request_id=request_id, duration_ms=duration_ms)
+    except Exception as exc:
+        print(f"[audit] Usage recording failed: {type(exc).__name__}")
+        return None
+
+
+def _queued_action(fn, args):
+    if fn is handle_command and args:
+        command = (str(args[0]).strip().split() or ["unknown"])[0].lower().split("@")[0]
+        return command if command in COMMAND_INFO else "unknown"
+    if fn is handle_incoming_file:
+        return "upload"
+    if fn is handle_pending:
+        return "confirmation"
+    return "menu"
+
+
 def _command_worker():
     """Executes commands from the queue in order — /exec Long does not stop receiving messages"""
     while True:
-        fn, cb_args = _cmd_queue.get()
+        fn, cb_args, uid, request_id = _cmd_queue.get()
+        started = time.monotonic()
+        status = "completed"
         try:
             fn(*cb_args)
         except Exception as e:
+            status = "failed"
             try:
                 send_plain(f"[X] Error executing the command: {e}")
             except Exception:
                 pass
         finally:
+            record_usage(uid, _queued_action(fn, cb_args), status, request_id,
+                         (time.monotonic() - started) * 1000)
             _cmd_queue.task_done()
+
+
+def _enqueue_command(fn, args, uid):
+    """Reject excess work immediately, without storing command arguments in logs."""
+    try:
+        request_id = secrets.token_hex(16)
+        _cmd_queue.put_nowait((fn, args, uid, request_id))
+        record_usage(uid, _queued_action(fn, args), "queued", request_id)
+        return True
+    except queue.Full:
+        audit_record(f" queue-full user {uid}")
+        record_usage(uid, _queued_action(fn, args), "denied", request_id)
+        return False
 
 
 def telegram_loop():
     """Receive commands and files from Telegram (Long Polling)"""
     global _cmd_queue
-    _cmd_queue = queue.Queue()
+    _cmd_queue = queue.Queue(maxsize=MAX_COMMAND_QUEUE)
     threading.Thread(target=_command_worker, daemon=True).start()
     offset = 0
     print("[telegram] listening for commands...")
@@ -11421,26 +11487,34 @@ def telegram_loop():
                     uid = str(cb.get("from", {}).get("id", ""))
                     cbid = cb.get("id")
                     if uid not in _allowed_user_ids():
+                        record_usage(uid, "authentication", "denied", secrets.token_hex(16))
                         tg_api("answerCallbackQuery", callback_query_id=cbid,
                                text="Unauthorized")
+                        continue
+                    if _rate_limited(uid):
+                        record_usage(uid, "rate_limit", "denied", secrets.token_hex(16))
+                        audit_record(f" rate-limit user {uid}")
+                        tg_api("answerCallbackQuery", callback_query_id=cbid,
+                               text="Rate limit exceeded - slow down")
                         continue
                     d = cb.get("data", "")
                     audit_record(f"{uid}: [button] {_scrub_secrets(d)[:60]}")
                     if d.startswith("run:"):
+                        queued = _enqueue_command(handle_command, (d[4:],), uid)
                         tg_api("answerCallbackQuery", callback_query_id=cbid,
-                               text="Implementation underway...")
-                        _cmd_queue.put((handle_command, (d[4:],)))
+                               text="Queued for execution" if queued else "Server busy - try again shortly")
                     elif d.startswith("cf:"):
+                        queued = _enqueue_command(handle_pending, (d[3:],), uid)
                         tg_api("answerCallbackQuery", callback_query_id=cbid,
-                               text="Confirmed - Implementation underway")
-                        _cmd_queue.put((handle_pending, (d[3:],)))
+                               text="Confirmed - queued for execution" if queued else "Server busy - try again shortly")
                     elif d.startswith("cx:"):
                         pend_take(d[3:])
                         tg_api("answerCallbackQuery", callback_query_id=cbid,
                                text="Canceled - Nothing was implemented")
                     else:
-                        tg_api("answerCallbackQuery", callback_query_id=cbid)
-                        _cmd_queue.put((handle_menu_callback, (d,)))
+                        queued = _enqueue_command(handle_menu_callback, (d,), uid)
+                        tg_api("answerCallbackQuery", callback_query_id=cbid,
+                               text="" if queued else "Server busy - try again shortly")
                     continue
                 msg = update.get("message", {})
                 chat = msg.get("chat", {})
@@ -11454,16 +11528,19 @@ def telegram_loop():
                     chat.get("type") == "private"
                     and cid in _allowed_user_ids())
                 if not allowed:
+                    record_usage(uid, "authentication", "denied", secrets.token_hex(16))
                     audit_record(f" denied chat {cid} user {uid}")
                     continue
                 if _rate_limited(uid):
+                    record_usage(uid, "rate_limit", "denied", secrets.token_hex(16))
                     audit_record(f" rate-limit user {uid}")
                     send_message(" Large number of orders within a minute — Slow down\n"
                                  " Rate limit exceeded — slow down")
                     continue
                 if msg.get("document") or msg.get("photo"):
                     audit_record(f"{uid}: [File/Image]")
-                    _cmd_queue.put((handle_incoming_file, (msg,)))
+                    if not _enqueue_command(handle_incoming_file, (msg,), uid):
+                        send_message("Server busy - file was not queued; try again shortly")
                     continue
                 text = msg.get("text", "")
                 if text.startswith("/"):
@@ -11475,7 +11552,8 @@ def telegram_loop():
                                          message_id=msg.get("message_id"))
                         if not deleted.get("ok"):
                             send_message("[WARN] Telegram did not delete the credential message. Remove it from chat history and rotate the secret if this chat is shared.")
-                    _cmd_queue.put((handle_command, (text,)))
+                    if not _enqueue_command(handle_command, (text,), uid):
+                        send_message("Server busy - command was not queued; try again shortly")
         except Exception as e:
             print(f"[telegram] listen error: {e}")
             time.sleep(3)

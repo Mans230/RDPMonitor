@@ -314,13 +314,27 @@ class PanelDiagReadOnlyTests(unittest.TestCase):
         self.assertIn("100 Mbps", out)
 
     def test_speedtest_is_bounded_by_deadline(self):
+        import threading
+        release = threading.Event()
+        finished = threading.Event()
+        capacity = threading.BoundedSemaphore(1)
         def slow_job(silent=False):
-            time.sleep(3)
+            try:
+                release.wait(2)
+            finally:
+                finished.set()
         with mock.patch.object(rm, "_PANEL_JOB_DEADLINE", 0.2), \
+                mock.patch.object(rm, "_PANEL_JOB_SLOTS", capacity), \
                 mock.patch.object(rm, "speedtest_job", side_effect=slow_job):
-            ok, out = rm.api_diag("speedtest")
-        self.assertFalse(ok)
-        self.assertIn("did not finish", out)
+            try:
+                ok, out = rm.api_diag("speedtest")
+                self.assertFalse(ok)
+                self.assertIn("did not finish", out)
+            finally:
+                release.set()
+                self.assertTrue(finished.wait(1))
+                self.assertTrue(capacity.acquire(timeout=1))
+                capacity.release()
 
     def test_job_refuses_a_second_concurrent_run(self):
         release = threading.Event()
@@ -341,7 +355,7 @@ class PanelDiagReadOnlyTests(unittest.TestCase):
                 self.assertIn("already running", second_out)
             finally:
                 release.set()
-                lock = rm._job_lock("diag:speedtest")
+                lock = rm._PANEL_JOB_SLOTS
                 for _ in range(200):
                     if lock.acquire(blocking=False):
                         lock.release()

@@ -205,7 +205,8 @@ def load_and_prepare_config():
     except Exception as e:
         log(f"rclone config detection failed: {e}", "WARN")
     try:
-        config_manager.harden_backup_assets(cfg)
+        if not config_manager.harden_backup_assets(cfg):
+            log("ACL hardening failed for one or more backup assets; review filesystem permissions.", "WARN")
     except Exception as e:
         log(f"ACL hardening failed: {e}", "WARN")
     return cfg

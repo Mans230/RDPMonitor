@@ -1,5 +1,11 @@
 # RDP Monitor Suite
 
+Security updates add personal administrator tokens, request-bound confirmations,
+serialized account changes, bounded diagnostics and local usage journals. Read
+[security changes](docs/SECURITY-CHANGES.md), [operators and usage](docs/USAGE-AUDIT.md),
+and [validation/rollback](docs/VALIDATION.md) before upgrading. New changes go
+through [pull requests](CONTRIBUTING.md).
+
 **v4.3-full-fixed** — a self-hosted monitoring, security, and administration suite for
 Windows servers that you reach over RDP.
 

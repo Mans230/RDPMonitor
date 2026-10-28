@@ -1,5 +1,11 @@
 # Hardened RDPWebConsole
 
+Personal operator tokens, the request-confirmation protocol and audit semantics
+are documented in [USAGE-AUDIT](../docs/USAGE-AUDIT.md) and
+[SECURITY-CHANGES](../docs/SECURITY-CHANGES.md). Upgrade the HTML, Python server and
+helper modules together; older clients cannot issue protected actions without
+fresh server nonces. See [validation and rollback](../docs/VALIDATION.md).
+
 Run from an **Administrator** terminal.
 
 ## Local use (recommended)

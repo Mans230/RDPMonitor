@@ -38,3 +38,16 @@ __pycache__/
 # Agent tooling (not part of the tool)
 .agents/
 skills-lock.json
+
+# Development copies and local verification output
+develope/
+.baseline/
+.checkpoints/
+validation-*.txt
+
+# Usage journals, rotated audit logs, and Telegram session credentials
+usage_audit.jsonl*
+webconsole/webconsole_audit.jsonl.*
+*.session
+*.session-*
+image_state.json
