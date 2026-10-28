@@ -48,6 +48,7 @@ import requests
 from account_safety import serialized_account_action, serialized_user_command
 from diagnostic_runtime import deadline_scope, remaining_timeout
 from audit_store import append_event
+from rdp_connectivity import COLLECT_PS, analyze as analyze_rdp_policy, format_report as format_rdp_policy
 from bot_catalog import (build_menus, category_title, canonical_command, help_text,
                          telegram_menu, PAGE_ALIASES, OWNERS)
 from resource_alerts import ResourceAlertPolicy, usage_level as resource_usage_level
@@ -2915,14 +2916,8 @@ def _api_diag_inline(op, arg=""):
         head = "System log: %s, level %s, %d matching events" % (arg or "24 hours", level, total)
         return True, head + "\n" + ("\n".join(lines[:40]) if lines else "(no events at this level)")
     if op == "firewall":
-        profiles, ports = get_firewall_report()
-        if profiles is None:
-            return False, "firewall check failed"
-        out = ["Firewall profiles:"]
-        out += ["  %s: %s" % (n, "on" if e else "off") for n, e in profiles]
-        out.append("Inbound allow ports: %d" % len(ports))
-        out += ["  " + str(p) for p in ports[:40]]
-        return True, "\n".join(out)
+        report = get_firewall_report()
+        return report["status"] == "external_verification_required", format_rdp_policy(report)
     if op == "netstat":
         return True, _panel_text(format_netstat())
     if op == "when":
@@ -3925,8 +3920,8 @@ COMMAND_INFO = {
                  "process) and all listening ports, marked local-only vs "
                  "open-to-network. Reveals backdoors and unexpected listeners.",
                  "/netstat", False),
-    "/firewall": ("Shows whether the Domain/Private/Public firewall profiles "
-                  "are enabled and lists every inbound allow port.",
+    "/firewall": ("Diagnoses effective RDP firewall policy, client-logon allow rules, "
+                  "broad inbound blocks, policy sources, listener and NLA. External access remains unverified.",
                   "/firewall", False),
     "/sysinfo": ("System card: Windows version, CPU model, RAM size and "
                  "pressure, pagefile usage, uptime, and whether a reboot is "
@@ -4341,16 +4336,16 @@ COMMAND_DOCS = {
         "related": ["/rdp", "/rdpallow", "/firewall"],
     },
     "/firewall": {
-        "summary": "Shows firewall profile state and RDP-related rules (read-only).",
+        "summary": "Read-only RDP connectivity diagnosis using effective ActiveStore policy.",
         "steps": [
-            ("Profile state",
-             "netsh advfirewall show allprofiles"),
-            ("RDP rules",
-             "Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow ..."),
+            ("Effective policy",
+             "Get-NetFirewallProfile -PolicyStore ActiveStore; Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore -Direction Inbound"),
+            ("RDP endpoints",
+             "Read RDP registry port, TermService and TCP listeners; inspect rule port/address/application/service filters"),
         ],
         "effect": "No changes; a report only.",
-        "output": "Profile table and rule list.",
-        "troubleshoot": "If profiles show off, enable the firewall from Windows Security.",
+        "output": "Local issues, potential RDP TCP allows, broad/conditional blocks, policy origin and external-verification requirement.",
+        "troubleshoot": "Shadow is not a client-logon allow. Unknown/GroupPolicy/sandbox blocks are never disabled automatically. Verify the actual address/port from an authorized independent host.",
         "related": ["/rdpallow", "/harden"],
     },
     "/block": {
@@ -7141,40 +7136,15 @@ def fetch_system_logs(hours, levels, limit=30):
 
 
 def get_firewall_report():
-    """Status of firewall files + Open entry ports: (profiles, ports)"""
-    ps = (
-        "Write-Output '---P---'; "
-        "Get-NetFirewallProfile -ErrorAction SilentlyContinue | "
-        "ForEach-Object { Write-Output ($_.Name + '|' + $_.Enabled) }; "
-        "Write-Output '---R---'; "
-        "Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow "
-        "-ErrorAction SilentlyContinue | "
-        "Get-NetFirewallPortFilter -ErrorAction SilentlyContinue | "
-        "Where-Object { $_.LocalPort -and (($_.LocalPort -ne 'Any') -or "
-        "-not $_.Protocol -or $_.Protocol -eq 'Any' -or $_.Protocol -eq 'TCP') } | "
-        "ForEach-Object { $_.LocalPort } | Sort-Object -Unique"
-    )
+    """Read effective RDP policy without changing rules or probing external hosts."""
     try:
-        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                           capture_output=True, timeout=120, creationflags=NO_WINDOW)
+        result = subprocess.run(["powershell", "-NoProfile", "-Command", COLLECT_PS],
+                                capture_output=True, timeout=120, creationflags=NO_WINDOW)
+        if result.returncode != 0:
+            raise RuntimeError("effective policy query failed")
+        return analyze_rdp_policy(json.loads(_decode_out(result.stdout)))
     except Exception:
-        return None, []
-    section = ""
-    profiles, ports = [], []
-    for ln in _decode_out(r.stdout).splitlines():
-        ln = ln.strip()
-        if ln == "---P---":
-            section = "P"
-            continue
-        if ln == "---R---":
-            section = "R"
-            continue
-        if section == "P" and "|" in ln:
-            name, en = ln.split("|", 1)
-            profiles.append((name, en.lower() == "true"))
-        elif section == "R" and ln:
-            ports.append(ln)
-    return profiles, ports
+        return analyze_rdp_policy({})
 
 
 def format_netstat():
@@ -7798,15 +7768,22 @@ def check_firewall_guard():
         return
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command",
-                            "Get-NetFirewallProfile | ForEach-Object { "
-                            "Write-Output ($_.Name + '|' + [int][bool]$_.Enabled) }"],
+                            "$ErrorActionPreference='Stop'; Get-NetFirewallProfile -PolicyStore ActiveStore | ForEach-Object { "
+                            "Write-Output ($_.Name + '|' + $_.Enabled.ToString()) }"],
                            capture_output=True, timeout=60, creationflags=NO_WINDOW)
+        if r.returncode != 0:
+            raise RuntimeError("firewall profile query failed")
         off = []
         for ln in _decode_out(r.stdout).splitlines():
             parts = ln.strip().split("|")
-            if len(parts) == 2 and parts[1] == "0":
+            if len(parts) == 2 and parts[1].lower() == "false":
                 off.append(parts[0])
         if not off:
+            return
+        diagnosis = get_firewall_report()
+        if diagnosis["status"] in ("inconclusive", "blockers_found") or diagnosis.get("activation_blockers"):
+            send_message("[X] Firewall guard paused: effective RDP policy is unknown or contains broad inbound blocks. "
+                         "Review /firewall from the provider console; no policy was changed.")
             return
         # Safety first: Make sure that RDP It delivers — But there is no broad rule that breaks the restrictions!
         # (The guard was creating a general tolerance rule even if the restriction was enabled = It opens RDP To the world)
@@ -10025,26 +10002,10 @@ def handle_command(text):
 
     # ---------- Protection RDP Advanced ----------
     elif cmd == "/firewall":
-        send_message("The firewall is being checked...")
+        send_message("Reading effective RDP firewall policy; external reachability is not tested...")
 
         def _fw_job():
-            profiles, ports = get_firewall_report()
-            if profiles is None:
-                send_message("[X] Firewall check failed")
-                return
-            lines = ["<b>Firewall status</b>\n"]
-            for name, enabled in profiles:
-                mark = "[OK] Activated" if enabled else "[X] Disabled"
-                lines.append(f"• {name}: {mark}")
-            lines.append(f"\nOpen entry ports (inbound allow): "
-                         f"{len(ports)}")
-            for p in ports[:30]:
-                warn = "  (All ports!)" if str(p).strip() == "Any" else ""
-                lines.append(f"• {p}{warn}")
-            if len(ports) > 30:
-                lines.append(f"... And {len(ports) - 30} Another port")
-            lines.append("\n Suspicious port? /netstat Yorick who uses it?")
-            send_message("\n".join(lines))
+            send_message("<pre>" + esc(format_rdp_policy(get_firewall_report())) + "</pre>")
 
         threading.Thread(target=_fw_job, daemon=True).start()
 

@@ -2,6 +2,14 @@
 
 ## Automated checks
 
+The 2026-10-27 RDP connectivity follow-up passed 188 Python tests and the existing
+9 JavaScript tests, with all 31 locked runtime versions matching. New tests use
+synthetic effective-policy snapshots for Shadow, disabled enum states, broad and
+loopback-exempt blocks, GPO origin, scoped blocks, custom ports, malformed inventory
+and firewall-activation hazards. The collector is parsed by Windows PowerShell
+without executing native queries. No live rule toggling or external probing was
+performed; see [RDP connectivity validation limits](RDP-CONNECTIVITY.md).
+
 From the changed checkout:
 
 ```powershell
