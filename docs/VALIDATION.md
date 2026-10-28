@@ -2,6 +2,14 @@
 
 ## Automated checks
 
+The 2026-10-27 RDP connectivity follow-up passed 188 Python tests and the existing
+9 JavaScript tests, with all 31 locked runtime versions matching. New tests use
+synthetic effective-policy snapshots for Shadow, disabled enum states, broad and
+loopback-exempt blocks, GPO origin, scoped blocks, custom ports, malformed inventory
+and firewall-activation hazards. The collector is parsed by Windows PowerShell
+without executing native queries. No live rule toggling or external probing was
+performed; see [RDP connectivity validation limits](RDP-CONNECTIVITY.md).
+
 From the changed checkout:
 
 ```powershell
@@ -31,6 +39,35 @@ for every older Python version. In a matching isolated environment install with
 `python -B scripts/lock_dependencies.py --write`.
 
 ## Disposable Windows VM verification
+
+### Bot/RDP follow-up, 2026-10-24
+
+Local final checks: 170 Python tests and 9 JavaScript tests passed; all 31 locked
+runtime versions matched. Generated PowerShell Security queries passed the actual
+Windows PowerShell parser without executing the queries. `git diff --check` passed.
+The [review](BOT-SECURITY-REVIEW.md) distinguishes command-card coverage from live
+handler execution and describes the remaining event/firewall limits.
+
+The existing control design was preserved (no direction draw or palette change).
+Chromium button fixtures using the actual CSS passed at 1440/768/390px with zero
+failures before/after; two unused-space warnings reflect the isolated component
+fixture. Final screenshots were inspected at all widths: busy labels remain
+readable for default/primary/danger buttons, busy borders are visible, and phone
+targets are 44px tall. Local `.taste-skill/` artifacts are excluded from Git.
+The full login page still has pre-existing gradient/shadow findings; this is not
+a whole-dashboard visual certification. No photos or generated assets were added.
+
+Control critique: the idea is to make request progress visible on the control
+that initiated it. The live behavior is press, disabled busy state and restoration.
+Final component scores: design 7, usability 8, creativity 6, content 8 (7.2 overall).
+The initial weak busy contrast, variant border overrides and 38px phone targets
+were corrected; whole-page composition is outside this scoped score.
+
+On the real HTML in the collaborative browser, mocked fetch and two clicks on
+Capture screen produced one preparation plus one screenshot action, with
+`aria-busy=true` while waiting and the original button restored after completion.
+No screenshot or Telegram message was actually captured/sent. Snapshot automation
+timed out twice; screenshot inspection used the skill's Chromium fallback.
 
 A copied folder/worktree isolates source, not Windows side effects. Do not install
 two copies against the production machine, bot or scheduled tasks. Use a disposable

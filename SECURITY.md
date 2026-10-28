@@ -4,6 +4,13 @@ See [security changes](docs/SECURITY-CHANGES.md) for confirmations, account safe
 resource bounds and remaining limits, and [usage/operator docs](docs/USAGE-AUDIT.md)
 for personal credentials and attribution.
 
+See the [bot/RDP review](docs/BOT-SECURITY-REVIEW.md) for failed-logon event windows,
+source trust exemptions, verified firewall release and the limits of event polling.
+
+The [RDP connectivity diagnostic](docs/RDP-CONNECTIVITY.md) reports effective
+policy blockers and their sources. It never disables unknown, GPO or sandbox rules
+and never treats local evidence as externally verified connectivity.
+
 Backup secrets use **machine-scoped DPAPI** for the SYSTEM worker, unlike the
 user-scoped monitor/owner token storage. File ACLs are their primary local access
 boundary. Personal operator tokens are stored as hashes of random credentials in

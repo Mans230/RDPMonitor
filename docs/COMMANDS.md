@@ -1,6 +1,424 @@
 # RDP Suite - Command reference
 
-## Control
+## Backup & restore
+
+### /backsrc
+- Purpose: Manage what gets backed up: list sources, add or remove a file/folder, or browse with a desktop-style file browser (drives, breadcrumbs, folders and files, paging).
+- Usage: `/backsrc list | add <path> | remove <index|path> | browse [path] | drives`
+- Panel: backup
+
+**What it does:** Manage what gets backed up (add/remove/browse).
+
+**Steps (backend commands):**
+1. Update
+   ```
+   backup/config.json backup.sources
+   ```
+2. Reload
+   ```
+   worker reloads config before the next run
+   ```
+
+**Effect:** The backup set changes.
+**Output:** The updated source list.
+**Troubleshoot:** Missing sources abort the backup (fail closed).
+**Related:** /backup /backupstatus
+
+### /backup
+- Purpose: Queues a manual backup on the isolated SYSTEM worker. It reports here when it finishes.
+- Usage: `/backup`
+- Panel: backup
+
+**What it does:** Runs a backup now: archive, verify, upload to cloud, and report a link.
+
+**Steps (backend commands):**
+1. Queue the request
+   ```
+   write backup/control/request.json
+   ```
+2. SYSTEM worker picks it up
+   ```
+   create_backup(): collect files, zip (AES if password), verify CRC, write manifest
+   ```
+3. Upload to the cloud
+   ```
+   rclone copy <archive> <remote>:VPS-Backups --stats-one-line
+   ```
+4. Create a share link
+   ```
+   rclone link <remote>:VPS-Backups/<archive>
+   ```
+5. Deliver
+   ```
+   Telegram message + link; local retention keeps 3 copies
+   ```
+
+**Effect:** A verified archive exists locally, is uploaded, and a link is sent.
+**Output:** A structured result (archive, size, encryption, cloud, link).
+**Troubleshoot:** Check /backupstatus and the worker log; add sources with /backsrc.
+**Related:** /backupstatus /backsrc /restore
+
+### /backuplist
+- Purpose: Lists the local backup archives with size and time.
+- Usage: `/backuplist`
+- Panel: backup
+
+**What it does:** Local backup archives with size and time.
+
+**Steps (backend commands):**
+1. List
+   ```
+   backup/local_backups
+   ```
+
+**Effect:** Read-only.
+**Output:** An archive list.
+**Troubleshoot:** Restore with /restore.
+**Related:** /restorelist /restore
+
+### /backupprogress
+- Purpose: Shows the live progress of a running backup (percentage, phase, name).
+- Usage: `/backupprogress`
+- Panel: backup
+
+**What it does:** Live progress of a running backup.
+
+**Steps (backend commands):**
+1. Read
+   ```
+   control/progress.json
+   ```
+
+**Effect:** Read-only.
+**Output:** Percent, phase, and message.
+**Troubleshoot:** Updated during compression and cloud upload.
+**Related:** /backup
+
+### /backupschedule
+- Purpose: View or change the automatic backup schedule: daily at a time, every N hours, or several specific times.
+- Usage: `/backupschedule [daily HH:MM | interval HOURS | times HH:MM,HH:MM | on | off]`
+- Panel: backup
+
+**What it does:** View or change the automatic backup schedule.
+
+**Steps (backend commands):**
+1. Update
+   ```
+   backup/config.json schedule (mode/time/interval/times)
+   ```
+
+**Effect:** The worker applies the new schedule within seconds.
+**Output:** The current schedule with buttons.
+**Troubleshoot:** Modes: daily HH:MM, interval HOURS, times HH:MM,HH:MM.
+**Related:** /backupstatus
+
+### /backupstatus
+- Purpose: Backup worker state, last successful run, schedule, and recent archives.
+- Usage: `/backupstatus`
+- Panel: backup
+
+**What it does:** Worker state, last run, schedule, recent archives.
+
+**Steps (backend commands):**
+1. Read
+   ```
+   control/status.json + logs/last_run.json + local_backups
+   ```
+
+**Effect:** Read-only.
+**Output:** A status summary.
+**Troubleshoot:** Use /backupschedule to change timing.
+**Related:** /backup /backupschedule
+
+### /drill
+- Purpose: Restores the newest archive into an isolated folder and verifies it, then removes the copy. A restore test, not just a CRC check.
+- Usage: `/drill`
+- Panel: backup
+- Risk: dangerous (confirmation required)
+
+**What it does:** Restore drill: restores the newest archive, verifies it, then removes the copy.
+
+**Steps (backend commands):**
+1. Pick the newest archive
+   ```
+   backup/local_backups newest Backup_*.zip
+   ```
+2. Restore + verify
+   ```
+   same steps as /restore
+   ```
+3. Clean up
+   ```
+   remove the temporary restore folder unless keep=true
+   ```
+
+**Effect:** Proves the latest backup can actually be restored.
+**Output:** "Restore drill passed" or a failure with the reason.
+**Troubleshoot:** If it fails, inspect the archive and manifest.
+**Related:** /restore /restorelist /backupstatus
+
+### /restore
+- Purpose: Restores one archive into an isolated folder under the suite and verifies the restored files. It never overwrites the original paths.
+- Usage: `/restore <archive-name>`
+- Panel: backup
+- Risk: dangerous (confirmation required)
+
+**What it does:** Restores one archive into a new isolated folder and verifies it.
+
+**Steps (backend commands):**
+1. Refuse an unsafe destination
+   ```
+   destination must be new/empty with no reparse points
+   ```
+2. Extract
+   ```
+   zip extract into the isolated folder (zip-slip protected)
+   ```
+3. Verify
+   ```
+   each manifest entry: exists, size matches, CRC matches the manifest
+   ```
+
+**Effect:** Files are restored to an isolated folder; originals are untouched.
+**Output:** "restored N files, verified M manifest entries".
+**Troubleshoot:** A missing/invalid manifest aborts; a non-empty destination is refused.
+**Related:** /restorelist /drill /backuplist
+
+### /restorelist
+- Purpose: Lists the local archives available to restore.
+- Usage: `/restorelist`
+- Panel: backup
+
+**What it does:** Archives available to restore.
+
+**Steps (backend commands):**
+1. List
+   ```
+   backup/local_backups
+   ```
+
+**Effect:** Read-only.
+**Output:** An archive list.
+**Troubleshoot:** Restore with /restore <name>.
+**Related:** /restore /drill
+
+## CPU & RAM
+
+### /chart
+- Purpose: Generates a graph image of CPU and RAM over the last 24 hours (one sample per minute) and sends it as a photo.
+- Usage: `/chart`
+- Panel: charts
+
+**What it does:** Graph image of CPU/RAM over the last 24 hours.
+
+**Steps (backend commands):**
+1. Render
+   ```
+   matplotlib from history.json
+   ```
+
+**Effect:** Read-only.
+**Output:** A PNG chart.
+**Troubleshoot:** Needs matplotlib installed.
+**Related:** /report /view
+
+### /ps
+- Purpose: Shows details for processes matching a name.
+- Usage: `/ps <name>`
+- Panel: diagnostics
+
+**What it does:** Details for processes matching a name.
+
+**Steps (backend commands):**
+1. Match
+   ```
+   psutil process_iter by name
+   ```
+2. Detail
+   ```
+   exe, cmdline, user, cpu, memory
+   ```
+
+**Effect:** Read-only.
+**Output:** Process details.
+**Troubleshoot:** Use a distinctive name.
+**Related:** /top /kill
+
+### /report
+- Purpose: Today's report: average and peak CPU/RAM since midnight with the chart, plus today's transferred data. The same report is sent automatically every day at the configured hour.
+- Usage: `/report`
+- Panel: diagnostics
+
+**What it does:** Today's averages and peaks.
+
+**Steps (backend commands):**
+1. Aggregate
+   ```
+   history.json for today
+   ```
+
+**Effect:** Read-only.
+**Output:** Averages and peaks.
+**Troubleshoot:** History builds up over time.
+**Related:** /chart
+
+### /temp
+- Purpose: Reads CPU temperature via WMI and GPU via nvidia-smi. Many VPS machines expose no sensors - in that case it says so.
+- Usage: `/temp`
+- Panel: diagnostics
+
+**What it does:** CPU/GPU temperature when sensors are available.
+
+**Steps (backend commands):**
+1. Read
+   ```
+   WMI/OpenHardwareMonitor sensors via PowerShell
+   ```
+
+**Effect:** Read-only.
+**Output:** Temperature readings.
+**Troubleshoot:** Many VMs expose no sensors.
+**Related:** /view
+
+### /top
+- Purpose: Lists the 10 processes consuming the most CPU and the 10 using the most RAM right now, with PID, memory and CPU per process. Use it to find what is loading the machine.
+- Usage: `/top`
+- Panel: apps
+
+**What it does:** Top processes by CPU and by RAM.
+
+**Steps (backend commands):**
+1. Enumerate
+   ```
+   psutil.process_iter() with cpu_percent and memory_info
+   ```
+
+**Effect:** Read-only.
+**Output:** A ranked process list with PIDs.
+**Troubleshoot:** First sample of a new process may read 0%.
+**Related:** /kill /ps
+
+### /view
+- Purpose: Full live report: CPU %, RAM % and GB used, network speed up/down right now, disk usage with free space, active login sessions count, and machine uptime. Reads information only - changes nothing.
+- Usage: `/view`
+- Panel: live
+
+**What it does:** Live snapshot of CPU, RAM, network, disks, sessions, and uptime.
+
+**Steps (backend commands):**
+1. Sample
+   ```
+   psutil.cpu_percent(), virtual_memory(), net_io_counters(), disk_usage(), boot_time()
+   ```
+
+**Effect:** Read-only.
+**Output:** A formatted report.
+**Troubleshoot:** Values are point-in-time samples.
+**Related:** /top /chart
+
+### /when
+- Purpose: Reports when CPU or RAM last exceeded a threshold, from saved history.
+- Usage: `/when [cpu|ram] [percent]`
+- Panel: diagnostics
+
+**What it does:** When CPU/RAM last exceeded a threshold.
+
+**Steps (backend commands):**
+1. Analyze
+   ```
+   history.json thresholds
+   ```
+
+**Effect:** Read-only.
+**Output:** Timestamps above the threshold.
+**Troubleshoot:** Needs accumulated history.
+**Related:** /chart /report
+
+## Cloud & system images
+
+### /cloud
+- Purpose: Choose the cloud destinations from your existing rclone remotes (enable/disable with buttons) and test the connection.
+- Usage: `/cloud | /cloud test`
+- Panel: backup
+
+**What it does:** Choose cloud destinations from existing rclone remotes and test them.
+
+**Steps (backend commands):**
+1. List
+   ```
+   rclone listremotes
+   ```
+2. Update
+   ```
+   backup/config.json cloud.remotes
+   ```
+3. Test
+   ```
+   rclone lsd <remote>
+   ```
+
+**Effect:** Selected remotes receive each backup.
+**Output:** The destination list with toggle buttons.
+**Troubleshoot:** Create remotes with rclone config; the worker uses the stored rclone.conf.
+**Related:** /backup /backupstatus
+
+### /image
+- Purpose: System image attempt: captures selected volumes into one or more VHDX files while Windows runs. Verify the complete file set and test a restore in a VM before relying on it. Needs free space equal to the used space; if no second disk is present the image is written to the system disk. Optionally uploads via rclone.
+- Usage: `/image start|list|upload|status|progress|stop`
+- Panel: bot-only
+
+**What it does:** System image with disk2vhd: captures the volumes while Windows runs; disk2vhd may create one VHDX per physical disk.
+
+**Steps (backend commands):**
+1. Run
+   ```
+   disk2vhd.exe -c * <file.vhdx>
+   ```
+2. Upload
+   ```
+   rclone copy of the VHDX file(s)
+   ```
+
+**Effect:** One VHDX per physical disk is produced (needs free space equal to used space).
+**Output:** Progress and the file(s).
+**Troubleshoot:** Mount on Hyper-V/Azure directly; for KVM/Proxmox run qemu-img convert -f vhdx -O qcow2. Needs admin rights.
+**Related:** /backup
+
+### /rclone
+- Purpose: Set up cloud upload entirely from chat: install rclone, create remotes (S3/B2/Wasabi/SFTP/WebDAV directly; Google Drive, OneDrive, Dropbox with a pasted token), list/test them, and choose where /image uploads. Stored in one config the SYSTEM worker also uses.
+- Usage: `/rclone [install|gdrive|auth|client|add|token|list|test|set|del]`
+- Panel: panel
+
+**What it does:** Cloud (rclone) setup from chat: install, create remotes, test, set target.
+
+**Steps (backend commands):**
+1. Install
+   ```
+   download rclone-current-windows-amd64.zip -> backup/rclone/rclone.exe
+   ```
+2. Google Drive
+   ```
+   /rclone gdrive runs rclone authorize drive and saves the token
+   ```
+3. OAuth other
+   ```
+   /rclone auth <name> <type> for onedrive/dropbox
+   ```
+4. Non-OAuth
+   ```
+   rclone --config backup/rclone/rclone.conf config create <name> <type> key value ...
+   ```
+5. Target
+   ```
+   config.rclone_remote = <remote:path>
+   ```
+
+**Effect:** Remotes live in backup/rclone/rclone.conf, shared with the SYSTEM worker.
+**Output:** The remote list, a test result, or the active upload target.
+**Troubleshoot:** OAuth types (drive/onedrive/dropbox) need a token from rclone authorize on any device.
+**Related:** /image /cloud
+
+## Device actions
 
 ### /cancel_restart
 - Purpose: Cancels a scheduled restart/shutdown inside the cancel window.
@@ -212,7 +630,25 @@
 **Troubleshoot:** Use the exact service name; needs admin rights.
 **Related:** /startup
 
-## Maintenance
+## Diagnostics & logs
+
+### /bigfiles
+- Purpose: Scans the system drive and lists the 20 largest files with their full paths. Use it when the disk is full. The scan can take a few minutes.
+- Usage: `/bigfiles`
+- Panel: diagnostics
+
+**What it does:** 20 largest files on the system drive.
+
+**Steps (backend commands):**
+1. Scan
+   ```
+   walk the system drive and sort by size
+   ```
+
+**Effect:** Read-only.
+**Output:** A largest-files list.
+**Troubleshoot:** Excludes protected system paths.
+**Related:** /clean
 
 ### /botlog
 - Purpose: Sends the tail of the tool's own log file (rdp_monitor.log) - use it when the tool itself misbehaves.
@@ -231,50 +667,6 @@
 **Output:** Recent log lines.
 **Troubleshoot:** Rotate if it grows large.
 **Related:** /diagnose
-
-### /clean
-- Purpose: Deletes files older than 24h from TEMP folders and empties the Recycle Bin, then reports how much space was freed. Locked files are skipped safely.
-- Usage: `/clean`
-- Panel: ctl
-
-**What it does:** Cleans old TEMP files and the recycle bin.
-
-**Steps (backend commands):**
-1. Delete old TEMP files
-   ```
-   os.unlink() for files older than 24h in %TEMP% and C:\Windows\Temp
-   ```
-2. Empty the recycle bin
-   ```
-   Clear-RecycleBin -Force
-   ```
-
-**Effect:** Frees disk space.
-**Output:** Files removed and space freed.
-**Troubleshoot:** Locked files are skipped.
-**Related:** /bigfiles /view
-
-### /configbackup
-- Purpose: Sends a copy of the configuration with secrets hidden.
-- Usage: `/configbackup`
-- Panel: diagnostics
-
-**What it does:** Sends a copy of the configuration with secrets hidden.
-
-**Steps (backend commands):**
-1. Redact
-   ```
-   remove credential fields by key name (any type)
-   ```
-2. Send
-   ```
-   sendDocument
-   ```
-
-**Effect:** A redacted config copy is sent.
-**Output:** The JSON file.
-**Troubleshoot:** Secrets are never included.
-**Related:** /status
 
 ### /diagnose
 - Purpose: Analyzes recent System/Application error events and explains likely causes.
@@ -338,6 +730,11 @@
 **Troubleshoot:** Try /exportlogs system if the combined size is too large.
 **Related:** /dumps /botlog
 
+### /getlog
+- Purpose: Shows the bot's recent log; alias of /botlog.
+- Usage: `/getlog`
+- Panel: bot-only
+
 ### /logstats
 - Purpose: Groups system log events by source for the last N days.
 - Usage: `/logstats [days]`
@@ -356,218 +753,152 @@
 **Troubleshoot:** Use a longer window for rare errors.
 **Related:** /diagnose
 
-### /mute
-- Purpose: Silences non-critical alerts (usage, disk, temp, sessions) for a period. Security and critical alerts always arrive.
-- Usage: `/mute 3h | /mute off`
-- Panel: ctl
+### /startup
+- Purpose: Inventory of autostart entries: registry Run keys and non-Microsoft scheduled tasks. Anything unfamiliar here is a classic malware persistence spot.
+- Usage: `/startup`
+- Panel: diagnostics
 
-**What it does:** Silences non-critical alerts for a period.
-
-**Steps (backend commands):**
-1. Set
-   ```
-   config.mute_until = now + duration
-   ```
-
-**Effect:** Routine alerts pause; security alerts continue.
-**Output:** A confirmation.
-**Troubleshoot:** /mute off restores alerts.
-**Related:** /status
-
-### /set
-- Purpose: Detailed settings guide with current values and examples.
-- Usage: `/set`
-- Panel: settings
-
-**What it does:** Detailed settings guide and value changes.
-
-**Steps (backend commands):**
-1. Update
-   ```
-   config[key] = value; save_config()
-   ```
-
-**Effect:** The setting changes immediately.
-**Output:** A confirmation.
-**Troubleshoot:** Use /set with no args for the guide.
-**Related:** /status
-
-### /status
-- Purpose: Current value of every setting in one message.
-- Usage: `/status`
-- Panel: settings
-
-**What it does:** Current value of every setting.
+**What it does:** Autostart inventory: Run keys and non-Microsoft scheduled tasks.
 
 **Steps (backend commands):**
 1. Read
    ```
-   config.json
+   registry Run keys + Get-ScheduledTask
    ```
 
 **Effect:** Read-only.
-**Output:** A settings summary.
-**Troubleshoot:** Change values with /set.
-**Related:** /set
+**Output:** A startup list.
+**Troubleshoot:** Compare against expected entries.
+**Related:** /sysinfo
 
-### /test
-- Purpose: Sends a test message to confirm the bot can reach you.
-- Usage: `/test`
-- Panel: ctl
+### /sysinfo
+- Purpose: System card: Windows version, CPU model, RAM size and pressure, pagefile usage, uptime, and whether a reboot is pending (from Windows Update).
+- Usage: `/sysinfo`
+- Panel: tools
 
-**What it does:** Sends a test message to verify the alert channel.
-
-**Steps (backend commands):**
-1. Send
-   ```
-   sendMessage to the configured chat
-   ```
-
-**Effect:** A test message arrives.
-**Output:** The test message.
-**Troubleshoot:** If it fails, check the token and chat id.
-**Related:** /status
-
-### /update
-- Purpose: Self-updates from the configured HTTPS URL and SHA-256 fingerprint.
-- Usage: `/update`
-- Panel: ctl
-- Risk: dangerous (confirmation required)
-
-**What it does:** Self-update from the configured HTTPS URL and SHA-256.
+**What it does:** OS, hardware, pagefile, pending reboot.
 
 **Steps (backend commands):**
-1. Download
+1. Collect
    ```
-   HTTPS GET update_url
-   ```
-2. Verify
-   ```
-   SHA-256 matches update_hash
-   ```
-3. Apply
-   ```
-   replace the script
+   platform + psutil + Get-CimInstance
    ```
 
-**Effect:** The tool updates to the new version.
-**Output:** A success or failure notice.
-**Troubleshoot:** Requires HTTPS and a matching hash; disabled by default.
-**Related:** /status
+**Effect:** Read-only.
+**Output:** System details.
+**Troubleshoot:** Pending-reboot reads the registry.
+**Related:** /startup
 
-### /watch
-- Purpose: Alerts when a program exceeds a RAM limit.
-- Usage: `/watch list | add <name> <MB> | del <name>`
-- Panel: automation
-
-**What it does:** Alerts when a program exceeds a RAM limit.
-
-**Steps (backend commands):**
-1. Sample
-   ```
-   psutil process memory per matching name each cycle
-   ```
-
-**Effect:** A warning when the limit is exceeded (cooldown 10 min).
-**Output:** The program and its current RAM.
-**Troubleshoot:** Use /watch add <name> <MB>.
-**Related:** /top
-
-## Monitoring
-
-### /bigfiles
-- Purpose: Scans the system drive and lists the 20 largest files with their full paths. Use it when the disk is full. The scan can take a few minutes.
-- Usage: `/bigfiles`
+### /updates
+- Purpose: Queries Windows Update: number of pending updates with titles, and whether a reboot is pending.
+- Usage: `/updates`
 - Panel: diagnostics
 
-**What it does:** 20 largest files on the system drive.
-
-**Steps (backend commands):**
-1. Scan
-   ```
-   walk the system drive and sort by size
-   ```
-
-**Effect:** Read-only.
-**Output:** A largest-files list.
-**Troubleshoot:** Excludes protected system paths.
-**Related:** /clean
-
-### /chart
-- Purpose: Generates a graph image of CPU and RAM over the last 24 hours (one sample per minute) and sends it as a photo.
-- Usage: `/chart`
-- Panel: charts
-
-**What it does:** Graph image of CPU/RAM over the last 24 hours.
-
-**Steps (backend commands):**
-1. Render
-   ```
-   matplotlib from history.json
-   ```
-
-**Effect:** Read-only.
-**Output:** A PNG chart.
-**Troubleshoot:** Needs matplotlib installed.
-**Related:** /report /view
-
-### /firewall
-- Purpose: Shows whether the Domain/Private/Public firewall profiles are enabled and lists every inbound allow port.
-- Usage: `/firewall`
-- Panel: diagnostics
-
-**What it does:** Shows firewall profile state and RDP-related rules (read-only).
-
-**Steps (backend commands):**
-1. Profile state
-   ```
-   netsh advfirewall show allprofiles
-   ```
-2. RDP rules
-   ```
-   Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow ...
-   ```
-
-**Effect:** No changes; a report only.
-**Output:** Profile table and rule list.
-**Troubleshoot:** If profiles show off, enable the firewall from Windows Security.
-**Related:** /rdpallow /harden
-
-### /listusers
-- Purpose: Lists all local Windows accounts and marks which ones are administrators.
-- Usage: `/listusers`
-- Panel: users
-
-**What it does:** Lists local Windows accounts.
-
-**Steps (backend commands):**
-1. Enumerate
-   ```
-   Get-LocalUser
-   ```
-
-**Effect:** Read-only.
-**Output:** A user table.
-**Troubleshoot:** Run from an administrator account.
-**Related:** /adduser /logins
-
-### /logins
-- Purpose: Last successful RDP logins from the Security event log: time, username, source IP. Use it after any suspicion - it shows who actually got in.
-- Usage: `/logins`
-- Panel: diagnostics
-
-**What it does:** Last successful RDP logins with source IPs.
+**What it does:** Pending Windows updates and reboot flag.
 
 **Steps (backend commands):**
 1. Query
    ```
-   Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624}
+   Windows Update COM API / USOClient
    ```
 
 **Effect:** Read-only.
-**Output:** A login list.
-**Troubleshoot:** Needs audit logon events enabled.
-**Related:** /rdp /blocklist
+**Output:** A pending-update list.
+**Troubleshoot:** Can be slow on first run.
+**Related:** /sysinfo
+
+## Help & navigation
+
+### /docs
+- Purpose: Documentation database: what runs behind each command, its effect, and troubleshooting. /docs shows the index; /docs <command> shows one card.
+- Usage: `/docs [command]`
+- Panel: docs
+
+**What it does:** The documentation database (index and per-command documents).
+
+**Steps (backend commands):**
+1. Render
+   ```
+   COMMAND_INFO + COMMAND_DOCS + PANEL_COVERAGE
+   ```
+
+**Effect:** Read-only.
+**Output:** An index or a full document.
+**Troubleshoot:** Generated to docs/COMMANDS.md too.
+**Related:** /help
+
+### /help
+- Purpose: This reference.
+- Usage: `/help`
+- Panel: bot-only
+
+**What it does:** The full command reference.
+
+**Steps (backend commands):**
+1. Render
+   ```
+   HELP_TEXT
+   ```
+
+**Effect:** Read-only.
+**Output:** The reference.
+**Troubleshoot:** Use /docs <command> for details.
+**Related:** /docs
+
+### /menu
+- Purpose: Shows the interactive button menu.
+- Usage: `/menu`
+- Panel: bot-only
+
+**What it does:** The interactive button menu.
+
+**Steps (backend commands):**
+1. Render
+   ```
+   MENU_PAGES
+   ```
+
+**Effect:** Read-only.
+**Output:** The menu.
+**Troubleshoot:** Tap a section to expand it.
+**Related:** /help
+
+### /noop
+- Purpose: Cancels a pending action (used by the Cancel buttons).
+- Usage: `/noop`
+- Panel: bot-only
+
+**What it does:** Cancels a pending action.
+
+**Steps (backend commands):**
+1. No-op
+   ```
+   nothing is executed
+   ```
+
+**Effect:** The pending action is dropped.
+**Output:** A cancellation notice.
+**Troubleshoot:** Used by Cancel buttons.
+
+### /start
+- Purpose: Opens the main button menu.
+- Usage: `/start`
+- Panel: bot-only
+
+**What it does:** Opens the main menu.
+
+**Steps (backend commands):**
+1. Render
+   ```
+   MENU_PAGES['root']
+   ```
+
+**Effect:** Read-only.
+**Output:** The main menu.
+**Troubleshoot:** Same as /menu.
+**Related:** /menu
+
+## Network & traffic
 
 ### /net
 - Purpose: Current download/upload speed, plus total data transferred since the machine booted.
@@ -623,68 +954,6 @@
 **Troubleshoot:** Use a hostname or IP.
 **Related:** /net /speedtest
 
-### /ps
-- Purpose: Shows details for processes matching a name.
-- Usage: `/ps <name>`
-- Panel: diagnostics
-
-**What it does:** Details for processes matching a name.
-
-**Steps (backend commands):**
-1. Match
-   ```
-   psutil process_iter by name
-   ```
-2. Detail
-   ```
-   exe, cmdline, user, cpu, memory
-   ```
-
-**Effect:** Read-only.
-**Output:** Process details.
-**Troubleshoot:** Use a distinctive name.
-**Related:** /top /kill
-
-### /rdp
-- Purpose: Lists active RDP sessions (user, session, state, ID) and every remote IP currently connected to the RDP port via netstat.
-- Usage: `/rdp`
-- Panel: sec
-
-**What it does:** Shows active RDP sessions and remote IPs.
-
-**Steps (backend commands):**
-1. Sessions
-   ```
-   qwinsta
-   ```
-2. Recent logins
-   ```
-   Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624;StartTime=$st}
-   ```
-
-**Effect:** Read-only.
-**Output:** Sessions and caller IPs.
-**Troubleshoot:** Combine with /blocklist for banned callers.
-**Related:** /logins /blocklist
-
-### /report
-- Purpose: Today's report: average and peak CPU/RAM since midnight with the chart, plus today's transferred data. The same report is sent automatically every day at the configured hour.
-- Usage: `/report`
-- Panel: diagnostics
-
-**What it does:** Today's averages and peaks.
-
-**Steps (backend commands):**
-1. Aggregate
-   ```
-   history.json for today
-   ```
-
-**Effect:** Read-only.
-**Output:** Averages and peaks.
-**Troubleshoot:** History builds up over time.
-**Related:** /chart
-
 ### /speedtest
 - Purpose: Measures real internet speed via Cloudflare (~20 seconds): ping, download and upload Mbps.
 - Usage: `/speedtest`
@@ -702,78 +971,6 @@
 **Output:** Mbps down/up and latency.
 **Troubleshoot:** Consumes bandwidth; run sparingly.
 **Related:** /net /nettest
-
-### /startup
-- Purpose: Inventory of autostart entries: registry Run keys and non-Microsoft scheduled tasks. Anything unfamiliar here is a classic malware persistence spot.
-- Usage: `/startup`
-- Panel: diagnostics
-
-**What it does:** Autostart inventory: Run keys and non-Microsoft scheduled tasks.
-
-**Steps (backend commands):**
-1. Read
-   ```
-   registry Run keys + Get-ScheduledTask
-   ```
-
-**Effect:** Read-only.
-**Output:** A startup list.
-**Troubleshoot:** Compare against expected entries.
-**Related:** /sysinfo
-
-### /sysinfo
-- Purpose: System card: Windows version, CPU model, RAM size and pressure, pagefile usage, uptime, and whether a reboot is pending (from Windows Update).
-- Usage: `/sysinfo`
-- Panel: tools
-
-**What it does:** OS, hardware, pagefile, pending reboot.
-
-**Steps (backend commands):**
-1. Collect
-   ```
-   platform + psutil + Get-CimInstance
-   ```
-
-**Effect:** Read-only.
-**Output:** System details.
-**Troubleshoot:** Pending-reboot reads the registry.
-**Related:** /startup
-
-### /temp
-- Purpose: Reads CPU temperature via WMI and GPU via nvidia-smi. Many VPS machines expose no sensors - in that case it says so.
-- Usage: `/temp`
-- Panel: diagnostics
-
-**What it does:** CPU/GPU temperature when sensors are available.
-
-**Steps (backend commands):**
-1. Read
-   ```
-   WMI/OpenHardwareMonitor sensors via PowerShell
-   ```
-
-**Effect:** Read-only.
-**Output:** Temperature readings.
-**Troubleshoot:** Many VMs expose no sensors.
-**Related:** /view
-
-### /top
-- Purpose: Lists the 10 processes consuming the most CPU and the 10 using the most RAM right now, with PID, memory and CPU per process. Use it to find what is loading the machine.
-- Usage: `/top`
-- Panel: apps
-
-**What it does:** Top processes by CPU and by RAM.
-
-**Steps (backend commands):**
-1. Enumerate
-   ```
-   psutil.process_iter() with cpu_percent and memory_info
-   ```
-
-**Effect:** Read-only.
-**Output:** A ranked process list with PIDs.
-**Troubleshoot:** First sample of a new process may read 0%.
-**Related:** /kill /ps
 
 ### /traffic
 - Purpose: Bandwidth accounting: today, the current billing cycle, quota bar, all-time total, and a daily table. Counted machine-wide (all users), persisted in traffic.json.
@@ -793,535 +990,37 @@
 **Troubleshoot:** Quota alerts are configured with /set traffic.
 **Related:** /net
 
-### /updates
-- Purpose: Queries Windows Update: number of pending updates with titles, and whether a reboot is pending.
-- Usage: `/updates`
-- Panel: diagnostics
-
-**What it does:** Pending Windows updates and reboot flag.
-
-**Steps (backend commands):**
-1. Query
-   ```
-   Windows Update COM API / USOClient
-   ```
-
-**Effect:** Read-only.
-**Output:** A pending-update list.
-**Troubleshoot:** Can be slow on first run.
-**Related:** /sysinfo
-
-### /view
-- Purpose: Full live report: CPU %, RAM % and GB used, network speed up/down right now, disk usage with free space, active login sessions count, and machine uptime. Reads information only - changes nothing.
-- Usage: `/view`
-- Panel: live
-
-**What it does:** Live snapshot of CPU, RAM, network, disks, sessions, and uptime.
-
-**Steps (backend commands):**
-1. Sample
-   ```
-   psutil.cpu_percent(), virtual_memory(), net_io_counters(), disk_usage(), boot_time()
-   ```
-
-**Effect:** Read-only.
-**Output:** A formatted report.
-**Troubleshoot:** Values are point-in-time samples.
-**Related:** /top /chart
-
-### /when
-- Purpose: Reports when CPU or RAM last exceeded a threshold, from saved history.
-- Usage: `/when [cpu|ram] [percent]`
-- Panel: diagnostics
-
-**What it does:** When CPU/RAM last exceeded a threshold.
-
-**Steps (backend commands):**
-1. Analyze
-   ```
-   history.json thresholds
-   ```
-
-**Effect:** Read-only.
-**Output:** Timestamps above the threshold.
-**Troubleshoot:** Needs accumulated history.
-**Related:** /chart /report
-
-## Other
-
-### /backupschedule
-- Purpose: View or change the automatic backup schedule: daily at a time, every N hours, or several specific times.
-- Usage: `/backupschedule [daily HH:MM | interval HOURS | times HH:MM,HH:MM | on | off]`
-- Panel: backup
-
-**What it does:** View or change the automatic backup schedule.
-
-**Steps (backend commands):**
-1. Update
-   ```
-   backup/config.json schedule (mode/time/interval/times)
-   ```
-
-**Effect:** The worker applies the new schedule within seconds.
-**Output:** The current schedule with buttons.
-**Troubleshoot:** Modes: daily HH:MM, interval HOURS, times HH:MM,HH:MM.
-**Related:** /backupstatus
-
-### /cloud
-- Purpose: Choose the cloud destinations from your existing rclone remotes (enable/disable with buttons) and test the connection.
-- Usage: `/cloud | /cloud test`
-- Panel: backup
-
-**What it does:** Choose cloud destinations from existing rclone remotes and test them.
-
-**Steps (backend commands):**
-1. List
-   ```
-   rclone listremotes
-   ```
-2. Update
-   ```
-   backup/config.json cloud.remotes
-   ```
-3. Test
-   ```
-   rclone lsd <remote>
-   ```
-
-**Effect:** Selected remotes receive each backup.
-**Output:** The destination list with toggle buttons.
-**Troubleshoot:** Create remotes with rclone config; the worker uses the stored rclone.conf.
-**Related:** /backup /backupstatus
-
-### /docs
-- Purpose: Documentation database: what runs behind each command, its effect, and troubleshooting. /docs shows the index; /docs <command> shows one card.
-- Usage: `/docs [command]`
-- Panel: docs
-
-**What it does:** The documentation database (index and per-command documents).
-
-**Steps (backend commands):**
-1. Render
-   ```
-   COMMAND_INFO + COMMAND_DOCS + PANEL_COVERAGE
-   ```
-
-**Effect:** Read-only.
-**Output:** An index or a full document.
-**Troubleshoot:** Generated to docs/COMMANDS.md too.
-**Related:** /help
-
-### /getlog
-- Purpose: Shows the bot's recent log; alias of /botlog.
-- Usage: `/getlog`
-- Panel: bot-only
+## Programs & services
 
 ### /keepalive
 - Purpose: Lists or manages programs restarted automatically when they stop.
 - Usage: `/keepalive list|add|del`
 - Panel: automation
 
-### /menu
-- Purpose: Shows the interactive button menu.
-- Usage: `/menu`
-- Panel: bot-only
-
-**What it does:** The interactive button menu.
-
-**Steps (backend commands):**
-1. Render
-   ```
-   MENU_PAGES
-   ```
-
-**Effect:** Read-only.
-**Output:** The menu.
-**Troubleshoot:** Tap a section to expand it.
-**Related:** /help
-
-### /noop
-- Purpose: Cancels a pending action (used by the Cancel buttons).
-- Usage: `/noop`
-- Panel: bot-only
-
-**What it does:** Cancels a pending action.
-
-**Steps (backend commands):**
-1. No-op
-   ```
-   nothing is executed
-   ```
-
-**Effect:** The pending action is dropped.
-**Output:** A cancellation notice.
-**Troubleshoot:** Used by Cancel buttons.
-
-### /start
-- Purpose: Opens the main button menu.
-- Usage: `/start`
-- Panel: bot-only
-
-**What it does:** Opens the main menu.
-
-**Steps (backend commands):**
-1. Render
-   ```
-   MENU_PAGES['root']
-   ```
-
-**Effect:** Read-only.
-**Output:** The main menu.
-**Troubleshoot:** Same as /menu.
-**Related:** /menu
-
 ### /svcwatch
 - Purpose: Lists or manages Windows services restarted automatically when they stop.
 - Usage: `/svcwatch list|add|del`
 - Panel: automation
 
-## Panel & Backup
+### /watch
+- Purpose: Alerts when a program exceeds a RAM limit.
+- Usage: `/watch list | add <name> <MB> | del <name>`
+- Panel: automation
 
-### /backsrc
-- Purpose: Manage what gets backed up: list sources, add or remove a file/folder, or browse with a desktop-style file browser (drives, breadcrumbs, folders and files, paging).
-- Usage: `/backsrc list | add <path> | remove <index|path> | browse [path] | drives`
-- Panel: backup
-
-**What it does:** Manage what gets backed up (add/remove/browse).
+**What it does:** Alerts when a program exceeds a RAM limit.
 
 **Steps (backend commands):**
-1. Update
+1. Sample
    ```
-   backup/config.json backup.sources
-   ```
-2. Reload
-   ```
-   worker reloads config before the next run
+   psutil process memory per matching name each cycle
    ```
 
-**Effect:** The backup set changes.
-**Output:** The updated source list.
-**Troubleshoot:** Missing sources abort the backup (fail closed).
-**Related:** /backup /backupstatus
+**Effect:** A warning when the limit is exceeded (cooldown 10 min).
+**Output:** The program and its current RAM.
+**Troubleshoot:** Use /watch add <name> <MB>.
+**Related:** /top
 
-### /backup
-- Purpose: Queues a manual backup on the isolated SYSTEM worker. It reports here when it finishes.
-- Usage: `/backup`
-- Panel: backup
-
-**What it does:** Runs a backup now: archive, verify, upload to cloud, and report a link.
-
-**Steps (backend commands):**
-1. Queue the request
-   ```
-   write backup/control/request.json
-   ```
-2. SYSTEM worker picks it up
-   ```
-   create_backup(): collect files, zip (AES if password), verify CRC, write manifest
-   ```
-3. Upload to the cloud
-   ```
-   rclone copy <archive> <remote>:VPS-Backups --stats-one-line
-   ```
-4. Create a share link
-   ```
-   rclone link <remote>:VPS-Backups/<archive>
-   ```
-5. Deliver
-   ```
-   Telegram message + link; local retention keeps 3 copies
-   ```
-
-**Effect:** A verified archive exists locally, is uploaded, and a link is sent.
-**Output:** A structured result (archive, size, encryption, cloud, link).
-**Troubleshoot:** Check /backupstatus and the worker log; add sources with /backsrc.
-**Related:** /backupstatus /backsrc /restore
-
-### /backuplist
-- Purpose: Lists the local backup archives with size and time.
-- Usage: `/backuplist`
-- Panel: backup
-
-**What it does:** Local backup archives with size and time.
-
-**Steps (backend commands):**
-1. List
-   ```
-   backup/local_backups
-   ```
-
-**Effect:** Read-only.
-**Output:** An archive list.
-**Troubleshoot:** Restore with /restore.
-**Related:** /restorelist /restore
-
-### /backupprogress
-- Purpose: Shows the live progress of a running backup (percentage, phase, name).
-- Usage: `/backupprogress`
-- Panel: backup
-
-**What it does:** Live progress of a running backup.
-
-**Steps (backend commands):**
-1. Read
-   ```
-   control/progress.json
-   ```
-
-**Effect:** Read-only.
-**Output:** Percent, phase, and message.
-**Troubleshoot:** Updated during compression and cloud upload.
-**Related:** /backup
-
-### /backupstatus
-- Purpose: Backup worker state, last successful run, schedule, and recent archives.
-- Usage: `/backupstatus`
-- Panel: backup
-
-**What it does:** Worker state, last run, schedule, recent archives.
-
-**Steps (backend commands):**
-1. Read
-   ```
-   control/status.json + logs/last_run.json + local_backups
-   ```
-
-**Effect:** Read-only.
-**Output:** A status summary.
-**Troubleshoot:** Use /backupschedule to change timing.
-**Related:** /backup /backupschedule
-
-### /drill
-- Purpose: Restores the newest archive into an isolated folder and verifies it, then removes the copy. A restore test, not just a CRC check.
-- Usage: `/drill`
-- Panel: backup
-- Risk: dangerous (confirmation required)
-
-**What it does:** Restore drill: restores the newest archive, verifies it, then removes the copy.
-
-**Steps (backend commands):**
-1. Pick the newest archive
-   ```
-   backup/local_backups newest Backup_*.zip
-   ```
-2. Restore + verify
-   ```
-   same steps as /restore
-   ```
-3. Clean up
-   ```
-   remove the temporary restore folder unless keep=true
-   ```
-
-**Effect:** Proves the latest backup can actually be restored.
-**Output:** "Restore drill passed" or a failure with the reason.
-**Troubleshoot:** If it fails, inspect the archive and manifest.
-**Related:** /restore /restorelist /backupstatus
-
-### /image
-- Purpose: System image attempt: captures selected volumes into one or more VHDX files while Windows runs. Verify the complete file set and test a restore in a VM before relying on it. Needs free space equal to the used space; if no second disk is present the image is written to the system disk. Optionally uploads via rclone.
-- Usage: `/image start|list|upload|status|progress|stop`
-- Panel: bot-only
-
-**What it does:** System image with disk2vhd: captures the volumes while Windows runs; disk2vhd may create one VHDX per physical disk.
-
-**Steps (backend commands):**
-1. Run
-   ```
-   disk2vhd.exe -c * <file.vhdx>
-   ```
-2. Upload
-   ```
-   rclone copy of the VHDX file(s)
-   ```
-
-**Effect:** One VHDX per physical disk is produced (needs free space equal to used space).
-**Output:** Progress and the file(s).
-**Troubleshoot:** Mount on Hyper-V/Azure directly; for KVM/Proxmox run qemu-img convert -f vhdx -O qcow2. Needs admin rights.
-**Related:** /backup
-
-### /panel
-- Purpose: WebConsole panel: shows the local URL and a button to reveal the login token on demand.
-- Usage: `/panel`
-- Panel: panel
-
-**What it does:** Shows the WebConsole URL and a token button.
-
-**Steps (backend commands):**
-1. Read
-   ```
-   webconsole_state.json port
-   ```
-
-**Effect:** Read-only.
-**Output:** The URL and a Get-token button.
-**Troubleshoot:** Local-only unless remote mode is configured.
-**Related:** /paneltoken /panelstatus
-
-### /panelremote
-- Purpose: Turns remote access to the WebConsole panel on or off. On enables HTTPS on 0.0.0.0 with a self-signed certificate and a firewall/IP allow-list (loopback + Tailscale + this host). open allows any IP; allow/deny edit the list.
-- Usage: `/panelremote on|off|status|open|allow <ip>|deny <ip>`
-- Panel: panel
-
-**What it does:** Turns remote access to the panel on or off.
-
-**Steps (backend commands):**
-1. Generate
-   ```
-   self-signed TLS cert -> webconsole/tls/panel.crt.pem
-   ```
-2. Set
-   ```
-   webconsole_state.json bind=0.0.0.0 + allowed_ips
-   ```
-3. Firewall
-   ```
-   netsh advfirewall add rule remoteip=<allow-list>
-   ```
-4. Restart
-   ```
-   supervisor rebinds the WebConsole on 0.0.0.0:8399
-   ```
-
-**Effect:** The panel answers on https://<host-ip>:8399/ for allowed IPs only.
-**Output:** Enabled/disabled and the reachable URLs.
-**Troubleshoot:** on allows loopback + Tailscale 100.64.0.0/10 + this host; use allow <ip> for more, open for any IP, off to revert.
-**Related:** /panel /panelstatus
-
-### /panelstatus
-- Purpose: Checks whether the WebConsole is reachable and whether a login token is stored.
-- Usage: `/panelstatus`
-- Panel: panel
-
-**What it does:** Checks whether the WebConsole is reachable.
-
-**Steps (backend commands):**
-1. Probe
-   ```
-   HTTP GET /health on 127.0.0.1:<port>
-   ```
-
-**Effect:** Read-only.
-**Output:** Reachable yes/no and token stored.
-**Troubleshoot:** If down, check the RDPSuite task.
-**Related:** /panel
-
-### /paneltoken
-- Purpose: Reveals the current WebConsole login token in chat.
-- Usage: `/paneltoken`
-- Panel: panel
-
-**What it does:** Reveals the WebConsole login token.
-
-**Steps (backend commands):**
-1. Read
-   ```
-   token_enc -> DPAPI unprotect
-   ```
-
-**Effect:** The token is sent.
-**Output:** The token.
-**Troubleshoot:** Rotate if leaked.
-**Related:** /panel
-
-### /rclone
-- Purpose: Set up cloud upload entirely from chat: install rclone, create remotes (S3/B2/Wasabi/SFTP/WebDAV directly; Google Drive, OneDrive, Dropbox with a pasted token), list/test them, and choose where /image uploads. Stored in one config the SYSTEM worker also uses.
-- Usage: `/rclone [install|gdrive|auth|client|add|token|list|test|set|del]`
-- Panel: panel
-
-**What it does:** Cloud (rclone) setup from chat: install, create remotes, test, set target.
-
-**Steps (backend commands):**
-1. Install
-   ```
-   download rclone-current-windows-amd64.zip -> backup/rclone/rclone.exe
-   ```
-2. Google Drive
-   ```
-   /rclone gdrive runs rclone authorize drive and saves the token
-   ```
-3. OAuth other
-   ```
-   /rclone auth <name> <type> for onedrive/dropbox
-   ```
-4. Non-OAuth
-   ```
-   rclone --config backup/rclone/rclone.conf config create <name> <type> key value ...
-   ```
-5. Target
-   ```
-   config.rclone_remote = <remote:path>
-   ```
-
-**Effect:** Remotes live in backup/rclone/rclone.conf, shared with the SYSTEM worker.
-**Output:** The remote list, a test result, or the active upload target.
-**Troubleshoot:** OAuth types (drive/onedrive/dropbox) need a token from rclone authorize on any device.
-**Related:** /image /cloud
-
-### /restore
-- Purpose: Restores one archive into an isolated folder under the suite and verifies the restored files. It never overwrites the original paths.
-- Usage: `/restore <archive-name>`
-- Panel: backup
-- Risk: dangerous (confirmation required)
-
-**What it does:** Restores one archive into a new isolated folder and verifies it.
-
-**Steps (backend commands):**
-1. Refuse an unsafe destination
-   ```
-   destination must be new/empty with no reparse points
-   ```
-2. Extract
-   ```
-   zip extract into the isolated folder (zip-slip protected)
-   ```
-3. Verify
-   ```
-   each manifest entry: exists, size matches, CRC matches the manifest
-   ```
-
-**Effect:** Files are restored to an isolated folder; originals are untouched.
-**Output:** "restored N files, verified M manifest entries".
-**Troubleshoot:** A missing/invalid manifest aborts; a non-empty destination is refused.
-**Related:** /restorelist /drill /backuplist
-
-### /restorelist
-- Purpose: Lists the local archives available to restore.
-- Usage: `/restorelist`
-- Panel: backup
-
-**What it does:** Archives available to restore.
-
-**Steps (backend commands):**
-1. List
-   ```
-   backup/local_backups
-   ```
-
-**Effect:** Read-only.
-**Output:** An archive list.
-**Troubleshoot:** Restore with /restore <name>.
-**Related:** /restore /drill
-
-### /token
-- Purpose: Reveals the WebConsole login token.
-- Usage: `/token`
-- Panel: panel
-
-**What it does:** Reveals the WebConsole login token.
-
-**Steps (backend commands):**
-1. Read
-   ```
-   webconsole_state.json token_enc -> DPAPI unprotect
-   ```
-
-**Effect:** The panel login token is sent.
-**Output:** The token (keep it private).
-**Troubleshoot:** Rotate with the panel rotate-token command if leaked.
-**Related:** /panel /paneltoken
-
-## Security
+## RDP security & firewall
 
 ### /allow
 - Purpose: Manage trusted Telegram user IDs allowed to control the device.
@@ -1418,6 +1117,28 @@
 **Output:** "Banned <net>.0/24 (network)".
 **Troubleshoot:** Confirm the network is not yours; remove with /unblock on the /24 entry.
 **Related:** /block /unblock
+
+### /firewall
+- Purpose: Diagnoses effective RDP firewall policy, client-logon allow rules, broad inbound blocks, policy sources, listener and NLA. External access remains unverified.
+- Usage: `/firewall`
+- Panel: diagnostics
+
+**What it does:** Read-only RDP connectivity diagnosis using effective ActiveStore policy.
+
+**Steps (backend commands):**
+1. Effective policy
+   ```
+   Get-NetFirewallProfile -PolicyStore ActiveStore; Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore -Direction Inbound
+   ```
+2. RDP endpoints
+   ```
+   Read RDP registry port, TermService and TCP listeners; inspect rule port/address/application/service filters
+   ```
+
+**Effect:** No changes; a report only.
+**Output:** Local issues, potential RDP TCP allows, broad/conditional blocks, policy origin and external-verification requirement.
+**Troubleshoot:** Shadow is not a client-logon allow. Unknown/GroupPolicy/sandbox blocks are never disabled automatically. Verify the actual address/port from an authorized independent host.
+**Related:** /rdpallow /harden
 
 ### /harden
 - Purpose: Audits RDP hardening: NLA enabled, account lockout policy, Administrator account renamed. '/harden fix' auto-fixes the first two (needs confirm).
@@ -1652,7 +1373,7 @@
 **Troubleshoot:** Learned IPs are used only during lockdown if enabled.
 **Related:** /rdpallow /lockdown
 
-## Users
+## Sessions & accounts
 
 ### /adduser
 - Purpose: Creates a local Windows account: /adduser name password for a normal user with RDP access, or add 'admin' to make it an administrator. The password stays visible in chat history - change it later if the chat is shared.
@@ -1734,6 +1455,42 @@
 **Troubleshoot:** Pair with /disableuser.
 **Related:** /disableuser /listusers
 
+### /listusers
+- Purpose: Lists all local Windows accounts and marks which ones are administrators.
+- Usage: `/listusers`
+- Panel: users
+
+**What it does:** Lists local Windows accounts.
+
+**Steps (backend commands):**
+1. Enumerate
+   ```
+   Get-LocalUser
+   ```
+
+**Effect:** Read-only.
+**Output:** A user table.
+**Troubleshoot:** Run from an administrator account.
+**Related:** /adduser /logins
+
+### /logins
+- Purpose: Last successful RDP logins from the Security event log: time, username, source IP. Use it after any suspicion - it shows who actually got in.
+- Usage: `/logins`
+- Panel: diagnostics
+
+**What it does:** Successful remote-interactive RDP logins from the last three days (up to 5,000 events scanned).
+
+**Steps (backend commands):**
+1. Query
+   ```
+   Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624}
+   ```
+
+**Effect:** Read-only.
+**Output:** UTC event time, domain/account, source IP and event record ID.
+**Troubleshoot:** Needs Security log read permission and successful Logon auditing. Query failure is reported separately from an empty result.
+**Related:** /rdp /blocklist
+
 ### /logoff
 - Purpose: Forces a user's RDP session to end immediately. Programs running in that session close without saving.
 - Usage: `/logoff <name> confirm`
@@ -1752,6 +1509,28 @@
 **Output:** "done" or an error.
 **Troubleshoot:** Confirm the session id from /rdp first.
 **Related:** /rdp /listusers
+
+### /rdp
+- Purpose: Lists active RDP sessions (user, session, state, ID) and every remote IP currently connected to the RDP port via netstat.
+- Usage: `/rdp`
+- Panel: sec
+
+**What it does:** Shows active RDP sessions and remote IPs.
+
+**Steps (backend commands):**
+1. Sessions
+   ```
+   qwinsta
+   ```
+2. Recent logins
+   ```
+   Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624;StartTime=$st}
+   ```
+
+**Effect:** Read-only.
+**Output:** Sessions and caller IPs.
+**Troubleshoot:** Combine with /blocklist for banned callers.
+**Related:** /logins /blocklist
 
 ### /renameuser
 - Purpose: Renames a local Windows account.
@@ -1772,22 +1551,251 @@
 **Troubleshoot:** Fails if the new name is taken.
 **Related:** /listusers
 
-## root
+## Settings & alerts
 
-### /help
-- Purpose: This reference.
-- Usage: `/help`
-- Panel: bot-only
+### /clean
+- Purpose: Deletes files older than 24h from TEMP folders and empties the Recycle Bin, then reports how much space was freed. Locked files are skipped safely.
+- Usage: `/clean`
+- Panel: ctl
 
-**What it does:** The full command reference.
+**What it does:** Cleans old TEMP files and the recycle bin.
 
 **Steps (backend commands):**
-1. Render
+1. Delete old TEMP files
    ```
-   HELP_TEXT
+   os.unlink() for files older than 24h in %TEMP% and C:\Windows\Temp
+   ```
+2. Empty the recycle bin
+   ```
+   Clear-RecycleBin -Force
+   ```
+
+**Effect:** Frees disk space.
+**Output:** Files removed and space freed.
+**Troubleshoot:** Locked files are skipped.
+**Related:** /bigfiles /view
+
+### /configbackup
+- Purpose: Sends a copy of the configuration with secrets hidden.
+- Usage: `/configbackup`
+- Panel: diagnostics
+
+**What it does:** Sends a copy of the configuration with secrets hidden.
+
+**Steps (backend commands):**
+1. Redact
+   ```
+   remove credential fields by key name (any type)
+   ```
+2. Send
+   ```
+   sendDocument
+   ```
+
+**Effect:** A redacted config copy is sent.
+**Output:** The JSON file.
+**Troubleshoot:** Secrets are never included.
+**Related:** /status
+
+### /mute
+- Purpose: Silences non-critical alerts (usage, disk, temp, sessions) for a period. Security and critical alerts always arrive.
+- Usage: `/mute 3h | /mute off`
+- Panel: ctl
+
+**What it does:** Silences non-critical alerts for a period.
+
+**Steps (backend commands):**
+1. Set
+   ```
+   config.mute_until = now + duration
+   ```
+
+**Effect:** Routine alerts pause; security alerts continue.
+**Output:** A confirmation.
+**Troubleshoot:** /mute off restores alerts.
+**Related:** /status
+
+### /set
+- Purpose: Detailed settings guide with current values and examples.
+- Usage: `/set`
+- Panel: settings
+
+**What it does:** Detailed settings guide and value changes.
+
+**Steps (backend commands):**
+1. Update
+   ```
+   config[key] = value; save_config()
+   ```
+
+**Effect:** The setting changes immediately.
+**Output:** A confirmation.
+**Troubleshoot:** Use /set with no args for the guide.
+**Related:** /status
+
+### /status
+- Purpose: Current value of every setting in one message.
+- Usage: `/status`
+- Panel: settings
+
+**What it does:** Current value of every setting.
+
+**Steps (backend commands):**
+1. Read
+   ```
+   config.json
    ```
 
 **Effect:** Read-only.
-**Output:** The reference.
-**Troubleshoot:** Use /docs <command> for details.
-**Related:** /docs
+**Output:** A settings summary.
+**Troubleshoot:** Change values with /set.
+**Related:** /set
+
+### /test
+- Purpose: Sends a test message to confirm the bot can reach you.
+- Usage: `/test`
+- Panel: ctl
+
+**What it does:** Sends a test message to verify the alert channel.
+
+**Steps (backend commands):**
+1. Send
+   ```
+   sendMessage to the configured chat
+   ```
+
+**Effect:** A test message arrives.
+**Output:** The test message.
+**Troubleshoot:** If it fails, check the token and chat id.
+**Related:** /status
+
+### /update
+- Purpose: Self-updates from the configured HTTPS URL and SHA-256 fingerprint.
+- Usage: `/update`
+- Panel: ctl
+- Risk: dangerous (confirmation required)
+
+**What it does:** Self-update from the configured HTTPS URL and SHA-256.
+
+**Steps (backend commands):**
+1. Download
+   ```
+   HTTPS GET update_url
+   ```
+2. Verify
+   ```
+   SHA-256 matches update_hash
+   ```
+3. Apply
+   ```
+   replace the script
+   ```
+
+**Effect:** The tool updates to the new version.
+**Output:** A success or failure notice.
+**Troubleshoot:** Requires HTTPS and a matching hash; disabled by default.
+**Related:** /status
+
+## Web panel
+
+### /panel
+- Purpose: WebConsole panel: shows the local URL and a button to reveal the login token on demand.
+- Usage: `/panel`
+- Panel: panel
+
+**What it does:** Shows the WebConsole URL and a token button.
+
+**Steps (backend commands):**
+1. Read
+   ```
+   webconsole_state.json port
+   ```
+
+**Effect:** Read-only.
+**Output:** The URL and a Get-token button.
+**Troubleshoot:** Local-only unless remote mode is configured.
+**Related:** /paneltoken /panelstatus
+
+### /panelremote
+- Purpose: Turns remote access to the WebConsole panel on or off. On enables HTTPS on 0.0.0.0 with a self-signed certificate and a firewall/IP allow-list (loopback + Tailscale + this host). open allows any IP; allow/deny edit the list.
+- Usage: `/panelremote on|off|status|open|allow <ip>|deny <ip>`
+- Panel: panel
+
+**What it does:** Turns remote access to the panel on or off.
+
+**Steps (backend commands):**
+1. Generate
+   ```
+   self-signed TLS cert -> webconsole/tls/panel.crt.pem
+   ```
+2. Set
+   ```
+   webconsole_state.json bind=0.0.0.0 + allowed_ips
+   ```
+3. Firewall
+   ```
+   netsh advfirewall add rule remoteip=<allow-list>
+   ```
+4. Restart
+   ```
+   supervisor rebinds the WebConsole on 0.0.0.0:8399
+   ```
+
+**Effect:** The panel answers on https://<host-ip>:8399/ for allowed IPs only.
+**Output:** Enabled/disabled and the reachable URLs.
+**Troubleshoot:** on allows loopback + Tailscale 100.64.0.0/10 + this host; use allow <ip> for more, open for any IP, off to revert.
+**Related:** /panel /panelstatus
+
+### /panelstatus
+- Purpose: Checks whether the WebConsole is reachable and whether a login token is stored.
+- Usage: `/panelstatus`
+- Panel: panel
+
+**What it does:** Checks whether the WebConsole is reachable.
+
+**Steps (backend commands):**
+1. Probe
+   ```
+   HTTP GET /health on 127.0.0.1:<port>
+   ```
+
+**Effect:** Read-only.
+**Output:** Reachable yes/no and token stored.
+**Troubleshoot:** If down, check the RDPSuite task.
+**Related:** /panel
+
+### /paneltoken
+- Purpose: Reveals the current WebConsole login token in chat.
+- Usage: `/paneltoken`
+- Panel: panel
+
+**What it does:** Reveals the WebConsole login token.
+
+**Steps (backend commands):**
+1. Read
+   ```
+   token_enc -> DPAPI unprotect
+   ```
+
+**Effect:** The token is sent.
+**Output:** The token.
+**Troubleshoot:** Rotate if leaked.
+**Related:** /panel
+
+### /token
+- Purpose: Reveals the WebConsole login token.
+- Usage: `/token`
+- Panel: panel
+
+**What it does:** Reveals the WebConsole login token.
+
+**Steps (backend commands):**
+1. Read
+   ```
+   webconsole_state.json token_enc -> DPAPI unprotect
+   ```
+
+**Effect:** The panel login token is sent.
+**Output:** The token (keep it private).
+**Troubleshoot:** Rotate with the panel rotate-token command if leaked.
+**Related:** /panel /paneltoken

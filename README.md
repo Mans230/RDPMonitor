@@ -6,6 +6,15 @@ serialized account changes, bounded diagnostics and local usage journals. Read
 and [validation/rollback](docs/VALIDATION.md) before upgrading. New changes go
 through [pull requests](CONTRIBUTING.md).
 
+The bot now uses one category per command and opens a review card before menu
+actions run. System CPU/RAM alerts share one policy; `/watch` monitors a named
+program's RAM. See [bot and RDP security review](docs/BOT-SECURITY-REVIEW.md) for
+event timestamps, firewall failure handling, test coverage and remaining VM checks.
+
+For RDP timeouts, `/firewall` now reports effective policy and broad inbound blocks
+without changing rules or claiming external reachability. See the
+[RDP connectivity diagnostic](docs/RDP-CONNECTIVITY.md) and its verification limits.
+
 **v4.3-full-fixed** — a self-hosted monitoring, security, and administration suite for
 Windows servers that you reach over RDP.
 
