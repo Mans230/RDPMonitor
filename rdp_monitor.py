@@ -737,7 +737,11 @@ def _find_rclone():
             same = saved and os.path.normcase(os.path.abspath(saved)) == os.path.normcase(local)
         except (OSError, TypeError, ValueError):
             same = False
-        if not same:
+        # Module imports used by tests or maintenance tools happen before
+        # load_config().  Never persist that empty/default in-memory mapping;
+        # normal runtime migration is allowed only after a real configuration
+        # file has been loaded successfully.
+        if not same and globals().get("CONFIG_LOAD_OK") is True:
             config["rclone_path"] = local
             try:
                 save_config()

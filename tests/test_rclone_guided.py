@@ -27,6 +27,7 @@ class RcloneMigrationTests(unittest.TestCase):
             old.write_bytes(b"old")
             rm.config["rclone_path"] = str(old)
             with mock.patch.object(rm, "BACKUP_DIR", str(root / "backup")), \
+                    mock.patch.object(rm, "CONFIG_LOAD_OK", True, create=True), \
                     mock.patch.object(rm, "save_config") as save, \
                     mock.patch.object(rm, "_rclone_register_config") as register:
                 found = rm._find_rclone()
@@ -35,6 +36,23 @@ class RcloneMigrationTests(unittest.TestCase):
                              os.path.normcase(str(local)))
             save.assert_called_once_with()
             register.assert_called_once_with()
+
+    def test_path_lookup_before_config_load_never_persists_defaults(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            local = root / "backup" / "rclone" / "rclone.exe"
+            local.parent.mkdir(parents=True)
+            local.write_bytes(b"new")
+            rm.config = {}
+            with mock.patch.object(rm, "BACKUP_DIR", str(root / "backup")), \
+                    mock.patch.object(rm, "CONFIG_LOAD_OK", False, create=True), \
+                    mock.patch.object(rm, "save_config") as save, \
+                    mock.patch.object(rm, "_rclone_register_config") as register:
+                found = rm._find_rclone()
+            self.assertEqual(os.path.normcase(found), os.path.normcase(str(local)))
+            self.assertEqual(rm.config, {})
+            save.assert_not_called()
+            register.assert_not_called()
 
 
 class RcloneGuidedMenuTests(unittest.TestCase):
