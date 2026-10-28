@@ -726,6 +726,27 @@ def _image_finish():
 
 def _find_rclone():
     """Looking for rclone: Saved path, tool folder, or PATH"""
+    # Prefer the suite-managed copy before a saved absolute path.  A deployment
+    # can move while the previous directory still exists (for rollback), and in
+    # that case trusting config first silently keeps the live process coupled to
+    # the old installation.
+    local = os.path.abspath(os.path.join(BACKUP_DIR, "rclone", "rclone.exe"))
+    if os.path.isfile(local):
+        saved = config.get("rclone_path", "")
+        try:
+            same = saved and os.path.normcase(os.path.abspath(saved)) == os.path.normcase(local)
+        except (OSError, TypeError, ValueError):
+            same = False
+        if not same:
+            config["rclone_path"] = local
+            try:
+                save_config()
+                register = globals().get("_rclone_register_config")
+                if register:
+                    register()
+            except Exception as e:
+                print("[rclone] local path migration warning: " + str(e))
+        return local
     p = config.get("rclone_path", "")
     if p and os.path.isfile(p):
         return p
@@ -1202,29 +1223,114 @@ def rclone_status_text():
     target = config.get("rclone_remote") or ""
     lines.append("Image upload target: " + (esc(target) if target else "(not set)"))
     lines.append("")
-    lines.append("<b>1. Install</b>")
-    lines.append("/rclone install")
-    lines.append("")
-    lines.append("<b>2. Add a cloud</b>")
-    lines.append("Google Drive (easiest - sign in on the machine):")
-    lines.append("  /rclone gdrive")
-    lines.append("OneDrive / Dropbox (same guided sign-in):")
-    lines.append("  /rclone auth &lt;name&gt; onedrive  |  /rclone auth &lt;name&gt; dropbox")
-    lines.append("Or paste a token from another PC that has rclone:")
-    lines.append("  /rclone token &lt;name&gt; &lt;type&gt; &lt;json&gt;")
-    lines.append("Own Google client_id (the shared one retires in 2026):")
-    lines.append("  /rclone client &lt;name&gt; &lt;client_id&gt; &lt;client_secret&gt;")
-    lines.append("S3 / B2 / Wasabi / MinIO / SFTP / FTP / WebDAV (no browser):")
-    lines.append("  /rclone add &lt;name&gt; &lt;type&gt; key=value ...")
-    lines.append("")
-    lines.append("<b>3. Check</b>")
-    lines.append("/rclone list          - show remotes")
-    lines.append("/rclone test &lt;name&gt;  - test one")
-    lines.append("")
-    lines.append("<b>4. Use it</b>")
-    lines.append("/rclone set &lt;name&gt;:&lt;folder&gt;  - where /image uploads")
-    lines.append("/rclone del &lt;name&gt; confirm  - remove a remote")
+    lines.append("Choose an action below. Common providers need no typed commands.")
     return "\n".join(lines)
+
+
+def _rclone_confirm(text, fn, args=()):
+    """Review a guided rclone mutation, then execute it once."""
+    pid = pend_store({"fn": fn, "args": tuple(args)})
+    send_buttons(text, [[("Confirm", "cf:" + pid), ("Cancel", "cx:" + pid)],
+                        [("Back to rclone", "rc:menu")]])
+
+
+def _rclone_start_install():
+    threading.Thread(target=rclone_install, daemon=True).start()
+
+
+def _rclone_start_authorize(name, rtype):
+    threading.Thread(target=rclone_authorize, args=(name, rtype), daemon=True).start()
+
+
+def rclone_menu():
+    """Button-first rclone setup for the common providers and operations."""
+    rows = [[("Install / repair", "rc:install"), ("My remotes", "rc:list")],
+            [("Google Drive", "rc:gdrive"), ("OneDrive", "rc:onedrive")],
+            [("Dropbox", "rc:dropbox"), ("Advanced providers", "rc:advanced")],
+            [("Cloud backup targets", "cmd:/cloud"), ("Home", "menu:root")]]
+    send_buttons(rclone_status_text(), rows)
+
+
+def rclone_advanced_menu():
+    send_buttons(
+        "<b>Advanced rclone providers</b>\n"
+        "Only credentials still need to be typed; navigation, testing, target "
+        "selection, and removal use buttons.\n\n"
+        "OAuth token from another device:\n"
+        "<code>/rclone token &lt;name&gt; &lt;type&gt; &lt;json&gt;</code>\n\n"
+        "S3 / B2 / Wasabi / MinIO / SFTP / FTP / WebDAV:\n"
+        "<code>/rclone add &lt;name&gt; &lt;type&gt; key=value ...</code>\n\n"
+        "Private Google client:\n"
+        "<code>/rclone client gdrive &lt;client_id&gt; &lt;client_secret&gt;</code>",
+        [[("My remotes", "rc:list"), ("Back", "rc:menu")]])
+
+
+def rclone_remotes_menu():
+    remotes = _rclone_remotes()
+    if not remotes:
+        return send_buttons(
+            "<b>rclone remotes</b>\nNone yet. Choose a provider to create one.",
+            [[("Google Drive", "rc:gdrive"), ("OneDrive", "rc:onedrive")],
+             [("Dropbox", "rc:dropbox"), ("Back", "rc:menu")]])
+    rows = []
+    for remote in remotes:
+        pid = pend_store({"rclone_remote_card": remote})
+        rows.append([(remote, "rr:" + pid)])
+    rows.append([("Back", "rc:menu")])
+    send_buttons("<b>rclone remotes</b>\nChoose one to test, use, or remove.", rows)
+
+
+def rclone_remote_card(remote):
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]+:", remote or ""):
+        return send_message("[X] Invalid rclone remote.")
+    name = remote[:-1]
+    current = config.get("rclone_remote") or ""
+    destination = current if current.split(":", 1)[0] == name else remote + "RDPMonitor-Images"
+    test_pid = pend_store({"fn": rclone_test, "args": ([name],)})
+    use_pid = pend_store({"rclone_use_review": destination})
+    del_pid = pend_store({"rclone_delete_review": name})
+    text = ("<b>" + esc(remote) + "</b>\n"
+            + ("Current image target: <code>" + esc(current) + "</code>\n" if current else "")
+            + "Choose an action.")
+    send_buttons(text,
+                 [[("Test connection", "sc:" + test_pid),
+                   ("Use for images", "rs:" + use_pid)],
+                  [("Remove", "rd:" + del_pid), ("Back", "rc:list")]])
+
+
+def rclone_guided_callback(data):
+    """Handle short callback identifiers; Telegram limits callback data to 64 bytes."""
+    if data == "rc:menu":
+        return rclone_menu()
+    if data == "rc:list":
+        return rclone_remotes_menu()
+    if data == "rc:advanced":
+        return rclone_advanced_menu()
+    if data == "rc:install":
+        return _rclone_confirm("Install or repair the suite-managed rclone copy?",
+                               _rclone_start_install)
+    providers = {"rc:gdrive": ("gdrive", "drive", "Google Drive"),
+                 "rc:onedrive": ("onedrive", "onedrive", "OneDrive"),
+                 "rc:dropbox": ("dropbox", "dropbox", "Dropbox")}
+    if data in providers:
+        name, rtype, label = providers[data]
+        return _rclone_confirm("Start guided sign-in for <b>" + esc(label) + "</b>?",
+                               _rclone_start_authorize, (name, rtype))
+    if data.startswith("rr:"):
+        pending = pend_take(data[3:])
+        remote = pending.get("rclone_remote_card") if pending else None
+        return rclone_remote_card(remote) if remote else send_message("This button expired. Open /rclone again.")
+    if data.startswith("rs:"):
+        pending = pend_take(data[3:])
+        destination = pending.get("rclone_use_review") if pending else None
+        if not destination:
+            return send_message("This button expired. Open /rclone again.")
+        return _rclone_confirm("Use <code>" + esc(destination) + "</code> for image uploads?",
+                               rclone_set, ([destination],))
+    if data.startswith("rd:"):
+        pending = pend_take(data[3:])
+        name = pending.get("rclone_delete_review") if pending else None
+        return rclone_del([name]) if name else send_message("This button expired. Open /rclone again.")
 
 
 def rclone_install():
@@ -1259,6 +1365,7 @@ def rclone_install():
         audit_record("rclone installed: " + target)
         send_message("[OK] rclone installed.\n" + esc(_rclone_version()) +
                      "\nPath: <code>" + esc(target) + "</code>")
+        rclone_menu()
     except Exception as e:
         send_message("[X] rclone download failed: " + esc(str(e)))
 
@@ -1416,9 +1523,8 @@ def rclone_authorize(name, rtype):
                          timeout=120)
     if ok:
         audit_record("rclone remote created via sign-in: " + name + " (" + rtype + ")")
-        send_message("[OK] Remote <b>" + esc(name) + "</b> created.\n"
-                     "Next: /rclone test " + esc(name) + "\n"
-                     "Then: /rclone set " + esc(name) + ":RDPMonitor-Images")
+        send_message("[OK] Remote <b>" + esc(name) + "</b> created.")
+        rclone_remote_card(name + ":")
     else:
         send_message("[X] Sign-in succeeded but saving the remote failed:\n"
                      + esc(o2[-400:]))
@@ -1453,6 +1559,7 @@ def rclone_set(args):
     save_config()
     audit_record("rclone image target set: " + remote)
     send_message("[OK] /image will upload to <b>" + esc(remote) + "</b>.")
+    rclone_remote_card(remote.split(":", 1)[0] + ":")
 
 
 def rclone_del(args):
@@ -1469,7 +1576,11 @@ def rclone_del(args):
         return
     ok, out = _rclone_run(["config", "delete", name], timeout=60)
     audit_record("rclone remote deleted: " + name)
-    send_message("[OK] Remote removed." if ok else "[X] " + esc(out[:300]))
+    if ok:
+        send_message("[OK] Remote removed.")
+        rclone_remotes_menu()
+    else:
+        send_message("[X] " + esc(out[:300]))
 
 
 _state_lock = threading.Lock()     # Lock the writing of state files (history/audit/blocked)
@@ -5258,6 +5369,9 @@ def handle_menu_callback(data):
         show_command_info(data[4:])
     elif data == "panel:token":
         send_panel_token()
+    elif (data.startswith("rc:") or data.startswith("rr:")
+          or data.startswith("rs:") or data.startswith("rd:")):
+        rclone_guided_callback(data)
     elif data.startswith("bs:") or data.startswith("cl:") or data.startswith("sc:"):
         p = pend_take(data[3:])
         if p and p.get("fn"):
@@ -10907,10 +11021,7 @@ def handle_command(text):
         elif sub == "client":
             rclone_client(args[1:])
         elif sub == "list":
-            remotes = _rclone_remotes()
-            send_message("<b>rclone remotes</b>\n" +
-                         (esc("\n".join(remotes)) if remotes
-                          else "None yet. Use /rclone add or /rclone token."))
+            rclone_remotes_menu()
         elif sub == "test":
             rclone_test(args[1:])
         elif sub == "set":
@@ -10918,7 +11029,7 @@ def handle_command(text):
         elif sub == "del":
             rclone_del(args[1:])
         else:
-            send_message(rclone_status_text())
+            rclone_menu()
 
     elif cmd == "/backsrc":
         if not args or args[0] == "list":
