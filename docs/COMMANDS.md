@@ -1119,25 +1119,25 @@
 **Related:** /block /unblock
 
 ### /firewall
-- Purpose: Shows whether the Domain/Private/Public firewall profiles are enabled and lists every inbound allow port.
+- Purpose: Diagnoses effective RDP firewall policy, client-logon allow rules, broad inbound blocks, policy sources, listener and NLA. External access remains unverified.
 - Usage: `/firewall`
 - Panel: diagnostics
 
-**What it does:** Shows firewall profile state and RDP-related rules (read-only).
+**What it does:** Read-only RDP connectivity diagnosis using effective ActiveStore policy.
 
 **Steps (backend commands):**
-1. Profile state
+1. Effective policy
    ```
-   netsh advfirewall show allprofiles
+   Get-NetFirewallProfile -PolicyStore ActiveStore; Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore -Direction Inbound
    ```
-2. RDP rules
+2. RDP endpoints
    ```
-   Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow ...
+   Read RDP registry port, TermService and TCP listeners; inspect rule port/address/application/service filters
    ```
 
 **Effect:** No changes; a report only.
-**Output:** Profile table and rule list.
-**Troubleshoot:** If profiles show off, enable the firewall from Windows Security.
+**Output:** Local issues, potential RDP TCP allows, broad/conditional blocks, policy origin and external-verification requirement.
+**Troubleshoot:** Shadow is not a client-logon allow. Unknown/GroupPolicy/sandbox blocks are never disabled automatically. Verify the actual address/port from an authorized independent host.
 **Related:** /rdpallow /harden
 
 ### /harden
