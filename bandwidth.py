@@ -27,7 +27,11 @@ class TrafficLedger:
         if not self.meta:
             self.meta = {"tracking_since": now, "legacy_history": bool(days), "reset_events": 0,
                          "cross_day_gaps": 0, "legacy_through_date": datetime.fromtimestamp(now).date().isoformat() if days else None}
-        self.previous = copy.deepcopy(saved.get("last_nics")) if saved.get("boot") == boot else None
+        # psutil's Windows boot-time estimate varies by fractions of a second
+        # across processes. Exact float equality discards a valid saved baseline.
+        saved_boot = saved.get("boot")
+        same_boot = isinstance(saved_boot, (int, float)) and abs(saved_boot - boot) <= 5
+        self.previous = copy.deepcopy(saved.get("last_nics")) if same_boot else None
         self.last_sample = saved.get("last_sample") if self.previous is not None else None
 
     def observe(self, counters, now):

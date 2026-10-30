@@ -27,6 +27,12 @@ class BandwidthAccountingTests(unittest.TestCase):
         self.assertEqual(row['down'] * 1024**2, 500)
         self.assertEqual(row['up'] * 1024**2, 200)
 
+    def test_windows_boot_estimate_jitter_does_not_discard_saved_baseline(self):
+        ledger = TrafficLedger({}, 1792973699.048, 1000)
+        ledger.observe({'eth': {'bytes_sent': 100, 'bytes_recv': 200}}, 1000)
+        resumed = TrafficLedger(ledger.snapshot(), 1792973699.789, 1030)
+        self.assertEqual(resumed.observe({'eth': {'bytes_sent': 120, 'bytes_recv': 250}}, 1030), (50, 20))
+
     def test_reboot_reset_and_new_adapters_rebaseline_without_spikes(self):
         ledger = TrafficLedger({}, 10, 1000)
         ledger.observe({'eth': {'bytes_sent': 1000, 'bytes_recv': 2000}}, 1000)
