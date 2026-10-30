@@ -804,25 +804,33 @@ function setConnection(state,message){
 /* ---------- charts (canvas, hover tooltip) ---------- */
 function drawLine(cv,series,unit,fixedMax){
   if(!cv.clientWidth)return;
-  const dpr=window.devicePixelRatio||1,W=cv.clientWidth,H=parseInt(cv.getAttribute("height"));
-  cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+"px";
-  const x=cv.getContext("2d");x.scale(dpr,dpr);x.clearRect(0,0,W,H);
+  // Canvas.height also changes the HTML height attribute. Never reuse the
+  // scaled backing buffer as the logical height on the next refresh.
+  const dpr=Math.max(1,Math.min(3,window.devicePixelRatio||1)),W=cv.clientWidth;
+  const H=Number(cv.dataset.chartHeight)||(parseInt(cv.getAttribute("height"),10)||140);
+  cv.dataset.chartHeight=String(H);cv.style.height=H+"px";
+  const width=Math.round(W*dpr),height=Math.round(H*dpr);
+  if(cv.width!==width)cv.width=width;
+  if(cv.height!==height)cv.height=height;
+  const x=cv.getContext("2d");if(!x)return;
+  x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,W,H);
   let mx=fixedMax||Math.max(1,...series.flatMap(s=>s.data.filter(v=>v!=null)));
   x.strokeStyle="rgba(255,255,255,.06)";x.lineWidth=1;
-  x.font="10px 'Cascadia Mono',Consolas,monospace";x.fillStyle="#8A93A4";
-  for(let i=0;i<=4;i++){const y=H*i/4+6;x.beginPath();x.moveTo(0,y);x.lineTo(W,y);x.stroke();
-    x.fillText((mx*(1-i/4)).toFixed(mx>=100?0:1)+(unit||""),2,y-2)}
+  const left=38,right=W-6,plotWidth=Math.max(1,right-left),plotHeight=H-34;
+  x.font="12px Arial,sans-serif";x.fillStyle="#aab5be";
+  for(let i=0;i<=4;i++){const y=16+plotHeight*i/4;x.beginPath();x.moveTo(left,y);x.lineTo(right,y);x.stroke();
+    x.fillText((mx*(1-i/4)).toFixed(mx>=100?0:1)+(unit||""),2,y-4)}
   const N=Math.max(...series.map(s=>s.data.length),2);
   for(const s of series){
     // Missing buckets must break the line rather than invent continuous data.
     x.beginPath();let started=false;
-    s.data.forEach((v,i)=>{if(v==null){started=false;return}const px=W-(s.data.length-1-i)*(W/(N-1)),py=H-(v/mx)*(H-18)-4;
+    s.data.forEach((v,i)=>{if(v==null){started=false;return}const px=right-(s.data.length-1-i)*(plotWidth/(N-1)),py=16+(1-v/mx)*plotHeight;
       if(!started){x.moveTo(px,py);started=true}else x.lineTo(px,py)});
     x.strokeStyle=s.c;x.lineWidth=1.6;x.stroke();
   }
   cv.onmousemove=ev=>{
     const r=cv.getBoundingClientRect(),px=ev.clientX-r.left;
-    const idx=Math.round((px/W)*(N-1));
+    const idx=Math.round(((px-left)/plotWidth)*(N-1));
     const vals=series.map(s=>s.data[Math.max(0,Math.min(s.data.length-1,idx))]);
     cv.title=vals.map((v,i)=>v==null?"":(i?" | ":"")+ (v>=1024?(v/1024).toFixed(1)+"K":v.toFixed(1))).join("");
   };
@@ -1138,12 +1146,12 @@ function renderSetting(it){
   const id="set-"+it.key;
   if(it.type==="bool"){
     const on=!!it.value;
-    return "<div class='setrow'><div class='setlabel'>"+eh(it.label)+"</div><div class='setctl'>"+
+    return "<div class='setrow setrow-toggle'><div class='setlabel'>"+eh(it.label)+"</div><div class='setctl'>"+
       "<button class='btn"+(on?" primary":"")+"' onclick=\"toggleSetting('"+it.key+"',"+(!on)+")\">"+(on?"Enabled":"Disabled")+"</button></div></div>";
   }
   const val=it.value==null?"":it.value;
   const num=it.type==="int"?(" type='number' min='"+(it.min!=null?it.min:"")+"' max='"+(it.max!=null?it.max:"")+"'"):"";
-  return "<div class='setrow'><div class='setlabel'>"+eh(it.label)+(it.unit?" <span class='mut'>("+eh(it.unit)+")</span>":"")+"</div>"+
+  return "<div class='setrow setrow-value'><div class='setlabel'><label for='"+id+"'>"+eh(it.label)+(it.unit?" <span class='mut'>("+eh(it.unit)+")</span>":"")+"</label></div>"+
     "<div class='setctl'><input id='"+id+"' value=\""+eh(String(val))+"\""+num+"><button class='btn primary' onclick=\"saveSetting('"+it.key+"')\">Save</button></div>"+(it.help?"<p class='sethelp'>"+eh(it.help)+"</p>":"")+"</div>";
 }
 function saveSetting(key){const el=$("set-"+key);if(el)applySetting(key,el.value.trim(),false)}

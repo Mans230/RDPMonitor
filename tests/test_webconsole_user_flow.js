@@ -32,6 +32,29 @@ test('all inline JavaScript parses', () => {
   for (const script of scripts) new vm.Script(script[1]);
 });
 
+test('high-DPI canvas refreshes keep logical height stable and reset the transform',()=>{
+  const code=html.slice(html.indexOf('function drawLine('),html.indexOf('function gridOver('));
+  for(const dpr of [1,2,2.75,3,4]){
+    let backingHeight=150,backingWidth=300;const transforms=[];
+    const drawing=new Proxy({}, {get:(_target,name)=>name==='setTransform'?(...args)=>transforms.push(args):()=>{}});
+    const canvas={dataset:{},style:{},clientWidth:300,getAttribute:()=>String(backingHeight),
+      getContext:()=>drawing,getBoundingClientRect:()=>({left:0}),
+      get height(){return backingHeight},set height(value){backingHeight=value},
+      get width(){return backingWidth},set width(value){backingWidth=value}};
+    const context=vm.createContext({window:{devicePixelRatio:dpr},Math,Number,String,parseInt});
+    vm.runInContext(code,context);
+    for(let i=0;i<200;i++)context.drawLine(canvas,[{c:'#8bcfff',data:[10,20,30]}],'%',100);
+    const scale=Math.min(dpr,3);
+    assert.equal(canvas.height,Math.round(150*scale));
+    assert.equal(canvas.style.height,'150px');
+    assert.equal(transforms.length,200);
+    assert.deepEqual(transforms[199],[scale,0,0,scale,0,0]);
+    canvas.clientWidth=390;context.drawLine(canvas,[{c:'#8bcfff',data:[15]}],'%',100);
+    assert.equal(canvas.height,Math.round(150*scale));
+    assert.equal(canvas.width,Math.round(390*scale));
+  }
+});
+
 function authBrowser(fetchImpl, startFailure=false){
   const fields=Object.fromEntries(['app','loginBg','loginErr','loginBtn','loginToken','sessionIdentity','logoutBtn'].map(id=>[id,{style:{},value:id==='loginToken'?'test-token':'',textContent:'',disabled:false}]));
   const timers=[];const notifications=[];
