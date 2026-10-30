@@ -99,6 +99,18 @@ test('failed panel reads retain displayed data and provide inline retry',async()
   context.readPanelStatus('status');assert.match(status.textContent,/Updated/);
 });
 
+test('panic confirmations accurately distinguish blocking from recovery',()=>{
+  const messages=[],calls=[];let accepted=true;
+  const context=vm.createContext({confirm:message=>{messages.push(message);return accepted},rdpAct:(op,args)=>calls.push([op,args.mode])});
+  vm.runInContext(html.slice(html.indexOf('function rdpPanic('),html.indexOf('function blockSubnet(')),context);
+  context.rdpPanic('on');context.rdpPanic('off');
+  assert.match(messages[0],/blocks RDP for everyone/);assert.match(messages[0],/persists after reboot/);
+  assert.match(messages[1],/removes the emergency RDP block/);assert.match(messages[1],/restrictions still apply/);
+  assert.deepEqual(calls,[['panic','on'],['panic','off']]);
+  accepted=false;context.rdpPanic('on');context.rdpPanic('off');context.rdpPanic('invalid');
+  assert.equal(calls.length,2);assert.equal(messages.length,4);
+});
+
 test('all inline JavaScript parses', () => {
   const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
   assert.ok(scripts.length > 0);
