@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Unified launcher and management CLI for RDP Suite.
 
-The interactive monitor and WebConsole share one at-logon supervisor. The
-backup worker intentionally remains a separate SYSTEM task so scheduled VSS
-backups continue when no user is signed in.
+The monitor and WebConsole share a SYSTEM startup supervisor. Desktop-only
+features need an interactive session; monitoring and panel access do not.
 """
 import ctypes
 import json
@@ -143,6 +142,19 @@ def _create_kill_job():
 
 def run_user_runtime():
     """Supervise the monitor and hardened local WebConsole."""
+    mutex = None
+    if os.name == "nt":
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateMutexW.restype = ctypes.c_void_p
+        kernel.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+        mutex = kernel.CreateMutexW(None, False, "Global\\RDPSuite-" +
+                                   __import__("hashlib").sha256(ROOT.lower().encode()).hexdigest()[:24])
+        if not mutex:
+            raise OSError("Cannot create suite runtime mutex")
+        if ctypes.get_last_error() == 183:
+            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel.CloseHandle(mutex)
+            return 0  # Interactive or boot runtime already owns these ports/bots.
     specs = {
         "monitor": [_python(True), os.path.join(ROOT, "rdp_monitor.py")],
         "webconsole": [_python(False), os.path.join(ROOT, "webconsole", "RDPWebConsole.py"), "--run"],
@@ -210,12 +222,18 @@ def run_user_runtime():
             if proc is not None and proc.poll() is None:
                 try:
                     proc.terminate()
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
                 except Exception:
                     pass
         try:
             os.remove(PID_FILE)
         except OSError:
             pass
+        if mutex:
+            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel.CloseHandle(mutex)
 
 
 def _backup_module(name):
@@ -303,10 +321,59 @@ def print_status():
     print(json.dumps(result, indent=2, default=str))
 
 
+def prepare_service():
+    """Migrate owner DPAPI blobs before changing task identity, without plaintext files.
+
+    Machine DPAPI is appropriate only with an Administrators/SYSTEM-only ACL.
+    Abort before task replacement if any credential cannot be decrypted.
+    """
+    if os.name != "nt" or not ctypes.windll.shell32.IsUserAnAdmin():
+        raise PermissionError("prepare-service requires an Administrator terminal")
+    os.environ["RDPWC_NO_INIT"] = "1"
+    sys.path.insert(0, os.path.join(ROOT, "webconsole"))
+    import rdp_monitor as monitor
+    import RDPWebConsole as panel
+    replacements = []
+    for path, key, module in (
+            (os.path.join(ROOT, "config.json"), "telegram_token_enc", monitor),
+            (os.path.join(ROOT, "webconsole", "webconsole_state.json"), "token_enc", panel)):
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding="utf-8") as stream:
+            data = json.load(stream)
+        if data.get(key):
+            data[key] = module.dpapi_protect(module.dpapi_unprotect(data[key]), machine=True)
+        replacements.append((path, data))
+    paths = [ROOT, os.path.join(ROOT, "webconsole"), os.path.join(ROOT, "control")]
+    for path in paths:
+        os.makedirs(path, exist_ok=True)
+        subprocess.run(["icacls", path, "/inheritance:r", "/grant:r",
+                        "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F"],
+                       capture_output=True, check=True, creationflags=NO_WINDOW)
+    for path, data in replacements:
+        # Restrict existing files too: removing inherited access alone is insufficient.
+        subprocess.run(["icacls", path, "/reset"], capture_output=True,
+                       check=True, creationflags=NO_WINDOW)
+        _atomic_json(path, data)
+    _atomic_json(os.path.join(ROOT, "control", "service.json"), {"version": 1})
+    print("Credentials prepared for startup hosting; desktop capture requires an interactive session.")
+    return 0
+
+
 def main():
     command = sys.argv[1].lower() if len(sys.argv) > 1 else "status"
     if command == "--user-runtime":
+        # At logon, hand hosting to the desktop session so screenshot/OAuth/GUI
+        # capabilities keep working. At logoff the periodic boot task takes over.
+        if os.name == "nt":
+            subprocess.run(["schtasks", "/End", "/TN", "RDPSuiteBoot"],
+                           capture_output=True, creationflags=NO_WINDOW)
+            time.sleep(1)
         return run_user_runtime()
+    if command == "--service-runtime":
+        return run_user_runtime()
+    if command == "prepare-service":
+        return prepare_service()
     if command == "status":
         print_status(); return 0
     if command == "backup-now":

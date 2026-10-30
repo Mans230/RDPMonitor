@@ -106,12 +106,14 @@ def _blob(data):
     return out
 
 
-def dpapi_protect(text):
+def dpapi_protect(text, machine=None):
     if not IS_WIN:
         return base64.b64encode(text.encode()).decode()
     inp, out = _blob(text.encode("utf-8")), _DATA_BLOB()
+    if machine is None:
+        machine = os.path.isfile(os.path.join(RDPDIR, "control", "service.json"))
     if not ctypes.windll.crypt32.CryptProtectData(
-            ctypes.byref(inp), None, None, None, None, 0, ctypes.byref(out)):
+            ctypes.byref(inp), None, None, None, None, 4 if machine else 0, ctypes.byref(out)):
         raise OSError("CryptProtectData failed")
     try:
         return base64.b64encode(ctypes.string_at(out.pbData, out.cbData)).decode()
@@ -775,27 +777,27 @@ def act_backup_gui():
 
 
 def panel_request(action, args=None, timeout=25):
-    """Serialize the single-slot monitor mailbox until its response arrives."""
+    """Use an isolated result slot for each request; unrelated reads do not queue."""
     deadline = time.monotonic() + timeout
-    if not _panel_request_lock.acquire(timeout=max(0, timeout)):
-        return False, "timed out waiting for the monitor mailbox"
+    rid = secrets.token_hex(16)
+    os.makedirs(MONITOR_CONTROL_DIR, exist_ok=True)
+    request = os.path.join(MONITOR_CONTROL_DIR, "request-" + rid + ".json")
+    result = os.path.join(MONITOR_CONTROL_DIR, "result-" + rid + ".json")
     try:
-        os.makedirs(MONITOR_CONTROL_DIR, exist_ok=True)
-        while os.path.exists(MONITOR_REQUEST):
-            if time.monotonic() >= deadline:
-                return False, "a monitor request is already pending"
-            time.sleep(0.1)
-        rid = secrets.token_hex(8)
-        atomic_write(MONITOR_REQUEST, {"id": rid, "action": action,
-                                      "args": args or {}, "created": time.time()})
+        atomic_write(request, {"id": rid, "action": action, "args": args or {},
+                               "created": time.time(), "expires": time.time() + timeout})
         while time.monotonic() < deadline:
-            res = load_json(MONITOR_RESULT, {})
+            res = load_json(result, {})
             if res.get("id") == rid:
                 return bool(res.get("ok")), res.get("out")
             time.sleep(0.1)
         return False, "timed out waiting for the monitor"
     finally:
-        _panel_request_lock.release()
+        for path in (request, result):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
 
 
 def _backup_module(name):

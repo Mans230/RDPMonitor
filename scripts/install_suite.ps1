@@ -15,7 +15,7 @@ function Resolve-Python {
 
 
 function Remove-SuiteTasks {
-    foreach ($name in @('RDPSuite', 'RDPSuiteBackup')) {
+    foreach ($name in @('RDPSuite', 'RDPSuiteBoot', 'RDPSuiteBackup')) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($task) {
             Stop-ScheduledTask -InputObject $task -ErrorAction Stop
@@ -50,6 +50,11 @@ $Pythonw = Join-Path (Split-Path -Parent $Python) 'pythonw.exe'
 if (-not (Test-Path -LiteralPath $Pythonw)) { $Pythonw = $Python }
 $Account = $identity.Name
 
+# Migrate user-scoped DPAPI while the owner can still decrypt it. Do this before
+# removing healthy tasks; failure must leave the previous installation running.
+& $Python (Join-Path $Root 'rdp_suite.py') prepare-service
+if ($LASTEXITCODE -ne 0) { throw 'Cannot prepare credentials for startup hosting; existing tasks were preserved.' }
+
 Remove-SuiteTasks
 Remove-LegacyTasks
 
@@ -72,6 +77,13 @@ $boot.Delay = 'PT1M'
 $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(-5) `
     -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
 $system = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$bootAction = New-ScheduledTaskAction -Execute $Pythonw `
+    -Argument ('"' + (Join-Path $Root 'rdp_suite.py') + '" --service-runtime') -WorkingDirectory $Root
+$fallback = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(-1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 3650)
+Register-ScheduledTask -TaskName 'RDPSuiteBoot' -Action $bootAction -Trigger $boot,$fallback `
+    -Principal $system -Settings $settings `
+    -Description 'RDP Suite - unattended startup and logoff fallback; desktop runtime takes priority' -Force | Out-Null
 Register-ScheduledTask -TaskName 'RDPSuiteBackup' -Action $backupAction -Trigger $boot,$repeat `
     -Principal $system -Settings $settings `
     -Description 'RDP Suite - scheduled backup and backup Telegram bot' -Force | Out-Null
@@ -82,4 +94,6 @@ try { Start-ScheduledTask -TaskName 'RDPSuite' -ErrorAction Stop }
 catch { Write-Output ('Registered RDPSuite, but it could not start now: ' + $_.Exception.Message) }
 try { Start-ScheduledTask -TaskName 'RDPSuiteBackup' -ErrorAction Stop }
 catch { Write-Output ('Registered RDPSuiteBackup, but it could not start now: ' + $_.Exception.Message) }
-Write-Output 'RDP Suite installed: one user runtime and one isolated SYSTEM backup worker.'
+try { Start-ScheduledTask -TaskName 'RDPSuiteBoot' -ErrorAction Stop }
+catch { Write-Output ('Registered RDPSuiteBoot, but it could not start now: ' + $_.Exception.Message) }
+Write-Output 'RDP Suite installed: startup monitor/panel and isolated SYSTEM backup worker. No Windows logon is required.'
