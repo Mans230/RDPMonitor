@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="RDPWebConsole — authenticated local control panel for a Windows RDP server: live health, backups, security posture, and admin actions.">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#0B0E12">
+<meta name="theme-color" content="#101214">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230B0E12'/%3E%3Crect x='7' y='9' width='18' height='7' rx='2' fill='none' stroke='%2369C0D4' stroke-width='2'/%3E%3Crect x='7' y='18' width='18' height='6' rx='2' fill='none' stroke='%2369C0D4' stroke-width='2' opacity='.45'/%3E%3C/svg%3E">
-<title>RDPWebConsole</title>
+<title>RDPMonitor</title>
 <style>
 /* =====================================================================
    RDPWebConsole design system
@@ -283,10 +283,11 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
 </style>
+<link rel="stylesheet" href="/assets/night_signal.css">
 </head>
 <body>
 <div class="loginbg" id="loginBg">
-  <div class="loginbox"><h1>RDPWebConsole</h1><p>Enter your personal operator token or the owner token. A secure, time-limited session is created.</p>
+  <div class="loginbox"><h1 id="loginTitle">RDPMonitor</h1><p>Enter your personal operator token or the owner token. A secure, time-limited session is created.</p>
     <label for="loginToken" class="field-label">Login token</label>
     <input id="loginToken" type="password" autocomplete="current-password" placeholder="Enter your token" aria-describedby="loginErr">
     <button class="btn primary" id="loginBtn">Login</button><div class="loginerr" id="loginErr" role="alert"></div>
@@ -299,7 +300,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   <header class="top">
     <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.75" stroke-linecap="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/><path d="M10 7h4M10 17h4"/></svg></div>
     <div style="flex:1;min-width:0">
-      <h1 class="hname">RDPWebConsole <span id="hostname" class="mut" style="font-size:12px;font-weight:400"></span></h1>
+      <div class="hname">RDPMonitor <span id="hostname" class="mut" style="font-size:12px;font-weight:400"></span></div>
       <div class="hsub">Server operations and live health — refreshed every 2 seconds</div>
     </div>
     <div class="connection" id="connectionStatus" data-state="connecting" role="status" aria-live="polite">
@@ -312,7 +313,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     <button class="btn" id="logoutBtn" onclick="doLogout()">Sign out</button>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="Console sections">
+  <nav class="tabs" id="consoleNavigation" role="tablist" aria-label="Console sections">
     <div class="nav-label" role="presentation">Overview</div>
     <div class="tab on" data-t="bot" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v4"/><rect x="5" y="6" width="14" height="12" rx="2"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M9 16h6"/></svg>Bot</div>
     <div class="tab" data-t="backup" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Backup</div>
@@ -336,7 +337,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   <div id="tab-bot">
     <div class="card" style="margin-bottom:14px">
       <h3>Bot command center <span class="pill p-ok">Hardened session</span></h3>
-      <div class="mut" style="line-height:1.65">Browser equivalents for the most useful RDPMonitor bot commands. Every action uses the authenticated session, CSRF protection, server-side validation, and the same confirmation flow as the rest of this panel.</div>
+      <div class="mut" style="line-height:1.65">Common server tasks, ready to run from your browser. Changes that affect access, accounts, files or power ask for confirmation before running.</div>
     </div>
     <div class="cmd-grid">
       <section class="cmd-card">
@@ -383,7 +384,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         </div>
       </section>
       <section class="cmd-card">
-        <h3>Power</h3><p>Destructive power operations require a fresh server-issued confirmation nonce.</p>
+        <h3>Power</h3><p>Review the server action before confirming a restart or shutdown.</p>
         <div class="cmd-list">
           <button class="btn danger" onclick="confirmAct('reboot')">/restart</button>
           <button class="btn danger" onclick="confirmAct('shutdown')">/shutdown</button>
@@ -561,6 +562,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 
   <!-- ============ RDP SECURITY ============ -->
   <div id="tab-rdpsec" style="display:none">
+    <div id="rdpLoadStatus" class="load-state" role="status"></div>
     <div class="grid g4">
       <div class="card"><h3>RDP port</h3><div class="big" id="rdpPort">—</div></div>
       <div class="card"><h3>Allow-list</h3><div class="big" id="rdpAllow">—</div></div>
@@ -765,6 +767,8 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
       </div>
     </div>
   </div>
+  <nav class="mobile-nav" aria-label="Primary navigation" id="mobileNavigation"></nav>
+  <button class="menu-backdrop" id="mobileMenuBackdrop" aria-label="Close navigation" onclick="closeNightMenu()"></button>
 </main>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -849,6 +853,50 @@ function drawAll(){
 }
 
 /* ---------- tabs ---------- */
+const NIGHT_ROUTES=[['live','Overview'],['sec','Protection'],['backup','Backups'],['apps','Processes'],['rdpsec','RDP access'],['users','Local users'],['settings','Settings'],['bot','Command center'],['charts','Resource history'],['tools','System tools'],['automation','Automation'],['diagnostics','Diagnostics'],['docs','Command reference'],['ctl','Maintenance']];
+function prepareNightSignal(){
+  const nav=$("consoleNavigation"),tabs=Object.fromEntries([...nav.querySelectorAll('.tab')].map(t=>[t.dataset.t,t]));
+  nav.replaceChildren();
+  const brand=document.createElement('div');brand.className='side-brand';brand.innerHTML='RDPMonitor<small>Server console</small>';nav.append(brand);
+  const close=document.createElement('div');close.className='mobile-only';close.innerHTML='All sections <button class="btn" onclick="closeNightMenu()">Close</button>';nav.append(close);
+  const selected=NIGHT_ROUTES.some(r=>r[0]===location.hash.slice(1))?location.hash.slice(1):'live';
+  NIGHT_ROUTES.forEach(([id,label],i)=>{
+    if(i===0||i===7){const group=document.createElement('div');group.className='nav-label';group.textContent=i===0?'Monitor & protect':'Manage & maintain';nav.append(group)}
+    const t=tabs[id];t.replaceChildren(t.querySelector('svg'),document.createTextNode(label));t.classList.toggle('on',id===selected);nav.append(t);$("tab-"+id).style.display=id===selected?'':'none';
+  });
+  const heading=document.createElement('div');heading.className='page-heading';heading.innerHTML='<div><h1 id="pageTitle" tabindex="-1"></h1><p id="pageContext">Live data from this server</p></div>';
+  nav.after(heading);$("pageTitle").textContent=NIGHT_ROUTES.find(r=>r[0]===selected)[1];
+  for(const [id,label] of [['live','Overview'],['sec','Protect'],['backup','Backups'],['apps','Processes'],['more','More']]){
+    const button=document.createElement('button');button.type='button';button.dataset.destination=id;
+    button.innerHTML=(tabs[id]?.querySelector('svg')?.outerHTML||'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 12h.1M12 12h.1M20 12h.1" stroke-width="3" stroke-linecap="round"/></svg>')+'<span>'+label+'</span>';
+    if(id==='more'){button.id='mobileMore';button.setAttribute('aria-expanded','false');button.setAttribute('aria-controls','consoleNavigation');button.onclick=()=>document.body.classList.contains('menu-open')?closeNightMenu():openNightMenu()}
+    else button.onclick=()=>goTab(id);
+    $("mobileNavigation").append(button);
+  }
+  const metrics=$("tab-live").querySelector('.g4');metrics.className='overview-metrics';
+  const cpu=$("cpuPct").closest('.card'),memory=$("ramPct").closest('.card'),network=$("downBps").closest('.card'),storage=$("diskR").closest('.card');
+  cpu.classList.add('overview-cpu');memory.classList.add('overview-memory');network.classList.add('overview-network');storage.classList.add('overview-storage');
+  const gauge=document.createElement('div');gauge.className='cpu-gauge';gauge.innerHTML='<svg viewBox="0 0 156 156" aria-hidden="true"><circle cx="78" cy="78" r="70"/><circle class="reading" id="cpuRing" cx="78" cy="78" r="70"/></svg>';
+  const value=$("cpuPct").parentElement;value.querySelector('.unit').textContent='CPU usage · %';gauge.append(value);
+  const meta=document.createElement('div');meta.className='cpu-meta';meta.append(...cpu.childNodes);cpu.replaceChildren(gauge,meta);
+  const fold=(container,nodes,label)=>{const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent=label;detail.append(summary,...nodes);container.append(detail)};
+  fold(meta,[...meta.querySelectorAll('.row')].slice(1),'CPU details');
+  fold(memory,[...memory.querySelectorAll('.row')].slice(1),'Memory details');
+  fold(network,[...network.querySelectorAll('.row')],'Network details');
+  const detail=document.createElement('details');detail.className='disk-detail';const summary=document.createElement('summary');summary.textContent='Disk I/O & volumes';detail.append(summary,...storage.childNodes);
+  storage.innerHTML='<h3>Storage <span class="mut" id="storageDrive"></span></h3><div class="big"><span id="storagePct">—</span><span class="unit"> %</span></div><div class="bar"><div id="storageBar"></div></div><p class="mut" id="storageUsage" style="margin-top:12px">Waiting for disk data</p>';storage.append(detail);
+  const trend=document.createElement('section');trend.className='overview-trend';trend.innerHTML='<h2>CPU in the last hour <span class="mut" id="overviewCpuNow">—</span></h2><canvas id="cvOverview" height="140" aria-label="CPU usage over the last hour"></canvas><p><span>60 min ago</span><span>Now</span></p><button class="btn" style="margin-top:16px" onclick="goTab(\'charts\')">View resource history</button>';metrics.after(trend);
+  document.querySelectorAll('input,select,textarea').forEach(el=>{if(!el.getAttribute('aria-label')&&!document.querySelector('label[for="'+el.id+'"]'))el.setAttribute('aria-label',el.placeholder||el.id)});
+  updateNightNavigation(selected);
+}
+function updateNightNavigation(id){
+  const label=NIGHT_ROUTES.find(r=>r[0]===id)?.[1]||'Overview';$("pageTitle").textContent=label;document.title=label+' · RDPMonitor';
+  document.querySelectorAll('#mobileNavigation button').forEach(b=>{const selected=b.dataset.destination===id||(b.dataset.destination==='more'&&!['live','sec','backup','apps'].includes(id));if(selected)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
+}
+function openNightMenu(){document.body.classList.add('menu-open');$("mobileMore").setAttribute('aria-expanded','true');$("consoleNavigation").querySelector('.mobile-only button').focus()}
+function closeNightMenu(restore=true){document.body.classList.remove('menu-open');$("mobileMore").setAttribute('aria-expanded','false');if(restore)$("mobileMore").focus()}
+function drawOverview(){if($("cvOverview"))drawLine($("cvOverview"),[{c:'#8bcfff',data:gridOver([...dayHist,...liveHist],'c',3600000,60)}],'%',100)}
+prepareNightSignal();
 const consoleTabs=[...document.querySelectorAll(".tab")];
 function activateTab(t){
   consoleTabs.forEach(x=>{
@@ -859,6 +907,10 @@ function activateTab(t){
     $("tab-"+x.dataset.t).style.display=selected?"":"none";
   });
   $("skipNavigation").href="#tab-"+t.dataset.t;
+  updateNightNavigation(t.dataset.t);
+  const menuWasOpen=document.body.classList.contains('menu-open');closeNightMenu(false);if(menuWasOpen)$("pageTitle").focus();
+  history.replaceState(null,'','#'+t.dataset.t);
+  if(t.dataset.t=="live")drawOverview();
   if(t.dataset.t=="charts")drawAll();
   if(t.dataset.t=="sec"){loadSec();loadTraps()}
   if(t.dataset.t=="tools"){loadServices();loadNetstat();loadSysinfo()}
@@ -960,16 +1012,18 @@ function runDrill(){
   act({action:"drill"}).then(j=>{toast(j&&j.ok?"Restore drill passed":"Drill: "+((j&&j.out)||"failed"),!(j&&j.ok))});
 }
 async function loadRdp(){
+  $("rdpLoadStatus").textContent="Loading RDP access…";
   try{
     const r=await fetch("/api/rdp");const d=await r.json();
-    if(d.error){toast("RDP status: "+d.error,true);return}
+    if(!r.ok||d.error)throw new Error(d.error||"Invalid RDP response");
+    $("rdpLoadStatus").textContent="Updated "+new Date().toLocaleTimeString();
     $("rdpPort").textContent=d.port||"—";
     $("rdpAllow").textContent=d.allow_active?"On":"Off";
     $("rdpLock").textContent=d.lockdown?"Active":"Off";
     $("rdpPanic").textContent=d.panic?"ACTIVE":"Off";
     $("rdpBlocked").textContent=Number(d.blocked_count||0);
     $("rdpIpTbl").querySelector("tbody").innerHTML=(d.allowed_ips||[]).map(ip=>"<tr><td class='mono'>"+eh(ip)+"</td><td><button class='btn' onclick=\"rdpRemove('"+enc(ip)+"')\">Remove</button></td></tr>").join("")||'<tr><td colspan=2 class="mut">None</td></tr>';
-  }catch(e){toast("RDP status failed: "+e,true)}
+  }catch(e){$("rdpLoadStatus").innerHTML="Could not update RDP access. Previous values are kept. "+eh(e.message)+" <button class='btn' onclick='loadRdp()'>Retry</button>"}
 }
 function rdpAct(op,extra){
   act(Object.assign({action:"rdp",op:op},extra||{})).then(j=>{
@@ -1139,6 +1193,12 @@ async function poll(){
     const s=await r.json();if(!s.ts)throw new Error("No live data");
     setConnection("online","Live");
     const c=s.cpu,m=s.ram;
+    $("hostname").textContent=s.hostname||"";
+    $("pageContext").textContent=(s.hostname?s.hostname+' · ':'')+'Live readings updated '+new Date(s.ts*1000).toLocaleTimeString();
+    $("cpuRing").style.strokeDashoffset=440*(1-Math.max(0,Math.min(100,c.pct))/100);
+    $("overviewCpuNow").textContent=c.pct.toFixed(1)+'% now';
+    const volume=(s.disks||[]).find(d=>String(d.dev).toUpperCase().startsWith('C:'))||(s.disks||[])[0];
+    if(volume){$("storagePct").textContent=Number(volume.pct).toFixed(1);$("storageBar").style.width=volume.pct+'%';$("storageUsage").textContent=hb(volume.total-volume.free)+' of '+hb(volume.total);$("storageDrive").textContent=volume.dev}
     const setBar=(bar,p)=>{bar.style.width=p+"%";bar.style.background=colorOf(p)};
     $("cpuPct").textContent=c.pct.toFixed(0);setBar($("cpuBar"),c.pct);
     $("cpuCores").textContent=c.cores+" logical / "+(c.physical||"?")+" physical";
@@ -1164,6 +1224,7 @@ async function poll(){
     $("procTbl").querySelector("tbody").innerHTML=lastProcs.slice(0,25).map(p=>"<tr><td class='mono'>"+Number(p.pid)+"</td><td><a href='#' onclick='showProc("+Number(p.pid)+");return false' style='color:var(--acc)'>"+eh(p.name)+"</a></td><td class='mut'>"+eh(p.user||"—")+"</td><td class='mono' style='color:"+colorOf(Number(p.cpu))+"'>"+Number(p.cpu).toFixed(1)+"</td><td class='mono'>"+hb(p.rss)+"</td><td><button class='btn danger' onclick=\"killEnc("+Number(p.pid)+",'"+enc(p.name)+"')\">End</button></td></tr>").join("");
     liveHist.push({t:s.ts,c:c.pct,r:m.pct,up:s.up_bps,down:s.down_bps,dr:s.disk_r_bps,dw:s.disk_w_bps});
     liveHist=liveHist.filter(p=>p.t>=s.ts-3600).slice(-2000);
+    if(!$("tab-live").style.display)drawOverview();
     lastApps=s.apps||[];
     if(!$("tab-apps").style.display)renderApps();
     if(!$("tab-charts").style.display)drawAll();
@@ -1181,6 +1242,7 @@ async function loadDay(){
   try{
     const r=await fetch("/api/history");const h=await r.json();
     dayHist=h.points||[];rdpHist=h.rdpmon||[];
+    if(!$("tab-live").style.display)drawOverview();
     if(!$("tab-charts").style.display)drawAll();
   }catch(e){}
 }
@@ -1349,6 +1411,7 @@ async function loadSec(){
 }
 
 function showLogin(msg){
+  const title=$("loginTitle");if(title?.tagName==='H2')title.outerHTML='<h1 id="loginTitle">RDPMonitor</h1>';
   appTimers.forEach(clearInterval);appTimers=[];started=false;
   $("app").style.display="none";$("loginBg").style.display="grid";
   $("loginErr").textContent=msg||"";CSRF="";
@@ -1373,6 +1436,7 @@ async function authRequest(path,options){
 function enterSession(data){
   if(typeof data.csrf!=="string"||!data.csrf)throw new Error("The server returned incomplete session data. Reload and sign in again.");
   CSRF=data.csrf;$("loginToken").value="";
+  const title=$("loginTitle");if(title?.tagName==='H1')title.outerHTML='<h2 id="loginTitle">RDPMonitor</h2>';
   $("sessionIdentity").textContent=data.actor||"Signed in";
   $("sessionIdentity").title="Session renews while active; idle timeout "+Math.round((data.idle_timeout_seconds||1800)/60)+" minutes";
   try{startApp()}
@@ -1405,7 +1469,8 @@ async function doLogout(){
 $("loginBtn").onclick=doLogin;
 $("loginToken").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
 initAuth();
-window.addEventListener("resize",()=>{if(!$("tab-charts").style.display)drawAll()});
+window.addEventListener("resize",()=>{if(!$("tab-charts").style.display)drawAll();if(!$("tab-live").style.display)drawOverview();if(innerWidth>700)closeNightMenu(false)});
+window.addEventListener("keydown",e=>{if(e.key==='Escape'&&document.body.classList.contains('menu-open'))closeNightMenu()});
 </script>
 </body>
 </html>

@@ -88,12 +88,13 @@ Register-ScheduledTask -TaskName 'RDPSuiteBackup' -Action $backupAction -Trigger
     -Principal $system -Settings $settings `
     -Description 'RDP Suite - scheduled backup and backup Telegram bot' -Force | Out-Null
 
-# A start failure must not invalidate a successful registration (for example
-# the interactive trigger cannot start when no matching session exists yet).
+# Start fallback first, then let the desktop runtime take over when available.
+# Reversing this order races with the desktop runtime's boot-task stop request.
+try { Start-ScheduledTask -TaskName 'RDPSuiteBoot' -ErrorAction Stop }
+catch { Write-Output ('Registered RDPSuiteBoot, but it could not start now: ' + $_.Exception.Message) }
+Start-Sleep -Seconds 1
 try { Start-ScheduledTask -TaskName 'RDPSuite' -ErrorAction Stop }
 catch { Write-Output ('Registered RDPSuite, but it could not start now: ' + $_.Exception.Message) }
 try { Start-ScheduledTask -TaskName 'RDPSuiteBackup' -ErrorAction Stop }
 catch { Write-Output ('Registered RDPSuiteBackup, but it could not start now: ' + $_.Exception.Message) }
-try { Start-ScheduledTask -TaskName 'RDPSuiteBoot' -ErrorAction Stop }
-catch { Write-Output ('Registered RDPSuiteBoot, but it could not start now: ' + $_.Exception.Message) }
 Write-Output 'RDP Suite installed: startup monitor/panel and isolated SYSTEM backup worker. No Windows logon is required.'
