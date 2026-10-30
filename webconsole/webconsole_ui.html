@@ -1550,6 +1550,7 @@ async function loadSysinfo(){
 }
 
 /* ---------- security tab ---------- */
+function watchStatus(value){return value===true?'Enabled':value===false?'Disabled':'Unknown'}
 async function loadSec(){
   try{
     const r=await fetch("/api/security");const s=await r.json();
@@ -1560,7 +1561,7 @@ async function loadSec(){
       "<div class='row'><span class='mut'>Allowed IPs</span><span class='mono'>"+eh((c.rdp_allowed_ips||[]).join(", ")||"—")+"</span></div>"+
       "<div class='row'><span class='mut'>Automatic ban</span><span>"+(c.failed_login_block?"Enabled ("+c.failed_login_block_threshold+" attempts / "+c.failed_login_window+" min)":"Disabled")+"</span></div>"+
       "<div class='row'><span class='mut'>Lockdown</span><span class='pill "+(c.lockdown?"p-ok":"")+"'>"+(c.lockdown?"Enabled":"Disabled")+"</span></div>"+
-      "<div class='row'><span class='mut'>rdpwatch / netwatch</span><span>"+(c.rdp_watch?"":"")+" / "+(c.net_watch?"":"")+"</span></div>"+
+      "<div class='row'><span class='mut'>rdpwatch / netwatch</span><span>"+watchStatus(c.rdp_watch)+" / "+watchStatus(c.net_watch)+"</span></div>"+
       "<div class='row'><span class='mut'>Device name in chat</span><span class='mono'>"+eh(c.instance_name||c.machine_name||"Default")+"</span></div>";
     const b=s.blocked||{};$("blkCount").textContent=Object.keys(b).length+" IP";
     $("blkTbl").querySelector("tbody").innerHTML=Object.entries(b).sort((a,x)=>x[1]-a[1]).slice(0,100).map(e=>

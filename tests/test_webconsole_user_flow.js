@@ -37,6 +37,14 @@ test('authenticated startup initializes the selected route exactly once', () => 
   }
 });
 
+test('security watch flags distinguish enabled disabled and unknown',()=>{
+  const context=vm.createContext({});
+  vm.runInContext(html.slice(html.indexOf('function watchStatus('),html.indexOf('async function loadSec(')),context);
+  assert.equal(context.watchStatus(true),'Enabled');assert.equal(context.watchStatus(false),'Disabled');
+  for(const value of [undefined,null,'false',0])assert.equal(context.watchStatus(value),'Unknown');
+  assert.match(html,/watchStatus\(c\.rdp_watch\)\+" \/ "\+watchStatus\(c\.net_watch\)/);
+});
+
 test('all inline JavaScript parses', () => {
   const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
   assert.ok(scripts.length > 0);
