@@ -1587,12 +1587,12 @@ function startApp(){
   $("loginBg").style.display="none";$("app").style.display="";
   if(started)return;started=true;
   appTimers.push(setInterval(poll,2000));poll();
-  if(!$("tab-setup").style.display)loadSetup();
+  const selectedTab=document.querySelector('.tab.on');
+  if(selectedTab)activateTab(selectedTab);
   appTimers.push(setInterval(pollSetupJobs,3000));
   appTimers.push(setInterval(()=>{if(!$("tab-sec").style.display)loadSec()},10000));
   appTimers.push(setInterval(()=>{if(!$("tab-backup").style.display)loadBackup()},5000));
-  loadSec();loadDay();appTimers.push(setInterval(loadDay,120000));
-  if(!$("tab-bandwidth").style.display){loadBandwidthUsage();loadBandwidthConnections()}
+  loadDay();appTimers.push(setInterval(loadDay,120000));
   appTimers.push(setInterval(()=>{if(!$("tab-bandwidth").style.display)loadBandwidthUsage()},30000));
   appTimers.push(setInterval(()=>{if(!$("tab-bandwidth").style.display)loadBandwidthConnections()},15000));
 }
