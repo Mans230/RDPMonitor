@@ -85,6 +85,48 @@ class WebConsoleSecurityTests(unittest.TestCase):
         self.assertEqual(headers.get("X-Frame-Options"), "DENY")
         self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
 
+    def test_logout_revokes_the_session_and_session_shows_identity(self):
+        cookie, csrf = self.login()
+        status, _, session = self.request("GET", "/api/session", headers={"Cookie": cookie})
+        self.assertEqual(status, 200)
+        self.assertEqual(session["actor"], "owner")
+        self.assertEqual(session["idle_timeout_seconds"], wc.SESSION_TTL)
+        status, _, _ = self.request("POST", "/api/logout", {},
+                                    {"Cookie": cookie, "X-CSRF-Token": csrf})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.request("GET", "/api/session", headers={"Cookie": cookie})[0], 401)
+
+    def test_execution_requires_both_permissions(self):
+        from unittest import mock
+        for monitor, panel in ((False, False), (True, False), (False, True), (True, True)):
+            with mock.patch.object(wc, "rdpm_config", return_value={"exec_enabled": monitor}), \
+                    mock.patch.object(wc, "EXEC_ENABLED", panel), \
+                    mock.patch.object(wc.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=b'ok', stderr=b'')) as run:
+                self.assertEqual(wc.execution_permissions()["effective"], monitor and panel)
+                ok, _ = wc.act_run_command("unit-test-command")
+                self.assertEqual(ok, monitor and panel)
+                self.assertEqual(run.called, monitor and panel)
+
+    def test_panel_permission_needs_confirmation_and_persists(self):
+        from unittest import mock
+        cookie, csrf = self.login()
+        headers = {"Cookie": cookie, "X-CSRF-Token": csrf}
+        body = {"action": "settings_set", "key": "panelexec", "value": "on", "confirm": True}
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(wc, "STATE", dict(wc.STATE)), \
+                mock.patch.object(wc, "STATE_FILE", str(Path(directory) / "state.json")), \
+                mock.patch.object(wc, "EXEC_ENABLED", False), \
+                mock.patch.object(wc, "harden_private_storage", return_value=True), \
+                mock.patch.object(wc, "harden_file", return_value=True):
+            self.assertEqual(self.request("POST", "/api/action", body, headers)[0], 400)
+            prepare = dict(body, action="prepare", target="settings_set")
+            _, _, prepared = self.request("POST", "/api/action", prepare, headers)
+            status, _, result = self.request("POST", "/api/action", dict(body, nonce=prepared["nonce"]), headers)
+            self.assertEqual(status, 200)
+            self.assertTrue(result["ok"])
+            self.assertTrue(wc.EXEC_ENABLED)
+            self.assertTrue(json.loads(Path(wc.STATE_FILE).read_text())["exec_enabled"])
+
     def test_token_never_needed_in_url(self):
         status, _headers, _ = self.request(
             "GET", "/api/stats?token=unit-test-token")

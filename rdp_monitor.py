@@ -9425,7 +9425,7 @@ SETTINGS_SCHEMA = [
         ("speedtest", "Auto speed test", "int", 0, 8760, "h"),
     ]),
     ("Access", [
-        ("exec", "Command execution (/exec)", "bool", None, None, ""),
+        ("exec", "Bot command execution (/exec)", "bool", None, None, ""),
         ("users", "User management", "bool", None, None, ""),
         ("uploads", "Receive files", "bool", None, None, ""),
         ("sessions", "Session alerts", "bool", None, None, ""),

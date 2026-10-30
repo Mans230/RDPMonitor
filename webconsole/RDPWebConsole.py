@@ -586,9 +586,14 @@ def act_list_services():
     except Exception:
         return []
 
+def execution_permissions():
+    monitor = bool(rdpm_config().get("exec_enabled", False))
+    return {"monitor": monitor, "panel": bool(EXEC_ENABLED), "effective": monitor and bool(EXEC_ENABLED)}
+
+
 def act_run_command(cmd, timeout=30):
-    if not EXEC_ENABLED:
-        audit("run_command BLOCKED", "sha256=" + hashlib.sha256(cmd.encode()).hexdigest()[:16]); return False, "exec disabled in webconsole_state.json"
+    if not execution_permissions()["effective"]:
+        audit("run_command BLOCKED", "sha256=" + hashlib.sha256(cmd.encode()).hexdigest()[:16]); return False, "Command execution is disabled. Settings shows both Bot and Panel permissions; both must be enabled."
     audit("run_command", "sha256=" + hashlib.sha256(cmd.encode()).hexdigest()[:16])
     try:
         timeout = max(1, min(60, int(timeout)))
@@ -601,8 +606,8 @@ def act_run_command(cmd, timeout=30):
         return False, repr(e)
 
 def act_start_program(path, args=""):
-    if not EXEC_ENABLED:
-        return False, "program execution disabled in webconsole_state.json"
+    if not execution_permissions()["effective"]:
+        return False, "Program execution is disabled. Enable both Bot and Panel command execution in Settings."
     path = os.path.abspath(os.path.expandvars(str(path).strip().strip('"')))
     if not os.path.isfile(path):
         return False, "executable path does not exist"
@@ -1606,7 +1611,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/session":
             _sid, sess = self._session()
             return self._json(200 if sess else 401,
-                              {"ok": bool(sess), "csrf": sess.get("csrf") if sess else ""})
+                              {"ok": bool(sess), "csrf": sess.get("csrf") if sess else "",
+                               "actor": sess.get("actor", "") if sess else "",
+                               "idle_timeout_seconds": SESSION_TTL})
         if not self._authed(): return self._json(401, {"error": "authentication required"})
         if u.path == "/api/stats":
             with _lock: s = dict(LIVE)
@@ -1642,6 +1649,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200 if ok else 503, out if isinstance(out, dict) else {"error": out})
         if u.path == "/api/settings":
             ok, out = panel_request("settings_get", timeout=15)
+            if ok and isinstance(out, dict):
+                out["execution"] = execution_permissions()
+                out.setdefault("groups", []).append({"name": "Panel access", "items": [
+                    {"key": "panelexec", "label": "Panel command execution", "type": "bool",
+                     "value": bool(EXEC_ENABLED)}]})
             return self._json(200 if ok else 503, out if isinstance(out, dict) else {"error": out})
         if u.path == "/api/traps":
             ok, out = panel_request("trap", {"op": "list"}, timeout=10)
@@ -1740,7 +1752,8 @@ class Handler(BaseHTTPRequestHandler):
             self._usage_context["session"] = hashlib.sha256(sid.encode()).hexdigest()[:16]
             self._finish_usage(200, {"ok": True})
             self.send_response(200)
-            payload = json.dumps({"ok": True, "csrf": csrf}).encode()
+            payload = json.dumps({"ok": True, "csrf": csrf, "actor": actor,
+                                  "idle_timeout_seconds": SESSION_TTL}).encode()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("Cache-Control", "no-store")
@@ -1848,6 +1861,21 @@ class Handler(BaseHTTPRequestHandler):
             if act == "settings_set":
                 key = str(body.get("key", ""))[:32]
                 value = str(body.get("value", ""))[:64]
+                if key == "panelexec":
+                    if value not in ("on", "off"):
+                        return self._json(400, {"error": "Panel execution expects on or off"})
+                    global EXEC_ENABLED
+                    updated = dict(STATE, exec_enabled=(value == "on"))
+                    if not harden_private_storage():
+                        return self._json(500, {"error": "Could not protect panel settings"})
+                    atomic_write(STATE_FILE, updated)
+                    if not harden_file(STATE_FILE):
+                        atomic_write(STATE_FILE, STATE)
+                        return self._json(500, {"error": "Could not protect panel settings file"})
+                    STATE.update(updated)
+                    EXEC_ENABLED = updated["exec_enabled"]
+                    audit("settings", "panelexec -> " + value)
+                    return self._json(200, {"ok": True, "out": "Panel permission saved"})
                 ok, out = panel_request("settings_set", {"key": key, "value": value,
                                                          "confirm": bool(body.get("confirm"))})
                 audit("settings", "%s -> %s" % (key, ok))
