@@ -981,7 +981,16 @@ def default_allowed_ips():
 
 def firewall_apply(allowed, port):
     run_cmd(["netsh", "advfirewall", "firewall", "delete", "rule", "name=%s" % RULE_NAME])
-    remoteip = ",".join(allowed)
+    # netsh rejects /0 networks. Expand full-family scopes into two /1s
+    # rather than using "any", which would also open the other IP family.
+    scopes = []
+    for item in allowed:
+        network = ipaddress.ip_network(item, strict=False)
+        if network.prefixlen == 0:
+            scopes.extend(str(subnet) for subnet in network.subnets(prefixlen_diff=1))
+        else:
+            scopes.append(str(network))
+    remoteip = ",".join(scopes)
     rc, out = run_cmd(["netsh", "advfirewall", "firewall", "add", "rule",
                        "name=%s" % RULE_NAME, "dir=in", "action=allow",
                        "protocol=TCP", "localport=%d" % int(port),
