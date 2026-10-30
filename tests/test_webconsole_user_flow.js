@@ -343,6 +343,24 @@ test('read-only variants and preconfirmed requests do not prepare again', async 
   }
 });
 const setupSource=fs.readFileSync(path.join(__dirname,'../webconsole/setup.js'),'utf8');
+test('cloud choices refresh without overwriting drafts and flag removed selections',()=>{
+ const fields={setupImageRemote:{value:'draft:',dataset:{}},setupClientRemote:{value:'old',dataset:{}},
+   setupRemoteChoices:{},setupImageFolder:{value:'unsaved-folder'},setupBackupTargets:{value:'draft:path'}};
+ const messages=[];let submitted=0;
+ const context=vm.createContext({$:id=>fields[id],eh:String,toast:m=>messages.push(m)});
+ vm.runInContext(setupSource,context);context.setupDo=()=>submitted++;
+ context.syncSetupRemoteChoices(['draft:','new:']);
+ assert.equal(fields.setupImageRemote.value,'draft:');assert.equal(fields.setupImageRemote.dataset.unavailable,'false');
+ assert.match(fields.setupImageRemote.innerHTML,/new:/);assert.match(fields.setupClientRemote.innerHTML,/unavailable/);
+ assert.equal(fields.setupClientRemote.dataset.unavailable,'true');
+ context.syncSetupRemoteChoices(['new:']);assert.equal(fields.setupImageRemote.dataset.unavailable,'true');
+ context.setupTargets();assert.equal(submitted,0);assert.match(messages[0],/unavailable/);
+ assert.equal(fields.setupImageFolder.value,'unsaved-folder');assert.equal(fields.setupBackupTargets.value,'draft:path');
+ context.syncSetupRemoteChoices(['new:'],'');assert.equal(fields.setupImageRemote.value,'');assert.equal(fields.setupImageRemote.dataset.unavailable,'false');
+ context.syncSetupRemoteChoices(['new:'],'missing:');assert.equal(fields.setupImageRemote.value,'missing:');
+ assert.match(fields.setupImageRemote.innerHTML,/disabled value="missing:"/);
+});
+
 test('setup script parses and form secrets clear only after accepted submission',async()=>{
  const fields={setupOptions:{value:'{}'},setupRemoteName:{value:'test'},setupProvider:{value:'s3'},setupOAuthToken:{value:''}};
  const secret={value:'fake-secret',dataset:{option:'secret_access_key'}};const calls=[];

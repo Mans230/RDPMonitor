@@ -28,6 +28,21 @@ function setupScheduleHint(){
   $('setupScheduleLabel').firstChild.textContent=mode==='interval'?'Interval · hours':mode==='times'?'Times · HH:MM,HH:MM':'Time · HH:MM';
   $('setupScheduleValue').placeholder=mode==='interval'?'6':mode==='times'?'03:00,15:00':'03:00';
 }
+function syncSetupRemoteChoices(remotes,imageSelection=null){
+  for(const [id,values,empty] of [
+    ['setupImageRemote',remotes,true],['setupClientRemote',remotes.map(r=>r.slice(0,-1)),false]
+  ]){
+    const select=$(id),selected=id==='setupImageRemote'&&imageSelection!==null?imageSelection:select.value;
+    const missing=Boolean(selected&&!values.includes(selected));
+    select.innerHTML=(empty?'<option value="">No cloud upload</option>':'')+
+      values.map(value=>'<option value="'+eh(value)+'">'+eh(value)+'</option>').join('')+
+      (missing?'<option disabled value="'+eh(selected)+'">'+eh(selected)+' (unavailable — choose another remote)</option>':'');
+    if(selected||empty)select.value=selected;
+    select.dataset.unavailable=String(missing);
+    select.dataset.unavailableValue=missing?selected:'';
+  }
+  $('setupRemoteChoices').innerHTML=remotes.map(r=>'<option value="'+eh(r)+'">').join('');
+}
 async function loadSetup(reset=false){
   if(setupBusy)return;setupBusy=true;
   try{
@@ -54,17 +69,16 @@ async function loadSetup(reset=false){
     const remote=d.remote;
     $('setupRemoteStatus').textContent='Current: '+remote.bind+':'+remote.port+' · '+(remote.https?'HTTPS':'HTTP')+' · '+(remote.allowed_ips.join(', ')||'local only');
     $('setupTimezone').textContent='Times use the server timezone: '+d.backup.timezone+'. Existing retry settings are preserved.';
+    if(!d.cloud.error)syncSetupRemoteChoices(d.cloud.remotes);
     if(!setupLoaded||reset){
       if(!setupLoaded)setupProviderFields();
       if(d.cloud.error&&setupLoaded)throw new Error('Remote list failed; your current form values were retained. Retry refresh.');
-      $('setupImageRemote').innerHTML='<option value="">No cloud upload</option>'+d.cloud.remotes.map(r=>'<option value="'+eh(r)+'">'+eh(r)+'</option>').join('');
-      $('setupClientRemote').innerHTML=d.cloud.remotes.map(r=>'<option value="'+eh(r.slice(0,-1))+'">'+eh(r)+'</option>').join('');
-      $('setupRemoteChoices').innerHTML=d.cloud.remotes.map(r=>'<option value="'+eh(r)+'">').join('');
-      const split=d.cloud.image_target.indexOf(':');$('setupImageRemote').value=split>=0?d.cloud.image_target.slice(0,split+1):'';$('setupImageFolder').value=split>=0?d.cloud.image_target.slice(split+1):'';
+      const split=d.cloud.image_target.indexOf(':');const savedImageRemote=split>=0?d.cloud.image_target.slice(0,split+1):'';$('setupImageFolder').value=split>=0?d.cloud.image_target.slice(split+1):'';
       $('setupBackupTargets').value=d.cloud.backup_targets.join('\n');$('setupBackupFolder').value=d.cloud.folder;
       $('setupSourcePaths').value=d.backup.sources.join('\n');
       const s=d.backup.schedule;$('setupScheduleEnabled').value=String(s.enabled!==false);$('setupScheduleMode').value=s.mode||'daily';$('setupScheduleValue').value=s.mode==='interval'?s.interval_hours:s.mode==='times'?(s.times||[]).join(','):s.time||'03:00';setupScheduleHint();
       $('setupAccessMode').value=['127.0.0.1','localhost','::1'].includes(remote.bind)?'local':remote.allowed_ips.includes('0.0.0.0/0')?'public':'restricted';$('setupAllowedIps').value=remote.allowed_ips.join('\n');
+      if(!d.cloud.error)syncSetupRemoteChoices(d.cloud.remotes,savedImageRemote);
       setupLoaded=true;
     }
     if(!document.activeElement.closest('#setupJobs form'))renderSetupJobs(d.jobs);
@@ -111,10 +125,11 @@ async function setupCreate(authorize){
   }catch(e){toast('Check provider options: '+e.message,true)}
 }
 async function setupClient(){
+  if(!$('setupClientRemote').value||$('setupClientRemote').value===$('setupClientRemote').dataset.unavailableValue){toast('Choose an available cloud remote first.',true);return}
   const j=await setupDo('client',{name:$('setupClientRemote').value,client_id:$('setupClientId').value,client_secret:$('setupClientSecret').value},'Update the OAuth client for this remote?');
   if(j?.ok)$('setupClientSecret').value='';
 }
-function setupTargets(){const remote=$('setupImageRemote').value;return setupDo('targets',{image:remote?remote+$('setupImageFolder').value.trim():'',backups:setupLines('setupBackupTargets'),folder:$('setupBackupFolder').value},'Replace cloud destinations? Empty destinations disable cloud copies; existing cloud files remain.')}
+function setupTargets(){const remote=$('setupImageRemote').value;if(remote&&remote===$('setupImageRemote').dataset.unavailableValue){toast('The selected image remote is unavailable. Choose another remote or explicitly select No cloud upload.',true);return}return setupDo('targets',{image:remote?remote+$('setupImageFolder').value.trim():'',backups:setupLines('setupBackupTargets'),folder:$('setupBackupFolder').value},'Replace cloud destinations? Empty destinations disable cloud copies; existing cloud files remain.')}
 function setupSchedule(){return setupDo('schedule',{enabled:$('setupScheduleEnabled').value==='true',mode:$('setupScheduleMode').value,value:$('setupScheduleValue').value},'Save this automatic backup schedule in the server timezone?')}
 function setupRemote(){return setupDo('remote',{mode:$('setupAccessMode').value,ips:setupLines('setupAllowedIps')},'Apply panel access settings? The panel will restart and sign you out. Restricted IPs can prevent this device from reconnecting. Keep RDP access available.')}
 async function setupRevealToken(){
