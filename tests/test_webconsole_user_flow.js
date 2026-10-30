@@ -101,6 +101,15 @@ test('hour history uses timestamps and persisted samples rather than 180 live sa
   assert.ok(buckets.includes(null));assert.match(html,/recent=\[\.\.\.dayHist,\.\.\.liveHist\]/);
 });
 
+test('missing adapter history stays a gap while a measured zero stays zero',()=>{
+  const context=vm.createContext({Date,Math,Number});
+  vm.runInContext(html.slice(html.indexOf('function gridOver('),html.indexOf('function drawAll(')),context);
+  const now=Date.now();
+  const missing=context.gridOver([{t:(now-1000)/1000,down:null}],'down',3600000,60);
+  const zero=context.gridOver([{t:(now-1000)/1000,down:0}],'down',3600000,60);
+  assert.equal(missing[59],null);assert.equal(zero[59],0);
+});
+
 test('failed user refresh keeps previous accounts and exposes retry', async () => {
   const tbody={innerHTML:'previous accounts'};
   const fields={usersStatus:{textContent:'',innerHTML:''},userTbl:{querySelector:()=>tbody}};

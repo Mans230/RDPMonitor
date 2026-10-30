@@ -53,6 +53,7 @@ from rdp_connectivity import COLLECT_PS, analyze as analyze_rdp_policy, format_r
 from bot_catalog import (build_menus, category_title, canonical_command, help_text,
                          telegram_menu, PAGE_ALIASES, OWNERS)
 from resource_alerts import ResourceAlertPolicy, usage_level as resource_usage_level
+from bandwidth import usage_summary, TrafficLedger
 from security_events import (canonical_ip, canonical_target, event_timestamp,
                              account_query, failed_query, protected_target, success_query, usable_source)
 
@@ -290,6 +291,8 @@ _last_traffic_counters = None      # (bytes_sent, bytes_recv) Last sample
 _last_traffic_save = 0.0
 _last_traffic_check = 0.0
 _traffic_alerted = {}              # Quota alerts: {"YYYY-MM_50": True, ...}
+_traffic_ledger = None
+_traffic_load_error = None
 _last_svcwatch_check = 0.0
 _last_rdpsched_check = 0.0        # Last check to schedule hours RDP
 _svcwatch_last = {}                # {name: ts} Last attempt to restart the service
@@ -3204,6 +3207,17 @@ def _dispatch_panel(action, args):
         return ok, "rule removal verified" if ok else "rule removal could not be verified; tracking retained"
     if action == "users_list":
         return api_users_list()
+    if action == "traffic_get":
+        with _traffic_lock:
+            days = copy.deepcopy(_traffic)
+            collected = _last_traffic_check
+            measurement = copy.deepcopy(_traffic_ledger.meta) if _traffic_ledger else {}
+        summary = usage_summary(days, config.get("traffic_quota_gb", 0), config.get("traffic_reset_day", 1))
+        summary["collected_at"] = collected or None
+        summary["timezone"] = datetime.now().astimezone().tzname()
+        summary["measurement"] = measurement
+        summary["history_error"] = _traffic_load_error
+        return True, summary
     if action == "diag":
         return api_diag(args.get("op", ""), args.get("arg", ""))
     if action == "user_action":
@@ -3438,7 +3452,7 @@ def monitor_control_loop():
 
 def _panel_read_request(req):
     action, args = req.get("action"), req.get("args") or {}
-    return (action in {"users_list", "settings_get", "rdp_status"}
+    return (action in {"users_list", "settings_get", "rdp_status", "traffic_get"}
             or action in {"trap", "automation"} and args.get("op") == "list")
 
 
@@ -8108,74 +8122,46 @@ TRAFFIC_FILE = os.path.join(BASE_DIR, "traffic.json")
 def load_traffic():
     """Holds daily count + Last sample counters — Turning the tool off and on doubles the count
     (It was the first sample after all restart It re-adds every byte of the device’s boot)"""
-    global _traffic, _last_traffic_counters
+    global _traffic, _traffic_ledger, _traffic_load_error
     try:
         if os.path.exists(TRAFFIC_FILE):
             with open(TRAFFIC_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
         else:
-            return
-        if isinstance(data, dict) and "days" in data:
-            _traffic = data.get("days") or {}
-            last = data.get("last")
-            # Boot ID: Pre-reboot system counters are worthless with
-            # New boot even if it is larger than the saved one (An account shortage was occurring)
-            if data.get("boot") == psutil.boot_time() \
-                    and isinstance(last, (list, tuple)) and len(last) == 2:
-                _last_traffic_counters = (last[0], last[1])
-        else:
-            _traffic = data  # Old formula: Dictionary of days directly
-    except Exception:
+            data = {}
+        _traffic_ledger = TrafficLedger(data, psutil.boot_time(), time.time())
+        _traffic = _traffic_ledger.days
+        _traffic_load_error = None
+    except Exception as exc:
+        _traffic_load_error = "Recorded traffic could not be loaded; file preserved: " + type(exc).__name__
+        print("[traffic] " + _traffic_load_error)
         _traffic = {}
 
 
 def save_traffic():
     """Atomic conservation - A power outage does not waste the daily count nor the last sample counters"""
-    try:
-        tmp = TRAFFIC_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"days": _traffic, "boot": psutil.boot_time(),
-                       "last": list(_last_traffic_counters or [])}, f)
-        os.replace(tmp, TRAFFIC_FILE)
-    except Exception as e:
-        print(f"[traffic] save error: {e}")
+    if _traffic_load_error or _traffic_ledger is None:
+        return False
+    with _traffic_lock:
+        snapshot = _traffic_ledger.snapshot()
+    return _atomic_write_json(TRAFFIC_FILE, snapshot)
 
 
 def traffic_job():
     """Collects the bytes transferred since the last sample and adds them to the day’s count - Every cycle is monitored"""
-    global _last_traffic_counters, _last_traffic_save, _last_traffic_check
-    c = psutil.net_io_counters()
-    if _last_traffic_counters:
-        d_sent = c.bytes_sent - _last_traffic_counters[0]
-        d_recv = c.bytes_recv - _last_traffic_counters[1]
-        # If the meters decrease, the device will be restarted - We are counting from the start of take-off
-        if d_sent < 0:
-            d_sent = c.bytes_sent
-        if d_recv < 0:
-            d_recv = c.bytes_recv
-    else:
-        # First run of the tool on this installation only (After the first save, the counters are saved
-        # In traffic.json Restarting the tool will continue without delay)
-        d_sent = c.bytes_sent
-        d_recv = c.bytes_recv
-    day = datetime.now().strftime("%Y-%m-%d")
-    with _traffic_lock:
-        rec = _traffic.setdefault(day, {"down": 0.0, "up": 0.0})
-        rec["down"] += d_recv / (1024 ** 2)   # MB
-        rec["up"] += d_sent / (1024 ** 2)
-        # Cleaning: We keep 95 day
-        if len(_traffic) > 95:
-            cutoff = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
-            for k in list(_traffic.keys()):
-                if k < cutoff:
-                    del _traffic[k]
-    _last_traffic_counters = (c.bytes_sent, c.bytes_recv)
+    global _last_traffic_save, _last_traffic_check
+    if _traffic_load_error or _traffic_ledger is None:
+        return
+    counters = {name: {"bytes_sent": c.bytes_sent, "bytes_recv": c.bytes_recv}
+                for name, c in (psutil.net_io_counters(pernic=True, nowrap=False) or {}).items()}
     now_ts = time.time()
+    with _traffic_lock:
+        _traffic_ledger.observe(counters, now_ts)
+        _last_traffic_check = now_ts
     if now_ts - _last_traffic_save >= 300:
-        _last_traffic_save = now_ts
-        save_traffic()
+        if save_traffic():
+            _last_traffic_save = now_ts
         check_traffic_quota()
-    _last_traffic_check = now_ts
 
 
 def quota_window_start():
@@ -8254,7 +8240,7 @@ def traffic_report(days=7):
         lines.append(rtl("There is no specific quota — Select it: /set traffic 500"))
     all_down = sum(r.get("down", 0) for r in snapshot.values())
     all_up = sum(r.get("up", 0) for r in snapshot.values())
-    lines.append(rtl(f" Since installation: <b>{(all_down + all_up) / 1024:.2f} GB</b> "
+    lines.append(rtl(f" Retained history (up to 95 days): <b>{(all_down + all_up) / 1024:.2f} GiB</b> "
                      f"(Download {all_down / 1024:.2f} | Raise {all_up / 1024:.2f})"))
     lines.append("")
     lines.append(rtl(f" Another {days} days:"))
@@ -8269,6 +8255,11 @@ def traffic_report(days=7):
             rows.append(f"{day_dt:%m-%d}      -")
     lines.append("<pre>" + esc("\n".join(rows)) + "</pre>")
     lines.append(rtl("Ranking: History | Total | Download | Raise"))
+    lines.append("Host-wide adapter counters, not an ISP billing meter. Internal/tunnel traffic may be counted more than once.")
+    if _traffic_ledger and _traffic_ledger.meta.get("legacy_history"):
+        lines.append("Includes legacy estimates. New per-adapter baselines do not retroactively correct old totals.")
+    if _traffic_load_error:
+        lines.append(esc(_traffic_load_error))
     return "\n".join(lines)
 
 
@@ -9484,7 +9475,7 @@ SETTINGS_SCHEMA = [
         ("block", "Auto-ban offenders", "bool", None, None, ""),
         ("blocklimit", "Auto-ban after", "int", 1, 100, "tries"),
         ("tempalert", "Temperature alert", "int", 40, 120, "C"),
-        ("traffic", "Traffic quota", "int", 0, 1000000, "GB"),
+        ("traffic", "Traffic quota", "int", 0, 1000000, "GiB"),
         ("trafficday", "Billing cycle day", "int", 1, 28, ""),
         ("lockdown", "Auto lockdown", "bool", None, None, ""),
         ("lockdownlimit", "Lockdown after", "int", 1, 1000, "tries"),
