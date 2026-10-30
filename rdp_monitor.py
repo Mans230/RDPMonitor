@@ -45,6 +45,7 @@ from datetime import datetime, timedelta, timezone
 
 import psutil
 import requests
+from safe_logging import redact as redact_log, scrub_file
 from account_safety import serialized_account_action, serialized_user_command
 from diagnostic_runtime import deadline_scope, remaining_timeout
 from audit_store import append_event
@@ -94,6 +95,10 @@ def _quiet_popen(*args, **kwargs):
     return _orig_sub_popen(*args, **kwargs)
 
 
+# Keep the standard module intact: asyncio subclasses subprocess.Popen on Windows.
+from types import SimpleNamespace
+subprocess = SimpleNamespace(**{name: getattr(subprocess, name) for name in dir(subprocess)
+                               if not name.startswith("__")})
 subprocess.run = _quiet_run
 subprocess.Popen = _quiet_popen
 
@@ -1655,12 +1660,14 @@ def _dpapi_blob(data):
     return blob
 
 
-def dpapi_protect(plain):
-    """Encrypt text with word/mechanism Windows DPAPI - It can only be unlocked for the same user on the same device"""
+def dpapi_protect(plain, machine=None):
+    """User DPAPI by default; startup hosting uses machine DPAPI plus private ACLs."""
     in_blob = _dpapi_blob(plain.encode("utf-8"))
     out = _DATA_BLOB()
+    if machine is None:
+        machine = os.path.isfile(os.path.join(BASE_DIR, "control", "service.json"))
     ok = ctypes.windll.crypt32.CryptProtectData(
-        ctypes.byref(in_blob), None, None, None, None, 0, ctypes.byref(out))
+        ctypes.byref(in_blob), None, None, None, None, 4 if machine else 0, ctypes.byref(out))
     if not ok:
         raise OSError("CryptProtectData failed")
     try:
@@ -1671,7 +1678,7 @@ def dpapi_protect(plain):
 
 
 def dpapi_unprotect(b64):
-    """Decrypt DPAPI - It fails if the user or device changes"""
+    """Decrypt a user- or machine-scoped DPAPI blob on this device."""
     raw = base64.b64decode(b64)
     in_blob = _dpapi_blob(raw)
     out = _DATA_BLOB()
@@ -1911,6 +1918,8 @@ class _TeeWriter:
         self._lock = threading.Lock()
 
     def write(self, s):
+        original_length = len(s or "")
+        s = redact_log(s or "")
         if s and s.strip():
             try:
                 stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1932,7 +1941,7 @@ class _TeeWriter:
                 orig.flush()
             except Exception:
                 pass
-        return len(s or "")
+        return original_length
 
     def flush(self):
         try:
@@ -3307,10 +3316,31 @@ def _dispatch_panel(action, args):
 def monitor_control_loop():
     """Execute panel requests (RDP security) in the monitor process."""
     os.makedirs(MONITOR_CONTROL_DIR, exist_ok=True)
+    from concurrent.futures import ThreadPoolExecutor
+    reads = ThreadPoolExecutor(max_workers=4, thread_name_prefix="panel-read")
+    writes = ThreadPoolExecutor(max_workers=1, thread_name_prefix="panel-write")
+    pending = set()
     while True:
         try:
+            pending = {job for job in pending if not job.done()}
+            # Per-request files let unrelated reads proceed while a slow query runs.
+            for name in sorted(os.listdir(MONITOR_CONTROL_DIR)):
+                if len(pending) >= 24:
+                    break
+                if not re.fullmatch(r"request-[a-f0-9]{32}\.json", name):
+                    continue
+                path = os.path.join(MONITOR_CONTROL_DIR, name)
+                claimed = path + ".processing"
+                try:
+                    os.replace(path, claimed)
+                except OSError:
+                    continue
+                with open(claimed, encoding="utf-8") as stream:
+                    req = json.load(stream)
+                pool = reads if _panel_read_request(req) else writes
+                pending.add(pool.submit(_process_panel_request, req, claimed))
             if not os.path.isfile(MONITOR_REQUEST):
-                time.sleep(2)
+                time.sleep(0.05)
                 continue
             claimed = MONITOR_REQUEST + ".processing"
             try:
@@ -3344,7 +3374,34 @@ def monitor_control_loop():
                                                     "out": repr(e), "t": time.time()})
             except Exception:
                 pass
-        time.sleep(1)
+        time.sleep(0.05)
+
+
+def _panel_read_request(req):
+    action, args = req.get("action"), req.get("args") or {}
+    return (action in {"users_list", "settings_get", "rdp_status"}
+            or action in {"trap", "automation"} and args.get("op") == "list")
+
+
+def _process_panel_request(req, claimed):
+    rid = str(req.get("id", ""))
+    try:
+        if not re.fullmatch(r"[a-f0-9]{32}", rid):
+            return
+        if time.time() >= float(req.get("expires", 0)):
+            return  # Never execute an action after its caller timed out.
+        try:
+            ok, out = _dispatch_panel(str(req.get("action", "")), req.get("args") or {})
+        except Exception as exc:
+            ok, out = False, redact_log(repr(exc))
+        if time.time() < float(req["expires"]):
+            _atomic_write_json(os.path.join(MONITOR_CONTROL_DIR, "result-" + rid + ".json"),
+                               {"id": rid, "ok": bool(ok), "out": out})
+    finally:
+        try:
+            os.remove(claimed)
+        except OSError:
+            pass
 
 
 def restore_list_text():
@@ -11423,6 +11480,8 @@ def main():
 
     # Permanent record: All outputs print Reach the console (If any) And to file rdp_monitor.log
     # - Addresses disappearance of errors when running with pythonw Without window
+    for retained in (LOG_FILE, LOG_FILE + ".old"):
+        scrub_file(retained)
     sys.stdout = _TeeWriter(sys.stdout)
     sys.stderr = _TeeWriter(sys.stderr)
 
