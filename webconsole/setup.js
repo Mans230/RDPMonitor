@@ -1,5 +1,5 @@
 /* Owner setup forms. Secrets are sent only in confirmed POST bodies. */
-let setupLoaded=false,setupBusy=false,setupJobsBusy=false,setupJobSignature='',setupTokenTimer,setupImagesActive=false,setupLastRefresh=0;
+let setupLoaded=false,setupBusy=false,setupJobsBusy=false,setupJobSignature='',setupTokenTimer,setupImagesActive=false,setupLastRefresh=0,setupCloudReady=false;
 const setupFields={drive:[['client_id','OAuth client ID (optional)'],['client_secret','OAuth client secret (optional)','password']],onedrive:[['client_id','OAuth client ID (optional)'],['client_secret','OAuth client secret (optional)','password']],dropbox:[],s3:[['provider','S3 provider (AWS / Wasabi / Minio / Other)'],['access_key_id','Access key ID'],['secret_access_key','Secret access key','password'],['endpoint','Endpoint URL (optional)'],['region','Region (optional)']],b2:[['account','Application key ID'],['key','Application key','password']],sftp:[['host','Server hostname'],['user','Username'],['pass','Password','password'],['port','Port (optional)']],ftp:[['host','Server hostname'],['user','Username'],['pass','Password','password']],webdav:[['url','WebDAV URL'],['vendor','Vendor (other / nextcloud / owncloud)'],['user','Username'],['pass','Password','password']]};
 function setupLines(id){return $(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
 function setupJump(index){document.querySelectorAll('#tab-setup section')[index].scrollIntoView({behavior:'smooth',block:'start'})}
@@ -48,6 +48,7 @@ async function loadSetup(reset=false){
   try{
     const r=await fetch('/api/setup'),d=await r.json();
     if(!r.ok)throw new Error(d.error||'Setup unavailable');
+    setupCloudReady=!d.cloud.error;
     $('setupError').textContent='';
     $('setupCloudStatus').textContent=(d.cloud.healthy?d.cloud.version:'rclone unavailable: '+d.cloud.version)+(d.cloud.error?' · '+d.cloud.error:'');
     $('setupRemotes').replaceChildren();
@@ -78,7 +79,9 @@ async function loadSetup(reset=false){
       $('setupSourcePaths').value=d.backup.sources.join('\n');
       const s=d.backup.schedule;$('setupScheduleEnabled').value=String(s.enabled!==false);$('setupScheduleMode').value=s.mode||'daily';$('setupScheduleValue').value=s.mode==='interval'?s.interval_hours:s.mode==='times'?(s.times||[]).join(','):s.time||'03:00';setupScheduleHint();
       $('setupAccessMode').value=['127.0.0.1','localhost','::1'].includes(remote.bind)?'local':remote.allowed_ips.includes('0.0.0.0/0')?'public':'restricted';$('setupAllowedIps').value=remote.allowed_ips.join('\n');
-      if(!d.cloud.error)syncSetupRemoteChoices(d.cloud.remotes,savedImageRemote);
+      // Initial discovery may fail even though a destination is already saved.
+      // Keep it visibly unavailable rather than silently selecting no upload.
+      syncSetupRemoteChoices(d.cloud.error?[]:d.cloud.remotes,savedImageRemote);
       setupLoaded=true;
     }
     if(!document.activeElement.closest('#setupJobs form'))renderSetupJobs(d.jobs);
@@ -129,7 +132,12 @@ async function setupClient(){
   const j=await setupDo('client',{name:$('setupClientRemote').value,client_id:$('setupClientId').value,client_secret:$('setupClientSecret').value},'Update the OAuth client for this remote?');
   if(j?.ok)$('setupClientSecret').value='';
 }
-function setupTargets(){const remote=$('setupImageRemote').value;if(remote&&remote===$('setupImageRemote').dataset.unavailableValue){toast('The selected image remote is unavailable. Choose another remote or explicitly select No cloud upload.',true);return}return setupDo('targets',{image:remote?remote+$('setupImageFolder').value.trim():'',backups:setupLines('setupBackupTargets'),folder:$('setupBackupFolder').value},'Replace cloud destinations? Empty destinations disable cloud copies; existing cloud files remain.')}
+function setupTargets(){
+  if(!setupLoaded||!setupCloudReady){toast('Cloud discovery is unavailable. Refresh saved settings before changing destinations.',true);return}
+  const remote=$('setupImageRemote').value;
+  if(remote&&remote===$('setupImageRemote').dataset.unavailableValue){toast('The selected image remote is unavailable. Choose another remote or explicitly select No cloud upload.',true);return}
+  return setupDo('targets',{image:remote?remote+$('setupImageFolder').value.trim():'',backups:setupLines('setupBackupTargets'),folder:$('setupBackupFolder').value},'Replace cloud destinations? Empty destinations disable cloud copies; existing cloud files remain.');
+}
 function setupSchedule(){return setupDo('schedule',{enabled:$('setupScheduleEnabled').value==='true',mode:$('setupScheduleMode').value,value:$('setupScheduleValue').value},'Save this automatic backup schedule in the server timezone?')}
 function setupRemote(){return setupDo('remote',{mode:$('setupAccessMode').value,ips:setupLines('setupAllowedIps')},'Apply panel access settings? The panel will restart and sign you out. Restricted IPs can prevent this device from reconnecting. Keep RDP access available.')}
 async function setupRevealToken(){

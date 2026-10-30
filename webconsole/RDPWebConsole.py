@@ -578,16 +578,24 @@ def act_service(name, action):
     audit("service_%s" % action, name); return ok, out
 
 def act_list_services():
-    rc, out = run_cmd(["powershell", "-NoProfile", "-Command",
-                       "Get-Service | Where-Object {$_.StartType -ne 'Disabled'} | "
-                       "Sort-Object {$_.Status -ne 'Running'}, DisplayName | "
-                       "Select-Object -First 80 Status,Name,DisplayName | ConvertTo-Json -Compress"], timeout=40)
+    message = "Could not read Windows services. Check permissions and retry."
     try:
-        items = json.loads(out)
+        rc, out = run_cmd(["powershell", "-NoProfile", "-Command",
+                           "$ErrorActionPreference='Stop'; Get-Service | Where-Object {$_.StartType -ne 'Disabled'} | "
+                           "Sort-Object {$_.Status -ne 'Running'}, DisplayName | "
+                           "Select-Object -First 80 Status,Name,DisplayName | ConvertTo-Json -Compress"], timeout=40)
+    except Exception:
+        raise RuntimeError(message) from None
+    if rc != 0:
+        raise RuntimeError(message)
+    try:
+        items = json.loads(out) if out.strip() else []
         if isinstance(items, dict): items = [items]
+        if not isinstance(items, list) or any(not isinstance(i, dict) or not isinstance(i.get("Name"), str) or not i["Name"] for i in items):
+            raise ValueError("invalid service data")
         return [{"status": i.get("Status"), "name": i.get("Name"), "display": i.get("DisplayName")} for i in items]
     except Exception:
-        return []
+        raise RuntimeError(message) from None
 
 def execution_permissions():
     monitor = bool(rdpm_config().get("exec_enabled", False))
@@ -1709,7 +1717,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e: return self._json(500, {"error": repr(e)})
         if u.path == "/api/sysinfo": return self._json(200, act_sysinfo())
         if u.path == "/api/netstat": return self._json(200, {"items": act_netstat()})
-        if u.path == "/api/services": return self._json(200, {"items": act_list_services()})
+        if u.path == "/api/services":
+            try:
+                return self._json(200, {"items": act_list_services()})
+            except RuntimeError as exc:
+                return self._json(503, {"error": str(exc)})
         if u.path == "/api/backup": return self._json(200, backup_info())
         if u.path in ("/api/setup", "/api/setup/jobs", "/api/setup/browse"):
             _sid, session = self._session()
