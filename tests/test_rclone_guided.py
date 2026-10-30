@@ -122,5 +122,57 @@ class RcloneGuidedMenuTests(unittest.TestCase):
         set_target.assert_called_once_with(["gdrive:RDPMonitor-Images"])
 
 
+class RcloneRepairTests(unittest.TestCase):
+    def test_healthy_install_checks_binary_and_skips_download(self):
+        with mock.patch.object(rm, "_rclone_exe", return_value="existing.exe"), \
+                mock.patch.object(rm, "_rclone_health", return_value=(True, "rclone v1.75.2")) as health, \
+                mock.patch.object(rm.requests, "get") as download, \
+                mock.patch.object(rm, "send_message"):
+            rm.rclone_install()
+        health.assert_called_once_with("existing.exe")
+        download.assert_not_called()
+
+    def test_repair_replaces_binary_only_after_validation_and_preserves_remotes(self):
+        self._exercise_repair(True)
+
+    def test_failed_candidate_validation_preserves_binary_and_remotes(self):
+        self._exercise_repair(False)
+
+    def test_failed_config_save_restores_binary(self):
+        self._exercise_repair(True, save=False)
+
+    def _exercise_repair(self, healthy, save=True):
+        import hashlib
+        import io
+        import zipfile
+        content = io.BytesIO()
+        with zipfile.ZipFile(content, "w") as archive:
+            archive.writestr("rclone/rclone.exe", b"new binary")
+        payload = content.getvalue()
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            target = folder / "rclone.exe"
+            target.write_bytes(b"old binary")
+            remote = folder / "rclone.conf"
+            remote.write_bytes(b"saved remote credentials")
+            cfg = dict(rm.DEFAULT_CONFIG, rclone_path=str(target))
+            with mock.patch.object(rm, "config", cfg), \
+                    mock.patch.object(rm, "_rclone_dir", return_value=directory), \
+                    mock.patch.object(rm, "_rclone_exe", return_value=str(target)), \
+                    mock.patch.object(rm, "_rclone_health", side_effect=[(True, "old"), (healthy, "rclone v1.74.4")]), \
+                    mock.patch.object(rm.requests, "get", return_value=mock.Mock(content=payload)) as download, \
+                    mock.patch.object(rm, "RCLONE_SHA256", hashlib.sha256(payload).hexdigest()), \
+                    mock.patch.object(rm, "save_config", return_value=save), \
+                    mock.patch.object(rm, "_rclone_register_config"), \
+                    mock.patch.object(rm, "_rclone_conf_path"), \
+                    mock.patch.object(rm, "audit_record"), \
+                    mock.patch.object(rm, "send_message"), \
+                    mock.patch.object(rm, "rclone_menu"):
+                rm.rclone_install(force=True)
+            download.assert_called_once()
+            self.assertEqual(target.read_bytes(), b"new binary" if healthy and save else b"old binary")
+            self.assertEqual(remote.read_bytes(), b"saved remote credentials")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1247,7 +1247,7 @@ def _rclone_confirm(text, fn, args=()):
 
 
 def _rclone_start_install():
-    threading.Thread(target=rclone_install, daemon=True).start()
+    threading.Thread(target=rclone_install, kwargs={"force": True}, daemon=True).start()
 
 
 def _rclone_start_authorize(name, rtype):
@@ -1323,7 +1323,9 @@ def rclone_guided_callback(data):
     if data == "rc:advanced":
         return rclone_advanced_menu()
     if data == "rc:install":
-        return _rclone_confirm("Install or repair the suite-managed rclone copy?",
+        return _rclone_confirm("Reinstall the suite-managed <b>rclone v1.74.4</b> from its verified archive? "
+                               "This replaces the managed binary, even if a newer version is installed. "
+                               "Your cloud accounts and rclone.conf are preserved.",
                                _rclone_start_install)
     providers = {"rc:gdrive": ("gdrive", "drive", "Google Drive"),
                  "rc:onedrive": ("onedrive", "onedrive", "OneDrive"),
@@ -1349,41 +1351,85 @@ def rclone_guided_callback(data):
         return rclone_del([name]) if name else send_message("This button expired. Open /rclone again.")
 
 
-def rclone_install():
+_rclone_install_lock = threading.Lock()
+
+
+def _rclone_health(exe):
+    if not exe or not os.path.isfile(exe):
+        return False, "rclone executable is missing"
+    try:
+        result = subprocess.run([exe, "version"], capture_output=True, timeout=20,
+                                creationflags=NO_WINDOW)
+        version = _decode_out(result.stdout).splitlines()
+        if result.returncode == 0 and version and re.match(r"^rclone v\d+\.\d+", version[0]):
+            return True, version[0].strip()
+        return False, "rclone could not report a valid version"
+    except Exception as exc:
+        return False, redact_log(str(exc))[:200]
+
+
+def rclone_install(force=False):
+    if not _rclone_install_lock.acquire(blocking=False):
+        return send_message("An rclone installation is already in progress. Please wait.")
+    try:
+        return _install_rclone_verified(force)
+    finally:
+        _rclone_install_lock.release()
+
+
+def _install_rclone_verified(force):
     exe = _rclone_exe()
-    if exe and os.path.isfile(exe):
-        send_message("[OK] rclone is already installed:\n<code>" + esc(exe) + "</code>")
-        return
-    send_message("Downloading rclone (about 20 MB)...")
+    healthy, version = _rclone_health(exe)
+    if healthy and not force:
+        return send_message("[OK] rclone passed its health check: " + esc(version) +
+                            "\nUse Install / repair in /rclone to reinstall the verified build.")
+    send_message("Downloading verified rclone v1.74.4. Cloud accounts are preserved…")
     try:
         import io
         import zipfile
-        r = requests.get(RCLONE_URL, timeout=300)
-        r.raise_for_status()
-        digest = hashlib.sha256(r.content).hexdigest()
-        if not hmac.compare_digest(digest, RCLONE_SHA256):
-            send_message("[X] rclone archive checksum mismatch. Nothing was installed.")
-            return
+        response = requests.get(RCLONE_URL, timeout=300)
+        response.raise_for_status()
+        if not hmac.compare_digest(hashlib.sha256(response.content).hexdigest(), RCLONE_SHA256):
+            return send_message("[X] rclone archive checksum mismatch. Existing installation was preserved.")
         os.makedirs(_rclone_dir(), exist_ok=True)
         target = os.path.join(_rclone_dir(), "rclone.exe")
-        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-            member = next((n for n in z.namelist()
-                           if n.lower().endswith("rclone.exe")), None)
-            if not member:
-                send_message("[X] rclone.exe was not found in the downloaded archive.")
-                return
-            with open(target, "wb") as f:
-                f.write(z.read(member))
-        config["rclone_path"] = target
-        save_config()
+        with tempfile.TemporaryDirectory(prefix="install-", dir=_rclone_dir()) as staging:
+            candidate = os.path.join(staging, "rclone.exe")
+            previous = os.path.join(staging, "previous.exe")
+            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                member = next((m for m in archive.infolist() if m.filename.lower().endswith("/rclone.exe")
+                               or m.filename.lower() == "rclone.exe"), None)
+                if member is None or member.file_size > 150 * 1024 * 1024:
+                    raise ValueError("verified archive has no valid rclone executable")
+                with open(candidate, "wb") as stream:
+                    stream.write(archive.read(member))
+            healthy, version = _rclone_health(candidate)
+            if not healthy:
+                raise RuntimeError("Downloaded executable failed validation: " + version)
+            old_path = config.get("rclone_path", "")
+            had_target = os.path.isfile(target)
+            if had_target:
+                os.replace(target, previous)
+            try:
+                os.replace(candidate, target)
+                config["rclone_path"] = target
+                if not save_config():
+                    raise OSError("Could not save rclone configuration; previous binary restored")
+            except Exception:
+                config["rclone_path"] = old_path
+                if had_target:
+                    os.replace(previous, target)
+                elif os.path.isfile(target):
+                    os.remove(target)
+                raise
         _rclone_conf_path()
         _rclone_register_config()
-        audit_record("rclone installed: " + target)
-        send_message("[OK] rclone installed.\n" + esc(_rclone_version()) +
-                     "\nPath: <code>" + esc(target) + "</code>")
+        audit_record("rclone verified installation: " + target)
+        send_message("[OK] rclone installed and validated.\n" + esc(version) +
+                     "\nCloud remotes and credentials were preserved.")
         rclone_menu()
-    except Exception as e:
-        send_message("[X] rclone download failed: " + esc(str(e)))
+    except Exception as exc:
+        send_message("[X] rclone installation failed: " + esc(redact_log(str(exc))))
 
 
 def _rclone_kv(pairs):
