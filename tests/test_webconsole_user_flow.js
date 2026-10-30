@@ -26,6 +26,17 @@ function browser(accepted = true, prepareOK = true) {
   return {context, calls, fields};
 }
 
+test('authenticated startup initializes the selected route exactly once', () => {
+  for(const route of ['users','settings','tools','docs','rdpsec','setup','backup','bandwidth','live']){
+    const calls=[];const selected={dataset:{t:route}};
+    const context=vm.createContext({started:false,appTimers:[],setInterval:()=>1,
+      $:()=>({style:{}}),poll:()=>{},pollSetupJobs:()=>{},loadDay:()=>{},
+      document:{querySelector:()=>selected},activateTab:tab=>calls.push(tab.dataset.t)});
+    vm.runInContext(html.slice(html.indexOf('function startApp(){'),html.indexOf('async function authRequest(')),context);
+    context.startApp();context.startApp();assert.deepEqual(calls,[route]);
+  }
+});
+
 test('all inline JavaScript parses', () => {
   const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
   assert.ok(scripts.length > 0);
