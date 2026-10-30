@@ -434,6 +434,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     </div>
   </div>
   <div id="tab-backup" style="display:none">
+    <p id="backupLoadStatus" class="load-state" role="status"></p>
     <div class="grid g4">
       <div class="card"><h3>Worker</h3><div class="big" id="backupState" style="font-size:24px">—</div><div class="mut" id="backupMessage">Loading…</div></div>
       <div class="card"><h3>Last successful run</h3><div class="big" id="backupLast" style="font-size:20px">—</div><div class="mut" id="backupSummary">—</div></div>
@@ -598,17 +599,20 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     </div>
     <div class="card" style="margin-top:14px">
       <h3>Services <span class="mut" style="text-transform:none;font-weight:400">first 80</span> <button class="btn" style="margin-inline-start:auto" onclick="loadServices()">Update</button></h3>
+      <p id="servicesLoadStatus" class="load-state" role="status"></p>
       <div class="scroll" style="max-height:380px"><table id="svcTbl"><thead><tr><th>Status</th><th>Name</th><th>Description</th><th></th></tr></thead><tbody></tbody></table></div>
     </div>
     <div class="grid g2" style="margin-top:14px">
       <div class="card"><h3>Active connections <button class="btn" style="margin-inline-start:auto" onclick="loadNetstat()">Update</button></h3>
+        <p id="netstatLoadStatus" class="load-state" role="status"></p>
         <div class="scroll"><table id="netTbl"><thead><tr><th>Local</th><th>Remote</th><th>Program</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="card"><h3>System information <button class="btn" style="margin-inline-start:auto" onclick="loadSysinfo()">Update</button></h3><div id="sysinfoBox"><div class="mut">—</div></div></div>
+      <div class="card"><h3>System information <button class="btn" style="margin-inline-start:auto" onclick="loadSysinfo()">Update</button></h3><p id="sysinfoLoadStatus" class="load-state" role="status"></p><div id="sysinfoBox"><div class="mut">—</div></div></div>
     </div>
   </div>
 
   <!-- ============ SECURITY ============ -->
   <div id="tab-sec" style="display:none">
+    <p id="securityLoadStatus" class="load-state" role="status"></p>
     <div class="grid g2">
       <div class="card"><h3>RDP status</h3><div id="rdpStatus"><div class="skel">loading</div></div></div>
       <div class="card"><h3>Blocked IPs <span id="blkCount" class="pill">—</span></h3>
@@ -628,6 +632,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     </div>
     <div class="card" style="margin-top:14px"><h3>Traffic totals (RDPMonitor traffic.json)</h3><div id="trafficBox" class="mono"></div></div>
     <div class="card" style="margin-top:14px"><h3>Event log — audit <button class="btn" style="margin-inline-start:auto" onclick="loadSec()">Update</button></h3>
+      <p id="auditLoadStatus" class="load-state" role="status"></p>
       <div class="scroll"><table id="auditTbl"><thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
@@ -1077,8 +1082,9 @@ function botService(){
 
 async function loadBackup(){
   try{
-    const r=await fetch("/api/backup");const d=await r.json();
-    if(!d.installed){$("backupState").textContent="Not installed";return}
+    const d=await readPanelData("/api/backup",d=>typeof d.installed==='boolean');
+    readPanelStatus("backupLoadStatus");
+    if(!d.installed){$("backupState").textContent="Not installed";$("backupNowBtn").disabled=true;$("backupMessage").textContent="Install the backup worker to use backups.";return}
     const w=d.worker||{},s=d.settings||{},last=d.last||{};
     $("backupState").textContent=(w.state||"unknown").toUpperCase();
     $("backupState").style.color=w.state==="ok"||w.state==="idle"?"var(--ok)":w.state==="running"?"var(--warn)":"var(--bad)";
@@ -1093,7 +1099,7 @@ async function loadBackup(){
     $("backupTbl").querySelector("tbody").innerHTML=(d.items||[]).map(x=>"<tr><td class='mono'>"+eh(x.name)+"</td><td class='mono'>"+hb(x.size)+"</td><td class='mut'>"+new Date(x.modified*1000).toLocaleString("en-US")+"</td><td><button class='btn' onclick=\"restoreArchive('"+enc(x.name)+"')\">Restore</button></td></tr>").join("")||'<tr><td colspan=4 class="mut">No local backups</td></tr>';
     $("backupLog").textContent=(d.recent_log||[]).join("\n")||"No log entries";
     $("backupNowBtn").disabled=w.state==="running";
-  }catch(e){toast("Unable to load backup status",true)}
+  }catch(e){readPanelStatus("backupLoadStatus",e,loadBackup)}
 }
 function backupNow(){
   if(!confirm("Start a manual backup now?"))return;
@@ -1540,7 +1546,8 @@ async function showProc(pid){
 /* ---------- tools tab ---------- */
 async function loadServices(){
   try{
-    const r=await fetch("/api/services");const j=await r.json();
+    const j=await readPanelData("/api/services",d=>Array.isArray(d.items));
+    readPanelStatus("servicesLoadStatus");
     $("svcTbl").querySelector("tbody").innerHTML=(j.items||[]).map(s=>"<tr><td><span class='pill "+(s.status=="Running"?"p-ok":"p-warn")+"'>"+eh(s.status)+"</span></td><td class='mono'>"+eh(s.name)+"</td><td class='mut'>"+eh(s.display||"")+"</td>"+
       "<td><button class='btn' onclick=\"doSvcNamedEnc('"+enc(s.name)+"','restart')\">↻</button> <button class='btn' onclick=\"doSvcNamedEnc('"+enc(s.name)+"','stop')\"></button></td></tr>").join("");
     $("svcTbl").querySelectorAll("tbody tr").forEach(row=>{
@@ -1548,7 +1555,7 @@ async function loadServices(){
       if(restart)restart.textContent="Restart";
       if(stop){stop.textContent="Stop";stop.classList.add("danger")}
     });
-  }catch(e){toast("Services load failed: "+e,true)}
+  }catch(e){readPanelStatus("servicesLoadStatus",e,loadServices)}
 }
 function doSvcNamed(name,mode){
   if(mode=="restart"&&!confirm("Restart the service "+name+"?"))return;
@@ -1558,13 +1565,15 @@ function doSvcNamed(name,mode){
 function doSvcNamedEnc(name,mode){doSvcNamed(decodeURIComponent(name),mode)}
 async function loadNetstat(){
   try{
-    const r=await fetch("/api/netstat");const j=await r.json();
+    const j=await readPanelData("/api/netstat",d=>Array.isArray(d.items));
+    readPanelStatus("netstatLoadStatus");
     $("netTbl").querySelector("tbody").innerHTML=(j.items||[]).map(c=>"<tr><td class='mono' style='direction:ltr;text-align:left'>"+eh(c.l)+"</td><td class='mono' style='direction:ltr;text-align:left'>"+eh(c.r)+"</td><td>"+eh(c.proc||"—")+"</td></tr>").join("");
-  }catch(e){toast("Connections load failed: "+e,true)}
+  }catch(e){readPanelStatus("netstatLoadStatus",e,loadNetstat)}
 }
 async function loadSysinfo(){
   try{
-    const r=await fetch("/api/sysinfo");const d=await r.json();
+    const d=await readPanelData("/api/sysinfo",d=>typeof d.hostname==='string');
+    readPanelStatus("sysinfoLoadStatus");
     $("sysinfoBox").innerHTML=
       "<div class='row'><span class='mut'>Host</span><span class='mono'>"+eh(d.hostname)+"</span></div>"+
       "<div class='row'><span class='mut'>System</span><span class='mono' style='direction:ltr;text-align:left'>"+eh(d.os)+" ("+eh(d.arch)+")</span></div>"+
@@ -1573,14 +1582,30 @@ async function loadSysinfo(){
       "<div class='row'><span class='mut'>Boot time</span><span class='mono'>"+new Date(d.boot*1000).toLocaleString("en-US")+"</span></div>"+
       "<div class='row'><span class='mut'>Uptime</span><span class='mono'>"+Math.floor(d.uptime_s/86400)+" days "+Math.floor(d.uptime_s%86400/3600)+" hours</span></div>"+
       (d.disks||[]).map(x=>"<div class='row'><span class='mono'>"+eh(x.dev)+"</span><span class='mono'>"+hb(x.free)+" Free / "+hb(x.total)+"</span></div>").join("");
-  }catch(e){toast("System information load failed: "+e,true)}
+  }catch(e){readPanelStatus("sysinfoLoadStatus",e,loadSysinfo)}
 }
 
 /* ---------- security tab ---------- */
+async function readPanelData(path,valid=()=>true){
+  let response;
+  try{response=await fetch(path)}catch(e){throw new Error("Cannot reach the panel. Check the connection.")}
+  if(response.status===401){showLogin("The session has ended");throw new Error("Sign in again to refresh.")}
+  let data;
+  try{data=await response.json()}catch(e){throw new Error("Invalid server response. Retry or check the panel address.")}
+  if(!response.ok||data?.error||data?.ok===false)throw new Error(data?.error||("Request failed (HTTP "+response.status+")."));
+  if(!data||typeof data!=="object"||!valid(data))throw new Error("Incomplete server response.");
+  return data;
+}
+function readPanelStatus(id,error,retry){
+  const status=$(id);
+  status.textContent=error?"Refresh failed. Previously displayed data, if any, is stale. "+error.message+" ":"Updated "+new Date().toLocaleTimeString();
+  if(error){const button=document.createElement("button");button.type="button";button.className="btn";button.textContent="Retry";button.onclick=retry;status.append(button)}
+}
 function watchStatus(value){return value===true?'Enabled':value===false?'Disabled':'Unknown'}
 async function loadSec(){
   try{
-    const r=await fetch("/api/security");const s=await r.json();
+    const s=await readPanelData("/api/security",d=>d.config&&typeof d.config==='object');
+    readPanelStatus("securityLoadStatus");
     const c=s.config||{};
     $("rdpStatus").innerHTML=
       "<div class='row'><span class='mut'>RDP port</span><span class='mono'>"+eh(c.rdp_port||3389)+"</span></div>"+
@@ -1597,11 +1622,12 @@ async function loadSec(){
     $("trafficBox").innerHTML=days.map(d=>"<div class='row'><span>"+eh(d)+"</span><span>↓ "+hb((tr[d].down||0)*1048576)+" • ↑ "+hb((tr[d].up||0)*1048576)+"</span></div>").join("")+
       "<div class='row'><b>7-day total</b><b>↓ "+hb(days.reduce((a,d)=>a+((tr[d].down||0)*1048576),0))+" • ↑ "+hb(days.reduce((a,d)=>a+((tr[d].up||0)*1048576),0))+"</b></div>";
     try{
-      const ar=await fetch("/api/audit");const aj=await ar.json();
+      const aj=await readPanelData("/api/audit",d=>Array.isArray(d.items));
+      readPanelStatus("auditLoadStatus");
       $("auditTbl").querySelector("tbody").innerHTML=(aj.items||[]).slice(-50).reverse().map(a=>
         "<tr><td class='mut mono'>"+new Date(a.t*1000).toLocaleString("en-US")+"</td><td><b>"+eh(a.action)+"</b></td><td class='mut mono' style='direction:ltr;text-align:left'>"+eh(a.detail||"")+"</td></tr>").join("");
-    }catch(e){toast("Audit load failed: "+e,true)}
-  }catch(e){toast("Security data load failed: "+e,true)}
+    }catch(e){readPanelStatus("auditLoadStatus",e,loadSec)}
+  }catch(e){readPanelStatus("securityLoadStatus",e,loadSec)}
 }
 
 function showLogin(msg){
