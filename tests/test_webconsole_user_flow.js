@@ -62,6 +62,43 @@ test('password dialog masks secrets and clears on submit or cancellation',async(
   assert.match(html,/<input id="resetPassword" type="password" required/);
 });
 
+test('panel reads distinguish transport auth HTTP malformed and incomplete responses',async()=>{
+  let expired=0;
+  const context=vm.createContext({Error,fetch:async()=>{},showLogin:()=>expired++});
+  vm.runInContext(html.slice(html.indexOf('async function readPanelData('),html.indexOf('function watchStatus(')),context);
+  for(const [fetcher,message] of [
+    [async()=>{throw Error('offline')},/Cannot reach/],
+    [async()=>({status:401}),/Sign in again/],
+    [async()=>({ok:false,status:403,json:async()=>({error:'Forbidden'})}),/Forbidden/],
+    [async()=>({ok:false,status:500,json:async()=>({})}),/HTTP 500/],
+    [async()=>({ok:true,json:async()=>{throw Error('HTML')}}),/Invalid server response/],
+    [async()=>({ok:true,json:async()=>({})}),/Incomplete/]
+  ]){context.fetch=fetcher;await assert.rejects(context.readPanelData('/test',d=>Array.isArray(d.items)),message)}
+  assert.equal(expired,1);
+  context.fetch=async()=>({ok:true,json:async()=>({items:[]})});
+  assert.equal((await context.readPanelData('/test',d=>Array.isArray(d.items))).items.length,0);
+});
+
+test('failed panel reads retain displayed data and provide inline retry',async()=>{
+  for(const [name,end,status] of [
+    ['loadBackup','function backupNow','backupLoadStatus'],['loadServices','function doSvcNamed','servicesLoadStatus'],
+    ['loadNetstat','async function loadSysinfo','netstatLoadStatus'],['loadSysinfo','async function readPanelData','sysinfoLoadStatus'],
+    ['loadSec','function showLogin','securityLoadStatus']
+  ]){
+    const notifications=[];
+    const context=vm.createContext({readPanelData:async()=>{throw Error('Unavailable')},
+      readPanelStatus:(...args)=>notifications.push(args),$:()=>{throw Error('Must not overwrite data')}});
+    vm.runInContext(html.slice(html.indexOf('async function '+name+'('),html.indexOf(end,html.indexOf('async function '+name+'('))),context);
+    await context[name]();assert.equal(notifications[0][0],status);assert.equal(typeof notifications[0][2],'function');
+  }
+  const status={textContent:'',append(button){this.button=button}};let retries=0;
+  const context=vm.createContext({$:()=>status,document:{createElement:()=>({})},Date});
+  vm.runInContext(html.slice(html.indexOf('function readPanelStatus('),html.indexOf('function watchStatus(')),context);
+  context.readPanelStatus('status',Error('Offline'),()=>retries++);
+  assert.match(status.textContent,/stale/);status.button.onclick();assert.equal(retries,1);
+  context.readPanelStatus('status');assert.match(status.textContent,/Updated/);
+});
+
 test('all inline JavaScript parses', () => {
   const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
   assert.ok(scripts.length > 0);
