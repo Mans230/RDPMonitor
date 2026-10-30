@@ -20,6 +20,7 @@ function setupProviderFields(){
   const type=$('setupProvider').value;
   $('setupProviderFields').innerHTML=setupFields[type].map(([key,label,kind])=>'<label>'+eh(label)+'<input data-option="'+key+'" type="'+(kind||'text')+'" autocomplete="'+(kind==='password'?'new-password':'off')+'"></label>').join('');
   $('setupOAuth').hidden=!['drive','onedrive','dropbox'].includes(type);
+  $('setupOAuth').querySelector('code').textContent='rclone authorize "'+type+'"';
   $('setupOAuthToken').value='';
 }
 function setupScheduleHint(){
@@ -53,6 +54,7 @@ async function loadSetup(reset=false){
     $('setupRemoteStatus').textContent='Current: '+remote.bind+':'+remote.port+' · '+(remote.https?'HTTPS':'HTTP')+' · '+(remote.allowed_ips.join(', ')||'local only');
     $('setupTimezone').textContent='Times use the server timezone: '+d.backup.timezone+'. Existing retry settings are preserved.';
     if(!setupLoaded||reset){
+      if(!setupLoaded)setupProviderFields();
       if(d.cloud.error&&setupLoaded)throw new Error('Remote list failed; your current form values were retained. Retry refresh.');
       $('setupImageRemote').innerHTML='<option value="">No cloud upload</option>'+d.cloud.remotes.map(r=>'<option value="'+eh(r)+'">'+eh(r)+'</option>').join('');
       $('setupClientRemote').innerHTML=d.cloud.remotes.map(r=>'<option value="'+eh(r.slice(0,-1))+'">'+eh(r)+'</option>').join('');
