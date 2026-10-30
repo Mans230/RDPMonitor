@@ -1139,7 +1139,13 @@ function rdpAct(op,extra){
 function rdpAdd(){const ip=$("rdpNewIp").value.trim();if(ip)rdpAct("rdp_allow_add",{ip:ip});}
 function rdpRemove(encIp){const ip=decodeURIComponent(encIp);if(confirm("Remove "+ip+" from the allow-list?"))rdpAct("rdp_allow_remove",{ip:ip});}
 function rdpClear(){if(confirm("Clear the allow-list and open RDP to ANY IP?"))rdpAct("rdp_allow_clear");}
-function rdpPanic(mode){if(confirm("Panic "+mode+": this closes RDP for everyone. Continue?"))rdpAct("panic",{mode:mode});}
+function rdpPanic(mode){
+  if(!['on','off'].includes(mode))return;
+  const message=mode==='on'
+    ?'Enable panic mode? This blocks RDP for everyone, including you, and persists after reboot. Keep provider-console access available to recover.'
+    :'Disable panic mode? This removes the emergency RDP block. Other firewall and allow-list restrictions still apply; this does not guarantee connectivity.';
+  if(confirm(message))rdpAct("panic",{mode:mode});
+}
 function blockSubnet(){
   const ip=$("subnetIp").value.trim();if(!ip)return;
   if(!confirm("Block the whole /24 network of "+ip+" (256 addresses)?"))return;

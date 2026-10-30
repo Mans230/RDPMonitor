@@ -44,6 +44,19 @@ The panel already has substantial functionality: responsive navigation, live hea
 - Phase 2: operation feedback, permission-aware UI, searchable/state-aware tables, accessible dialogs and unsaved-change protection.
 - Phase 3: overview/alerts, access management, audit explorer and guided backup/restore/onboarding.
 
+## Initial repair delivery
+
+The six P1 findings above were addressed in isolated PRs with regression tests:
+
+- Route initialization: #27.
+- Explicit watch status: #28.
+- Masked native password dialog with cancellation/secret cleanup: #29.
+- Checked reads, retained data, stale indicators and inline retries for backup/services/connections/system info/security/audit: #30. Other read endpoints remain follow-up work.
+- Cloud choice reconciliation preserving drafts and flagging removed selections: #31.
+- Mode-specific panic confirmations: separate final repair PR.
+
+Each repair is gated on the repository Windows validation workflow before merge. The broader P2 improvements and missing-feature roadmap remain planned, not implemented. Password entry deliberately clears when the dialog closes (including cancellation/session loss), rather than retaining secrets in hidden DOM.
+
 ## Validation still required
 
 This audit did not launch the Windows panel, execute administrative actions, or visually verify responsive layouts. Run browser tests at desktop and narrow-mobile widths, keyboard-only/screen-reader checks, and simulated offline/401/403/500/slow-response cases. On a disposable Windows VM, verify backup/restore, service changes, access-mode restart/reconnect, port changes and rollback behavior. Existing 19 Node tests pass, but they do not establish end-to-end Windows or visual correctness.
