@@ -5348,6 +5348,14 @@ def show_command_info(cmdline):
         rows.append([("Review lockdown NOW", "cmd:/lockdown now")])
     if cmd == "/rdpallow" and not args:
         rows.append([("Review allowlist apply", "cmd:/rdpallow apply")])
+    if cmd == "/panelremote" and not args:
+        text += "\n\nHTTPS access settings persist across restarts. Choose who can connect."
+        rows.extend([
+            [("Enable restricted HTTPS", "cmd:/panelremote on"),
+             ("Allow from anywhere", "cmd:/panelremote open")],
+            [("Connection status", "cmd:/panelremote status"),
+             ("Disable remote access", "cmd:/panelremote off")],
+        ])
     rows.append([("Back to category", "menu:" + OWNERS[cmd]), ("Home", "menu:root")])
     send_buttons(text, rows)
 
@@ -8870,7 +8878,10 @@ def monitor_loop():
                     send_usage_alert(cpu, ram_pct, used_gb, total_gb, notice["level"], notice["spike"])
                 elif notice["kind"] == "recovery":
                     send_message("<b>Usage back to normal</b>\n<pre>"
-                                 + esc(f"CPU {cpu:.1f}%\nRAM {ram_pct:.1f}%") + "</pre>")
+                                 + esc(f"CPU {cpu:.1f}%\nRAM {ram_pct:.1f}%\n"
+                                       f"Duration: {format_duration(notice['duration'])}\n"
+                                       f"Peak CPU: {notice['peak_cpu']:.1f}%\n"
+                                       f"Peak RAM: {notice['peak_ram']:.1f}%") + "</pre>")
                 else:
                     spike = notice["spike"]
                     send_buttons("<b>SUDDEN SPIKE</b>\n<pre>" + esc(

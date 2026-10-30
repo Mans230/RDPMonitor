@@ -94,5 +94,38 @@ class UnifiedResourceAlertTests(unittest.TestCase):
     def test_real_escalation_is_immediate_and_recovery_is_sent_once(self):
         self.policy.observe(55, 10, 10000, self.config)
         self.assertEqual(self.policy.observe(99, 10, 10005, self.config)["level"], "critical")
-        self.assertEqual(self.policy.observe(10, 10, 10010, self.config)["kind"], "recovery")
-        self.assertIsNone(self.policy.observe(10, 10, 10015, self.config))
+        self.assertIsNone(self.policy.observe(10, 10, 10010, self.config))
+        notice = self.policy.observe(10, 10, 10190, self.config)
+        self.assertEqual(notice["kind"], "recovery")
+        self.assertEqual(notice["peak_cpu"], 99)
+        self.assertEqual(notice["duration"], 190)
+        self.assertIsNone(self.policy.observe(10, 10, 10195, self.config))
+
+    def test_screenshot_fluctuation_produces_no_notifications(self):
+        self.config["ram_alert_threshold"] = 50
+        for index in range(300):
+            ram = (50.6, 48.5, 50.4, 48.0)[index % 4]
+            self.assertIsNone(self.policy.observe(3, ram, 10000+index*5, self.config))
+
+    def test_sustained_warning_and_brief_dips_stay_one_incident(self):
+        self.config["ram_alert_threshold"] = 50
+        self.assertIsNone(self.policy.observe(10, 51, 10000, self.config))
+        self.assertEqual(self.policy.observe(10, 51, 10120, self.config)["kind"], "threshold")
+        for index in range(100):
+            self.assertIsNone(self.policy.observe(10, (49, 51)[index % 2],
+                                                  10125+index*5, self.config))
+        self.assertIsNone(self.policy.observe(10, 44, 10700, self.config))
+        self.assertIsNone(self.policy.observe(10, 49, 10870, self.config))
+        self.assertIsNone(self.policy.observe(10, 44, 10875, self.config))
+        self.assertEqual(self.policy.observe(10, 44, 11055, self.config)["kind"], "recovery")
+
+    def test_muted_incident_never_emits_orphan_recovery(self):
+        self.assertIsNone(self.policy.observe(99, 10, 10000, self.config, muted=True))
+        self.assertIsNone(self.policy.observe(10, 10, 10010, self.config))
+        self.assertIsNone(self.policy.observe(10, 10, 10190, self.config))
+
+    def test_reminder_is_limited_and_downgrade_never_realerts(self):
+        self.policy.observe(99, 10, 10000, self.config)
+        self.assertIsNone(self.policy.observe(99, 10, 10900, self.config))
+        self.assertEqual(self.policy.observe(99, 10, 11800, self.config)["kind"], "threshold")
+        self.assertIsNone(self.policy.observe(85, 10, 14000, self.config))
