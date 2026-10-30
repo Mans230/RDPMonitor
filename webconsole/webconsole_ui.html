@@ -299,7 +299,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   <header class="top">
     <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.75" stroke-linecap="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/><path d="M10 7h4M10 17h4"/></svg></div>
     <div style="flex:1;min-width:0">
-      <div class="hname">RDPWebConsole <span id="hostname" class="mut" style="font-size:12px;font-weight:400"></span></div>
+      <h1 class="hname">RDPWebConsole <span id="hostname" class="mut" style="font-size:12px;font-weight:400"></span></h1>
       <div class="hsub">Server operations and live health — refreshed every 2 seconds</div>
     </div>
     <div class="connection" id="connectionStatus" data-state="connecting" role="status" aria-live="polite">
@@ -308,6 +308,8 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     <div class="netpill">
       <span>&darr; <b id="downMini">—</b></span><span>&uarr; <b id="upMini">—</b></span></div>
     <div class="clock" id="clock">—</div>
+    <span id="sessionIdentity" class="mut" style="font-size:13px"></span>
+    <button class="btn" id="logoutBtn" onclick="doLogout()">Sign out</button>
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Console sections">
@@ -464,6 +466,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   <div id="tab-charts" style="display:none">
     <div class="card">
       <h3>Last 60 minutes — CPU &amp; RAM <span class="mut" style="text-transform:none;font-weight:400">Hover the mouse to view the values</span></h3>
+      <p class="mut">One-minute averages from server history and live readings. Gaps mean no samples were recorded.</p>
       <canvas id="cvLive" height="150"></canvas>
       <div class="row" style="border:none"><span style="color:var(--acc)">CPU</span><span style="color:var(--ok)">RAM</span><span class="mut mono" id="cvLiveInfo" style="margin-inline-start:auto"></span></div>
     </div>
@@ -507,7 +510,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
           <button class="btn primary" onclick="doRun()">Run</button>
         </div>
         <pre id="cmdOut" class="mono" style="background:var(--color-surface-sunken);border:1px solid var(--bd);border-radius:var(--r-sm);padding:12px;font-size:11.5px;max-height:280px;overflow:auto;white-space:pre-wrap;color:var(--mut)">The result appears here…</pre>
-        <div class="note">Command execution is disabled by default. Set exec_enabled=true in webconsole_state.json only when required and after securing access.</div>
+        <div class="note">Command execution needs both Bot and Panel permissions. Open Settings to see effective access and enable each permission when needed.</div>
       </div>
       <div class="card">
         <h3>Run a program</h3>
@@ -770,7 +773,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 </div>
 
 <script>
-let CSRF="",started=false,toastTimer;
+let CSRF="",started=false,toastTimer,loginBusy=false,appTimers=[];
 let liveHist=[],dayHist=[],rdpHist=[],lastApps=[],lastProcs=[];
 const $=id=>document.getElementById(id);
 const eh=v=>String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -807,22 +810,15 @@ function drawLine(cv,series,unit,fixedMax){
     x.fillText((mx*(1-i/4)).toFixed(mx>=100?0:1)+(unit||""),2,y-2)}
   const N=Math.max(...series.map(s=>s.data.length),2);
   for(const s of series){
-    // area fill 20%
+    // Missing buckets must break the line rather than invent continuous data.
     x.beginPath();let started=false;
-    s.data.forEach((v,i)=>{if(v==null)return;const px=W-(s.data.length-1-i)*(W/(N-1)),py=H-(v/mx)*(H-18)-4;
+    s.data.forEach((v,i)=>{if(v==null){started=false;return}const px=W-(s.data.length-1-i)*(W/(N-1)),py=H-(v/mx)*(H-18)-4;
       if(!started){x.moveTo(px,py);started=true}else x.lineTo(px,py)});
-    if(started){
-      x.save();x.lineTo(W,H);x.lineTo(0,H);x.closePath();
-      x.fillStyle=s.c+"1f";x.fill();x.restore();
-      x.beginPath();started=false;
-      s.data.forEach((v,i)=>{if(v==null)return;const px=W-(s.data.length-1-i)*(W/(N-1)),py=H-(v/mx)*(H-18)-4;
-        if(!started){x.moveTo(px,py);started=true}else x.lineTo(px,py)});
-      x.strokeStyle=s.c;x.lineWidth=1.6;x.stroke();
-    }
+    x.strokeStyle=s.c;x.lineWidth=1.6;x.stroke();
   }
   cv.onmousemove=ev=>{
     const r=cv.getBoundingClientRect(),px=ev.clientX-r.left;
-    const idx=Math.round((1-px/W)*(N-1));
+    const idx=Math.round((px/W)*(N-1));
     const vals=series.map(s=>s.data[Math.max(0,Math.min(s.data.length-1,idx))]);
     cv.title=vals.map((v,i)=>v==null?"":(i?" | ":"")+ (v>=1024?(v/1024).toFixed(1)+"K":v.toFixed(1))).join("");
   };
@@ -838,9 +834,11 @@ function gridOver(pts,key,windowMs,buckets){
   return out;
 }
 function drawAll(){
-  drawLine($("cvLive"),[{c:"#69C0D4",data:liveHist.map(p=>p.c)},{c:"#5FD07A",data:liveHist.map(p=>p.r)}],"%",100);
-  drawLine($("cvNet"),[{c:"#5FD07A",data:liveHist.map(p=>p.down/1024)},{c:"#EC7A6F",data:liveHist.map(p=>p.up/1024)}],"K");
-  drawLine($("cvDisk"),[{c:"#69C0D4",data:liveHist.map(p=>p.dr/1024)},{c:"#E3B341",data:liveHist.map(p=>p.dw/1024)}],"K");
+  const hour=3600000,recent=[...dayHist,...liveHist];
+  const hourly=(key,scale=1)=>gridOver(recent,key,hour,60).map(v=>v==null?null:v/scale);
+  drawLine($("cvLive"),[{c:"#69C0D4",data:hourly("c")},{c:"#5FD07A",data:hourly("r")}],"%",100);
+  drawLine($("cvNet"),[{c:"#5FD07A",data:hourly("down",1024)},{c:"#EC7A6F",data:hourly("up",1024)}],"K");
+  drawLine($("cvDisk"),[{c:"#69C0D4",data:hourly("dr",1024)},{c:"#E3B341",data:hourly("dw",1024)}],"K");
   const H24=86400000;
   drawLine($("cvSteal"),[{c:"#69C0D4",data:gridOver(dayHist,"c",H24)},{c:"#EC7A6F",data:gridOver(dayHist,"steal",H24)}],"%",100);
   drawLine($("cvNetDay"),[{c:"#5FD07A",data:gridOver(dayHist,"down",H24).map(v=>v==null?null:v/1024)},{c:"#EC7A6F",data:gridOver(dayHist,"up",H24).map(v=>v==null?null:v/1024)}],"K");
@@ -1073,12 +1071,13 @@ async function loadDocs(){
 }
 
 /* ---------- settings tab ---------- */
-const SET_CONFIRM=new Set(["exec","users","image","imagedel","autorestart"]);
+const SET_CONFIRM=new Set(["exec","panelexec","users","image","imagedel","autorestart"]);
 async function loadSettings(){
   try{
     const r=await fetch("/api/settings");const d=await r.json();
     if(d.error){$("settingsBox").innerHTML="<div class='mut'>"+eh(d.error)+"</div>";return}
     $("settingsBox").innerHTML=(d.groups||[]).map(g=>"<div class='setgroup'><div class='setgrouptitle'>"+eh(g.name)+"</div>"+(g.items||[]).map(renderSetting).join("")+"</div>").join("");
+    if(d.execution){const p=d.execution;$("settingsBox").insertAdjacentHTML("afterbegin","<p class='note'>Command execution: Bot "+(p.monitor?"enabled":"disabled")+", Panel "+(p.panel?"enabled":"disabled")+". Effective access: "+(p.effective?"enabled":"disabled")+". Both permissions must be enabled to run commands here.</p>")}
   }catch(e){toast("Settings load failed: "+e,true)}
 }
 function renderSetting(it){
@@ -1132,6 +1131,7 @@ function sendFileToChat(){const p=$("sendFilePath").value.trim();if(!p)return;ac
 
 /* ---------- live poll ---------- */
 async function poll(){
+  if(!CSRF)return;
   try{
     const r=await fetch("/api/stats");
     if(r.status==401){showLogin("The session has ended — Sign in again");return}
@@ -1163,7 +1163,7 @@ async function poll(){
     lastProcs=s.procs||[];
     $("procTbl").querySelector("tbody").innerHTML=lastProcs.slice(0,25).map(p=>"<tr><td class='mono'>"+Number(p.pid)+"</td><td><a href='#' onclick='showProc("+Number(p.pid)+");return false' style='color:var(--acc)'>"+eh(p.name)+"</a></td><td class='mut'>"+eh(p.user||"—")+"</td><td class='mono' style='color:"+colorOf(Number(p.cpu))+"'>"+Number(p.cpu).toFixed(1)+"</td><td class='mono'>"+hb(p.rss)+"</td><td><button class='btn danger' onclick=\"killEnc("+Number(p.pid)+",'"+enc(p.name)+"')\">End</button></td></tr>").join("");
     liveHist.push({t:s.ts,c:c.pct,r:m.pct,up:s.up_bps,down:s.down_bps,dr:s.disk_r_bps,dw:s.disk_w_bps});
-    if(liveHist.length>180)liveHist.shift();
+    liveHist=liveHist.filter(p=>p.t>=s.ts-3600).slice(-2000);
     lastApps=s.apps||[];
     if(!$("tab-apps").style.display)renderApps();
     if(!$("tab-charts").style.display)drawAll();
@@ -1349,28 +1349,58 @@ async function loadSec(){
 }
 
 function showLogin(msg){
+  appTimers.forEach(clearInterval);appTimers=[];started=false;
   $("app").style.display="none";$("loginBg").style.display="grid";
   $("loginErr").textContent=msg||"";CSRF="";
 }
 function startApp(){
   $("loginBg").style.display="none";$("app").style.display="";
   if(started)return;started=true;
-  setInterval(poll,2000);poll();
-  setInterval(()=>{if(!$("tab-sec").style.display)loadSec()},10000);
-  setInterval(()=>{if(!$("tab-backup").style.display)loadBackup()},5000);
-  loadSec();loadDay();setInterval(loadDay,120000);
+  appTimers.push(setInterval(poll,2000));poll();
+  appTimers.push(setInterval(()=>{if(!$("tab-sec").style.display)loadSec()},10000));
+  appTimers.push(setInterval(()=>{if(!$("tab-backup").style.display)loadBackup()},5000));
+  loadSec();loadDay();appTimers.push(setInterval(loadDay,120000));
+}
+async function authRequest(path,options){
+  let response;
+  try{response=await fetch(path,options)}
+  catch(e){throw new Error("Cannot reach the panel. Reopen this address and check the server connection. For HTTPS, resolve any browser certificate warning first.")}
+  let data;
+  try{data=await response.json()}
+  catch(e){throw new Error("The server returned an invalid response. Reload the page and retry; check that this address belongs to the panel.")}
+  return {response,data};
+}
+function enterSession(data){
+  if(typeof data.csrf!=="string"||!data.csrf)throw new Error("The server returned incomplete session data. Reload and sign in again.");
+  CSRF=data.csrf;$("loginToken").value="";
+  $("sessionIdentity").textContent=data.actor||"Signed in";
+  $("sessionIdentity").title="Session renews while active; idle timeout "+Math.round((data.idle_timeout_seconds||1800)/60)+" minutes";
+  try{startApp()}
+  catch(e){throw new Error("Sign-in succeeded, but the panel could not start. Reload the page to recover.")}
 }
 async function doLogin(){
-  const token=$("loginToken").value;$("loginErr").textContent="Verifying…";
+  if(loginBusy)return;
+  const token=$("loginToken").value.trim();if(!token){showLogin("Enter your login token first.");return}
+  loginBusy=true;$("loginBtn").disabled=true;$("loginErr").textContent="Verifying…";
   try{
-    const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});
-    const j=await r.json();if(!r.ok){showLogin(j.error||"Login failed");return}
-    CSRF=j.csrf;$("loginToken").value="";startApp();
-  }catch(e){showLogin("Unable to connect to the server")}
+    const {response:r,data:j}=await authRequest("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});
+    if(!r.ok){showLogin(j.error||(r.status===429?"Too many attempts. Wait before retrying.":"Sign-in rejected. Check the token and retry."));return}
+    enterSession(j);
+  }catch(e){showLogin(e.message)}
+  finally{loginBusy=false;$("loginBtn").disabled=false}
 }
 async function initAuth(){
-  try{const r=await fetch("/api/session");const j=await r.json();if(r.ok&&j.ok){CSRF=j.csrf;startApp()}else showLogin("")}
-  catch(e){showLogin("Unable to connect to the server")}
+  try{const {response:r,data:j}=await authRequest("/api/session");if(r.ok&&j.ok)enterSession(j);else showLogin(r.status===401?"":(j.error||"Could not check the session. Retry sign-in."))}
+  catch(e){showLogin(e.message)}
+}
+async function doLogout(){
+  $("logoutBtn").disabled=true;
+  try{
+    const {response:r,data:j}=await authRequest("/api/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":CSRF},body:"{}"});
+    if(!r.ok&&r.status!==401)throw new Error(j.error||"Sign out was not confirmed. Retry.");
+    showLogin("Signed out.");$("loginToken").value="";location.reload();
+  }catch(e){toast(e.message,true)}
+  finally{$("logoutBtn").disabled=false}
 }
 $("loginBtn").onclick=doLogin;
 $("loginToken").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});

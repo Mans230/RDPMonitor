@@ -32,6 +32,52 @@ test('all inline JavaScript parses', () => {
   for (const script of scripts) new vm.Script(script[1]);
 });
 
+function authBrowser(fetchImpl, startFailure=false){
+  const fields=Object.fromEntries(['app','loginBg','loginErr','loginBtn','loginToken','sessionIdentity','logoutBtn'].map(id=>[id,{style:{},value:id==='loginToken'?'test-token':'',textContent:'',disabled:false}]));
+  const timers=[];const notifications=[];
+  const context=vm.createContext({CSRF:'',started:false,loginBusy:false,appTimers:[1,2],$:id=>fields[id],
+    fetch:fetchImpl,Error,Math,clearInterval:id=>timers.push(id),setInterval:()=>3,
+    poll:()=>{},loadSec:()=>{},loadDay:()=>{},loadBackup:()=>{},toast:m=>notifications.push(m),location:{reload:()=>{}},
+    document:{},notifications});
+  const begin=html.indexOf('function showLogin('),end=html.indexOf('$("loginBtn").onclick',begin);
+  vm.runInContext(html.slice(begin,end),context);
+  if(startFailure)context.startApp=()=>{throw new Error('UI failed')};
+  else context.startApp=()=>{context.started=true};
+  return {context,fields,timers};
+}
+
+test('login distinguishes transport failure, invalid response, rejected token and UI startup',async()=>{
+  for(const [fetchImpl,startFailure,expected] of [
+    [async()=>{throw new Error('offline')},false,/Cannot reach/],
+    [async()=>({json:async()=>{throw new Error('HTML')}}),false,/invalid response/],
+    [async()=>({ok:false,status:401,json:async()=>({error:'invalid token'})}),false,/invalid token/],
+    [async()=>({ok:true,json:async()=>({csrf:'test'})}),true,/Sign-in succeeded/]
+  ]){
+    const {context,fields}=authBrowser(fetchImpl,startFailure);await context.doLogin();
+    assert.match(fields.loginErr.textContent,expected);
+    assert.equal(fields.loginBtn.disabled,false);
+  }
+});
+
+test('duplicate login submits once and sign-out stops polling',async()=>{
+  let complete,calls=0;
+  const {context,fields,timers}=authBrowser(()=>{calls++;return new Promise(resolve=>complete=resolve)});
+  const pending=context.doLogin();await context.doLogin();assert.equal(calls,1);
+  complete({ok:true,json:async()=>({csrf:'test',actor:'owner'})});await pending;
+  assert.equal(fields.sessionIdentity.textContent,'owner');assert.equal(fields.loginToken.value,'');
+  context.fetch=async()=>({ok:true,json:async()=>({ok:true})});
+  await context.doLogout();assert.deepEqual(timers,[1,2]);assert.equal(context.CSRF,'');
+});
+
+test('hour history uses timestamps and persisted samples rather than 180 live samples',()=>{
+  const now=Date.now();const context=vm.createContext({Date,Math});
+  vm.runInContext(html.slice(html.indexOf('function gridOver('),html.indexOf('function drawAll(')),context);
+  const points=[{t:(now-3500000)/1000,c:42},{t:(now-10000)/1000,c:17},{t:(now-3700000)/1000,c:99}];
+  const buckets=context.gridOver(points,'c',3600000,60);
+  assert.equal(buckets.length,60);assert.ok(buckets.includes(42));assert.ok(buckets.includes(17));assert.ok(!buckets.includes(99));
+  assert.ok(buckets.includes(null));assert.match(html,/recent=\[\.\.\.dayHist,\.\.\.liveHist\]/);
+});
+
 test('failed user refresh keeps previous accounts and exposes retry', async () => {
   const tbody={innerHTML:'previous accounts'};
   const fields={usersStatus:{textContent:'',innerHTML:''},userTbl:{querySelector:()=>tbody}};
