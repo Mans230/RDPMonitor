@@ -286,3 +286,10 @@ test('setup cancellation sends nothing and adding a browsed source preserves exi
  vm.runInContext(setupSource,context);await context.setupDo('remote',{},'Change?');assert.equal(called,false);
  context.setupAddSource('D:\\Files');context.setupAddSource('D:\\Files');assert.equal(field.value,'C:\\Data\nD:\\Files');
 });
+test('active imaging refreshes progress even after the launch job has completed',async()=>{
+ const context=vm.createContext({$:()=>({style:{display:''}}),document:{activeElement:{closest:()=>null}},fetch:async()=>({ok:true,json:async()=>({jobs:[]})}),Date});
+ vm.runInContext(setupSource,context);let refreshed=0;context.renderSetupJobs=()=>{};context.loadSetup=()=>{refreshed++};
+ vm.runInContext('setupImagesActive=true;setupLastRefresh=Date.now()-11000',context);
+ await context.pollSetupJobs();assert.equal(refreshed,1);
+ vm.runInContext('setupImagesActive=false',context);await context.pollSetupJobs();assert.equal(refreshed,1);
+});
