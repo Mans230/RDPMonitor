@@ -85,6 +85,29 @@ class WebConsoleSecurityTests(unittest.TestCase):
         self.assertEqual(headers.get("X-Frame-Options"), "DENY")
         self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
 
+    def test_service_query_failures_return_503_instead_of_successful_empty_data(self):
+        from unittest import mock
+        cookie, _ = self.login()
+        for result in [(1, 'Access denied'), (0, 'not JSON'), (0, 'null'), (0, '{}'), (0, '[1]')]:
+            with self.subTest(result=result), mock.patch.object(wc, 'run_cmd', return_value=result):
+                status, _, data = self.request('GET', '/api/services', headers={'Cookie': cookie})
+                self.assertEqual(status, 503)
+                self.assertIn('retry', data['error'])
+                self.assertNotIn('items', data)
+        with mock.patch.object(wc, 'run_cmd', side_effect=TimeoutError('private diagnostic detail')):
+            status, _, data = self.request('GET', '/api/services', headers={'Cookie': cookie})
+        self.assertEqual(status, 503)
+        self.assertNotIn('private diagnostic detail', data['error'])
+
+    def test_service_query_preserves_genuine_empty_results_and_single_service(self):
+        from unittest import mock
+        for output in ['', '[]']:
+            with mock.patch.object(wc, 'run_cmd', return_value=(0, output)):
+                self.assertEqual(wc.act_list_services(), [])
+        with mock.patch.object(wc, 'run_cmd', return_value=(0, '{"Name":"Test","Status":"Running","DisplayName":"Test service"}')) as run:
+            self.assertEqual(wc.act_list_services()[0]['name'], 'Test')
+            self.assertIn("$ErrorActionPreference='Stop'", run.call_args.args[0][-1])
+
     def test_setup_requires_owner_csrf_and_exact_confirmation(self):
         from unittest import mock
         self.assertEqual(self.request('GET', '/api/setup')[0], 401)

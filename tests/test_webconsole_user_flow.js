@@ -355,12 +355,36 @@ test('read-only variants and preconfirmed requests do not prepare again', async 
   }
 });
 const setupSource=fs.readFileSync(path.join(__dirname,'../webconsole/setup.js'),'utf8');
+
+test('failed initial cloud discovery preserves the saved image target and blocks destination saves until recovery',async()=>{
+ const element=()=>({value:'',dataset:{},textContent:'',firstChild:{},replaceChildren(){},append(){},querySelector(){return {textContent:''}}});
+ const fields=new Proxy({}, {get:(obj,key)=>obj[key]??=element()});
+ fields.setupProvider.value='drive';
+ const data={cloud:{healthy:true,version:'fixture',remotes:[],error:'Unavailable',image_target:'gdrive:Images',backup_targets:['gdrive:'],folder:'Backups'},images:{enabled:false,files:[],phase:null},backup:{sources:['C:\\Data'],schedule:{enabled:true,mode:'daily',time:'03:00'},timezone:'UTC'},remote:{bind:'127.0.0.1',port:8399,allowed_ips:[]},jobs:[]};
+ const calls=[],messages=[];
+ const context=vm.createContext({$:id=>fields[id],eh:String,Date,document:{activeElement:{closest:()=>null},createElement:element},toast:m=>messages.push(m),fetch:async()=>({ok:true,json:async()=>data})});
+ vm.runInContext(setupSource,context);context.renderSetupJobs=()=>{};context.setupDo=(op,args)=>calls.push({op,args});
+ await context.loadSetup();
+ assert.equal(fields.setupImageRemote.value,'gdrive:');assert.equal(fields.setupImageFolder.value,'Images');
+ assert.match(fields.setupImageRemote.innerHTML,/unavailable/);
+ context.setupTargets();assert.equal(calls.length,0);
+ fields.setupImageRemote.value='';context.setupTargets();assert.equal(calls.length,0);assert.match(messages.at(-1),/discovery/);
+ fields.setupImageRemote.value='gdrive:';fields.setupImageFolder.value='unsaved-folder';
+ data.cloud.error='';data.cloud.remotes=['gdrive:'];await context.loadSetup();
+ assert.equal(fields.setupImageFolder.value,'unsaved-folder');context.setupTargets();
+ assert.equal(calls.length,1);assert.equal(calls[0].args.image,'gdrive:unsaved-folder');
+});
+
+test('password reveal uses its visible accessible label rather than an implementation identifier',()=>{
+ assert.match(html,/<label for="revealResetPassword"><input id="revealResetPassword" type="checkbox"> Show password<\/label>/);
+ assert.doesNotMatch(html,/id="revealResetPassword"[^>]*aria-label="revealResetPassword"/);
+});
 test('cloud choices refresh without overwriting drafts and flag removed selections',()=>{
  const fields={setupImageRemote:{value:'draft:',dataset:{}},setupClientRemote:{value:'old',dataset:{}},
    setupRemoteChoices:{},setupImageFolder:{value:'unsaved-folder'},setupBackupTargets:{value:'draft:path'}};
  const messages=[];let submitted=0;
  const context=vm.createContext({$:id=>fields[id],eh:String,toast:m=>messages.push(m)});
- vm.runInContext(setupSource,context);context.setupDo=()=>submitted++;
+ vm.runInContext(setupSource,context);vm.runInContext('setupLoaded=true;setupCloudReady=true',context);context.setupDo=()=>submitted++;
  context.syncSetupRemoteChoices(['draft:','new:']);
  assert.equal(fields.setupImageRemote.value,'draft:');assert.equal(fields.setupImageRemote.dataset.unavailable,'false');
  assert.match(fields.setupImageRemote.innerHTML,/new:/);assert.match(fields.setupClientRemote.innerHTML,/unavailable/);
