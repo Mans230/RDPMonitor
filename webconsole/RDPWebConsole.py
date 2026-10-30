@@ -1660,6 +1660,19 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 self._json(404, {"error": "Panel stylesheet unavailable"})
             return
+        if u.path == "/assets/setup.js":
+            try:
+                with open(os.path.join(BASE_DIR, "setup.js"), "rb") as stream:
+                    body = stream.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self._security_headers()
+                self.end_headers(); self.wfile.write(body)
+            except OSError:
+                self._json(404, {"error": "Setup script unavailable"})
+            return
         if u.path == "/health": return self._json(200, {"ok": True, "ts": time.time()})
         if u.path == "/api/session":
             _sid, sess = self._session()
@@ -1698,6 +1711,18 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/netstat": return self._json(200, {"items": act_netstat()})
         if u.path == "/api/services": return self._json(200, {"items": act_list_services()})
         if u.path == "/api/backup": return self._json(200, backup_info())
+        if u.path in ("/api/setup", "/api/setup/jobs", "/api/setup/browse"):
+            _sid, session = self._session()
+            if session.get("actor") != "owner":
+                return self._json(403, {"error": "Setup requires the owner login."})
+            if u.path.endswith("/browse"):
+                params = parse_qs(u.query)
+                ok, out = panel_request("setup_browse", {"path": (params.get("path") or [""])[0][:1000],
+                                                         "offset": (params.get("offset") or [0])[0]}, timeout=15)
+            else:
+                ok, out = panel_request("setup_jobs" if u.path.endswith("/jobs") else "setup_get", timeout=30)
+            payload = ({"jobs": out} if u.path.endswith("/jobs") else out) if ok else {"error": out}
+            return self._json(200 if ok else 503, payload)
         if u.path == "/api/docs":
             try:
                 with open(os.path.join(RDPDIR, "docs", "COMMANDS.md"),
@@ -1866,6 +1891,12 @@ class Handler(BaseHTTPRequestHandler):
                 if (not rec or rec["target"] != act or rec["expires"] < time.time()
                         or not hmac.compare_digest(rec.get("digest", ""), digest)):
                     return self._json(400, {"error": "fresh confirmation required"})
+            if act in ("setup", "setup_token"):
+                if sess.get("actor") != "owner":
+                    return self._json(403, {"error": "Setup requires the owner login."})
+                args = {k: v for k, v in body.items() if k not in ("action", "nonce")}
+                ok, out = panel_request("setup_action" if act == "setup" else "setup_token", args, timeout=10)
+                return self._json(200, {"ok": ok, "out": out})
             if act == "kill":
                 n, errs = act_kill(body.get("pids", [])); return self._json(200, {"ok": n > 0, "killed": n, "errors": errs})
             if act == "kill_app":

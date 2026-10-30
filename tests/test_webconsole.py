@@ -85,6 +85,30 @@ class WebConsoleSecurityTests(unittest.TestCase):
         self.assertEqual(headers.get("X-Frame-Options"), "DENY")
         self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
 
+    def test_setup_requires_owner_csrf_and_exact_confirmation(self):
+        from unittest import mock
+        self.assertEqual(self.request('GET', '/api/setup')[0], 401)
+        cookie, csrf = self.login()
+        headers = {'Cookie': cookie, 'X-CSRF-Token': csrf}
+        body = {'action':'setup', 'op':'schedule', 'mode':'daily', 'value':'03:00', 'enabled':True}
+        with mock.patch.object(wc, 'panel_request', return_value=(True, {'job':'test'})) as rpc:
+            self.assertEqual(self.request('POST','/api/action',body,{'Cookie':cookie})[0],403)
+            self.assertEqual(self.request('POST','/api/action',body,headers)[0],400)
+            _, _, prepared = self.request('POST','/api/action',dict(body,action='prepare',target='setup'),headers)
+            self.assertEqual(self.request('POST','/api/action',dict(body,value='04:00',nonce=prepared['nonce']),headers)[0],400)
+            rpc.assert_not_called()
+            _, _, prepared = self.request('POST','/api/action',dict(body,action='prepare',target='setup'),headers)
+            status, _, data = self.request('POST','/api/action',dict(body,nonce=prepared['nonce']),headers)
+            self.assertEqual(status,200);self.assertTrue(data['ok'])
+            self.assertEqual(rpc.call_args.args[0],'setup_action')
+            sid=cookie.split('=',1)[1]
+            wc._sessions[sid]['actor']='operator:tester'
+            wc._sessions[sid]['credential_hash']='a'*64
+            with mock.patch.object(wc,'operator_records',return_value={'tester':{'token_sha256':'a'*64}}):
+                self.assertEqual(self.request('GET','/api/setup',headers=headers)[0],403)
+                _, _, prepared = self.request('POST','/api/action',{'action':'prepare','target':'setup_token'},headers)
+                self.assertEqual(self.request('POST','/api/action',{'action':'setup_token','nonce':prepared['nonce']},headers)[0],403)
+
     def test_bandwidth_usage_requires_auth_and_preserves_monitor_failure(self):
         from unittest import mock
         self.assertEqual(self.request('GET', '/api/bandwidth/usage')[0], 401)

@@ -269,3 +269,20 @@ test('read-only variants and preconfirmed requests do not prepare again', async 
     assert.deepEqual(calls[0], body);
   }
 });
+const setupSource=fs.readFileSync(path.join(__dirname,'../webconsole/setup.js'),'utf8');
+test('setup script parses and form secrets clear only after accepted submission',async()=>{
+ const fields={setupOptions:{value:'{}'},setupRemoteName:{value:'test'},setupProvider:{value:'s3'},setupOAuthToken:{value:''}};
+ const secret={value:'fake-secret',dataset:{option:'secret_access_key'}};const calls=[];
+ const context=vm.createContext({$:id=>fields[id],document:{querySelectorAll:()=>[secret]},JSON,toast:()=>{}});
+ vm.runInContext(setupSource,context);
+ context.setupDo=async(op,args)=>{calls.push({op,args});return {ok:false}};
+ await context.setupCreate(false);assert.equal(secret.value,'fake-secret');
+ context.setupDo=async(op,args)=>{calls.push({op,args});return {ok:true}};
+ await context.setupCreate(false);assert.equal(secret.value,'');assert.equal(calls[1].args.options.secret_access_key,'fake-secret');
+});
+test('setup cancellation sends nothing and adding a browsed source preserves existing paths',async()=>{
+ const field={value:'C:\\Data'};let called=false;
+ const context=vm.createContext({$:()=>field,confirm:()=>false,act:()=>{called=true},toast:()=>{}});
+ vm.runInContext(setupSource,context);await context.setupDo('remote',{},'Change?');assert.equal(called,false);
+ context.setupAddSource('D:\\Files');context.setupAddSource('D:\\Files');assert.equal(field.value,'C:\\Data\nD:\\Files');
+});
