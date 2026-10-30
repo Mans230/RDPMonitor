@@ -22,6 +22,7 @@ from action_policy import CONFIRMED_ACTIONS, audit_action, confirmation_argument
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(BASE_DIR))
 from audit_store import append_event, read_events, summarize
+from bandwidth import adapter_rates
 # Default to the suite root (parent of this webconsole folder) instead of a
 # hard-coded C:\RDPMonitor, so the panel follows wherever the suite is installed.
 RDPDIR = os.environ.get("RDPWC_RDPDIR") or os.path.dirname(BASE_DIR)
@@ -357,7 +358,7 @@ def get_rdp_ips():
 _lock = threading.Lock()
 LIVE = {}
 HIST = [] if _NO_INIT else load_json(HIST_FILE, [])
-_prev = {"t": None, "net": {}, "disk": {}, "cpu_times": None}
+_prev = {"t": None, "net_t": None, "net": {}, "disk": {}, "cpu_times": None}
 proc_cpu_prev = {}
 LAST_ERR = None
 
@@ -389,21 +390,23 @@ def sample_once():
             for name, c in (psutil.disk_io_counters(perdisk=True) or {}).items(): dmap[name] = c._asdict()
         except Exception: pass
 
-        nics, nmap = [], {}
+        nics, nmap, network_error = [], {}, None
         try:
-            counters = psutil.net_io_counters(pernic=True) or {}
+            counters = psutil.net_io_counters(pernic=True, nowrap=False) or {}
             addrs = psutil.net_if_addrs() or {}
             stats = psutil.net_if_stats() or {}
             for name, c in counters.items():
                 nmap[name] = c._asdict(); ips = []
                 for a in addrs.get(name, []):
-                    if int(a.family) == socket.AF_INET: ips.append(a.address)
+                    if int(a.family) in (socket.AF_INET, socket.AF_INET6): ips.append(a.address)
                 st = stats.get(name)
                 nics.append({"name": name, "sent": c.bytes_sent, "recv": c.bytes_recv,
                              "errin": c.errin, "errout": c.errout, "dropin": c.dropin,
-                             "dropout": c.dropout, "up": bool(st.isup) if st else None,
+                             "dropout": c.dropout, "packets_sent": c.packets_sent,
+                             "packets_recv": c.packets_recv, "up": bool(st.isup) if st else None,
                              "speed": getattr(st, "speed", None) if st else None, "ips": ips})
-        except Exception: pass
+        except Exception as exc:
+            network_error = "Network counters unavailable: " + type(exc).__name__
 
         apps = collections.defaultdict(lambda: {"cpu": 0.0, "ram": 0, "io_r": 0, "io_w": 0, "procs": 0, "pids": []})
         procs_rows = []
@@ -450,17 +453,16 @@ def sample_once():
 
         net_rate, disk_rate = {}, {}
         dt = now - prev_t if prev_t else 0
-        for name, cur in nmap.items():
-            pv = _prev["net"].get(name)
-            if pv and dt > 0:
-                net_rate[name] = {"up": max(0, (cur["bytes_sent"] - pv["bytes_sent"]) / dt),
-                                  "down": max(0, (cur["bytes_recv"] - pv["bytes_recv"]) / dt)}
+        if network_error is None:
+            net_dt = now - _prev["net_t"] if _prev.get("net_t") is not None else 0
+            net_rate = adapter_rates(_prev["net"], nmap, net_dt)
+            _prev["net"], _prev["net_t"] = nmap, now
         for name, cur in dmap.items():
             pv = _prev["disk"].get(name)
             if pv and dt > 0:
                 disk_rate[name] = {"r": max(0, (cur["read_bytes"] - pv["read_bytes"]) / dt),
                                    "w": max(0, (cur["write_bytes"] - pv["write_bytes"]) / dt)}
-        _prev["net"] = nmap; _prev["disk"] = dmap
+        _prev["disk"] = dmap
         snap = {"ts": now, "hostname": socket.gethostname(),
                 "cpu": {"pct": cpu_pct, "per_core": per_core, "cores": psutil.cpu_count(),
                         "physical": psutil.cpu_count(logical=False), "freq": getattr(freq, "current", None),
@@ -470,8 +472,9 @@ def sample_once():
                 "ram": {"total": vm.total, "used": vm.used, "avail": vm.available, "pct": vm.percent,
                         "swap_total": sm.total, "swap_used": sm.used, "swap_pct": sm.percent},
                 "disks": disks, "disk_rate": disk_rate, "nic_rate": net_rate,
-                "up_bps": sum(v["up"] for v in net_rate.values()),
-                "down_bps": sum(v["down"] for v in net_rate.values()),
+                "up_bps": sum(v["up"] for v in net_rate.values() if v["up"] is not None) if any(v["up"] is not None for v in net_rate.values()) else None,
+                "down_bps": sum(v["down"] for v in net_rate.values() if v["down"] is not None) if any(v["down"] is not None for v in net_rate.values()) else None,
+                "network_error": network_error,
                 "disk_r_bps": sum(v["r"] for v in disk_rate.values()),
                 "disk_w_bps": sum(v["w"] for v in disk_rate.values()),
                 "nics": nics, "apps": app_list[:60],
@@ -492,7 +495,7 @@ def per_minute_job():
             if not s: continue
             HIST.append({"t": time.time(), "c": s["cpu"]["pct"], "r": s["ram"]["pct"],
                          "steal": s["cpu"].get("steal"), "up": s["up_bps"], "down": s["down_bps"],
-                         "dr": s["disk_r_bps"], "dw": s["disk_w_bps"]})
+                         "dr": s["disk_r_bps"], "dw": s["disk_w_bps"], "nics": s.get("nic_rate", {})})
             cutoff = time.time() - 3 * 86400
             while HIST and HIST[0].get("t", 0) < cutoff: HIST.pop(0)
             atomic_write(HIST_FILE, HIST)
@@ -666,6 +669,43 @@ def act_netstat(limit=60):
                      "pid": c.pid, "proc": proc})
         if len(rows) >= limit: break
     return rows
+
+
+_bandwidth_connections_lock = threading.Lock()
+_bandwidth_connections_cache = None
+
+
+def bandwidth_connections():
+    """Bounded, cached socket activity; these are counts, never byte estimates."""
+    global _bandwidth_connections_cache
+    with _bandwidth_connections_lock:
+        if _bandwidth_connections_cache and time.time() - _bandwidth_connections_cache["captured_at"] < 10:
+            return _bandwidth_connections_cache
+        sockets = psutil.net_connections(kind="inet")
+        rows, processes, names = [], {}, {}
+        for conn in sockets:
+            pid = conn.pid
+            if pid not in names:
+                try:
+                    names[pid] = psutil.Process(pid).name() if pid else "System / unavailable"
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    names[pid] = "Unavailable"
+            key = str(pid) if pid is not None else "unknown"
+            proc = processes.setdefault(key, {"pid": pid, "name": names[pid], "connections": 0, "established": 0})
+            proc["connections"] += 1
+            proc["established"] += int(conn.status == psutil.CONN_ESTABLISHED)
+            if len(rows) < 200:
+                def address(value):
+                    return ("[%s]:%s" if ":" in value.ip else "%s:%s") % (value.ip, value.port) if value else ""
+                rows.append({"pid": pid, "process": names[pid],
+                             "protocol": "TCP" if conn.type == socket.SOCK_STREAM else "UDP",
+                             "local": address(conn.laddr), "remote": address(conn.raddr),
+                             "state": conn.status if conn.status != psutil.CONN_NONE else "—"})
+        result = {"captured_at": time.time(), "items": rows, "total": len(sockets),
+                  "truncated": len(sockets) > len(rows),
+                  "processes": sorted(processes.values(), key=lambda p: -p["connections"])[:50]}
+        _bandwidth_connections_cache = result
+        return result
 
 def act_reboot():
     audit("reboot", "requested")
@@ -1632,6 +1672,14 @@ class Handler(BaseHTTPRequestHandler):
             with _lock: s = dict(LIVE)
             s["err"] = LAST_ERR
             return self._json(200, s)
+        if u.path == "/api/bandwidth/usage":
+            ok, out = panel_request("traffic_get", timeout=10)
+            return self._json(200 if ok else 503, out if isinstance(out, dict) else {"error": out})
+        if u.path == "/api/bandwidth/connections":
+            try:
+                return self._json(200, bandwidth_connections())
+            except Exception:
+                return self._json(503, {"error": "Could not read network connections. Retry; elevated access may be required."})
         if u.path == "/api/history":
             return self._json(200, {"points": HIST[-1500:], "rdpmon": rdpm_history()[-1500:]})
         if u.path == "/api/security":

@@ -85,6 +85,31 @@ class WebConsoleSecurityTests(unittest.TestCase):
         self.assertEqual(headers.get("X-Frame-Options"), "DENY")
         self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
 
+    def test_bandwidth_usage_requires_auth_and_preserves_monitor_failure(self):
+        from unittest import mock
+        self.assertEqual(self.request('GET', '/api/bandwidth/usage')[0], 401)
+        cookie, _ = self.login()
+        with mock.patch.object(wc, 'panel_request', return_value=(False, 'monitor unavailable')):
+            status, _, payload = self.request('GET', '/api/bandwidth/usage', headers={'Cookie': cookie})
+        self.assertEqual(status, 503)
+        self.assertEqual(payload['error'], 'monitor unavailable')
+
+    def test_socket_activity_is_cached_and_is_not_byte_accounting(self):
+        from unittest import mock
+        import socket
+        from types import SimpleNamespace as Obj
+        conn = Obj(pid=123, type=socket.SOCK_STREAM, status=wc.psutil.CONN_ESTABLISHED,
+                   laddr=Obj(ip='::1', port=10), raddr=Obj(ip='::1', port=20))
+        with mock.patch.object(wc, '_bandwidth_connections_cache', None), \
+                mock.patch.object(wc.psutil, 'net_connections', return_value=[conn]) as collect, \
+                mock.patch.object(wc.psutil, 'Process', return_value=Obj(name=lambda:'example.exe')):
+            first = wc.bandwidth_connections()
+            self.assertIs(first, wc.bandwidth_connections())
+        collect.assert_called_once()
+        self.assertEqual(first['processes'][0]['connections'], 1)
+        self.assertEqual(first['items'][0]['local'], '[::1]:10')
+        self.assertNotIn('bytes', first['processes'][0])
+
     def test_panel_stylesheet_is_available_before_login_without_directory_access(self):
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
         connection.request("GET", "/assets/night_signal.css")

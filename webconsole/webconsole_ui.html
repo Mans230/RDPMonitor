@@ -314,6 +314,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   </header>
 
   <nav class="tabs" id="consoleNavigation" role="tablist" aria-label="Console sections">
+    <div class="tab" data-t="bandwidth" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M7 3v18m-4-4 4 4 4-4M17 21V3m-4 4 4-4 4 4"/></svg>Bandwidth</div>
     <div class="nav-label" role="presentation">Overview</div>
     <div class="tab on" data-t="bot" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v4"/><rect x="5" y="6" width="14" height="12" rx="2"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M9 16h6"/></svg>Bot</div>
     <div class="tab" data-t="backup" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Backup</div>
@@ -460,6 +461,39 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     <div class="card" style="margin-top:14px">
       <h3>Top resource-consuming processes <span class="mut" style="text-transform:none;letter-spacing:0;font-weight:400">Click on the name of the process for its details</span></h3>
       <div class="scroll"><table id="procTbl"><thead><tr><th>PID</th><th>Process</th><th>User</th><th>CPU%</th><th>RAM</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- ============ BANDWIDTH ============ -->
+  <div id="tab-bandwidth" style="display:none">
+    <div class="bandwidth-toolbar">
+      <label>Live adapter<select id="bwAdapter" onchange="renderBandwidth(bandwidthLatest)"><option value="">All adapters</option></select></label>
+      <label>Rate unit<select id="bwUnit" onchange="renderBandwidth(bandwidthLatest)"><option value="mbps">Mbps</option><option value="mib">MiB/s</option></select></label>
+      <label>Rate history<select id="bwWindow" onchange="drawBandwidth()"><option value="3600000">Last hour</option><option value="86400000">Last 24 hours</option></select></label>
+    </div>
+    <p id="bwLiveStatus" class="load-state" role="status">Waiting for network counters…</p>
+    <p id="bwCoverageSummary" class="note" role="status">Loading measurement coverage…</p>
+    <div class="bandwidth-metrics">
+      <div class="card"><h3>Download now</h3><div class="big bw-rate" id="bwDown">—</div></div>
+      <div class="card"><h3>Upload now</h3><div class="big bw-rate" id="bwUp">—</div></div>
+      <div class="card"><h3>Today · all adapters</h3><div class="big" id="bwToday">—</div><p class="mut" id="bwTodaySplit"></p></div>
+      <div class="card"><h3>Billing cycle · all adapters</h3><div class="big" id="bwCycle">—</div><p class="mut" id="bwCycleDates"></p></div>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>Transfer rate</h3><canvas id="bwRateChart" height="160" aria-label="Network download and upload rates"></canvas><div class="row"><span style="color:var(--acc)">Download</span><span style="color:var(--ok)">Upload</span></div><p class="mut">One-minute averages plus current readings. Adapter history starts with this update; gaps mean no samples. Selecting an adapter affects live rates and this chart, while recorded totals below remain host-wide.</p></div>
+    <div class="card" style="margin-top:16px"><h3>Adapter counters</h3><div class="scroll"><table id="bwNicTable"><thead><tr><th>Adapter / status</th><th>Download / upload</th><th>OS received / sent</th><th>Packets RX / TX</th><th>Errors / drops</th></tr></thead><tbody></tbody></table></div><p class="mut">OS totals are adapter counters, not today's consumption. Link speed is the negotiated adapter speed, not an Internet speed test.</p></div>
+    <div class="card" style="margin-top:16px"><h3>Recorded consumption <button class="btn" onclick="loadBandwidthUsage()">Refresh</button></h3><p id="bwUsageStatus" class="load-state" role="status">Loading recorded traffic…</p><p id="bwQuality" class="note"></p>
+      <div class="row"><span>Quota · current cycle</span><strong id="bwQuota">—</strong></div><div class="bar"><div id="bwQuotaBar" style="width:0"></div></div>
+      <div class="row"><span>Last 7 days</span><span id="bwSeven">—</span></div><div class="row"><span>Last 30 days</span><span id="bwThirty">—</span></div>
+      <div class="bandwidth-toolbar" style="margin-top:16px"><label>Daily history<select id="bwDays" onchange="renderBandwidthUsage()"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="95">Retained history · up to 95 days</option></select></label><button class="btn" onclick="exportBandwidthCsv()">Export daily CSV</button><button class="btn" onclick="goTab('settings')">Configure quota &amp; reset day</button></div>
+      <canvas id="bwDailyChart" height="150" aria-label="Recorded daily download and upload in GiB"></canvas><p class="mut">Daily download (blue) and upload (green), GiB. Dates with no recorded data are gaps.</p>
+      <div class="scroll"><table id="bwDayTable"><thead><tr><th>Server date</th><th>Download</th><th>Upload</th><th>Total</th></tr></thead><tbody></tbody></table></div>
+      <p class="note">Measured on this Windows host across all adapters and users, including internal, loopback and tunnel traffic. The same transfer may appear on multiple adapters. This is not an ISP billing meter. New boots/adapters establish a baseline; bytes before that baseline are not assigned to today. Samples are collected about every 30s and saved every 5 minutes. Daily allocation near midnight follows sample time. GiB = 1024³ bytes.</p>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>Connections &amp; processes <button class="btn" onclick="loadBandwidthConnections()">Refresh</button></h3><p id="bwConnectionStatus" class="load-state" role="status">Loading socket activity…</p>
+      <p class="note">Connection counts show socket activity, not bytes consumed by each program or user. Per-process byte accounting is not collected.</p>
+      <label for="bwConnectionFilter">Filter process, PID or address</label><input id="bwConnectionFilter" placeholder="Search connections" oninput="renderBandwidthConnections()" style="width:100%;margin:10px 0">
+      <div class="scroll"><table id="bwProcessTable"><thead><tr><th>Process</th><th>PID</th><th>Sockets</th><th>Established TCP</th></tr></thead><tbody></tbody></table></div>
+      <div class="scroll" style="margin-top:16px"><table id="bwConnectionTable"><thead><tr><th>Process / PID</th><th>Protocol / state</th><th>Local</th><th>Remote</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 
@@ -779,6 +813,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 <script>
 let CSRF="",started=false,toastTimer,loginBusy=false,appTimers=[];
 let liveHist=[],dayHist=[],rdpHist=[],lastApps=[],lastProcs=[];
+let bandwidthLatest=null,bandwidthUsage=null,bandwidthSockets=null,bwUsageBusy=false,bwConnectionsBusy=false;
 const $=id=>document.getElementById(id);
 const eh=v=>String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const enc=v=>encodeURIComponent(String(v)).replace(/'/g,"%27");
@@ -840,7 +875,7 @@ function gridOver(pts,key,windowMs,buckets){
   const sel=pts.filter(q=>q.t*1000>now-windowMs);
   for(let i=0;i<n;i++){
     const t0=now-windowMs+(i*windowMs/n),t1=t0+windowMs/n;
-    const v=sel.filter(q=>q.t*1000>=t0&&q.t*1000<t1);
+    const v=sel.filter(q=>q.t*1000>=t0&&q.t*1000<t1&&Number.isFinite(q[key]));
     out.push(v.length?v.reduce((a,q)=>a+(q[key]||0),0)/v.length:null);
   }
   return out;
@@ -861,7 +896,7 @@ function drawAll(){
 }
 
 /* ---------- tabs ---------- */
-const NIGHT_ROUTES=[['live','Overview'],['sec','Protection'],['backup','Backups'],['apps','Processes'],['rdpsec','RDP access'],['users','Local users'],['settings','Settings'],['bot','Command center'],['charts','Resource history'],['tools','System tools'],['automation','Automation'],['diagnostics','Diagnostics'],['docs','Command reference'],['ctl','Maintenance']];
+const NIGHT_ROUTES=[['live','Overview'],['bandwidth','Bandwidth'],['sec','Protection'],['backup','Backups'],['apps','Processes'],['rdpsec','RDP access'],['users','Local users'],['settings','Settings'],['bot','Command center'],['charts','Resource history'],['tools','System tools'],['automation','Automation'],['diagnostics','Diagnostics'],['docs','Command reference'],['ctl','Maintenance']];
 function prepareNightSignal(){
   const nav=$("consoleNavigation"),tabs=Object.fromEntries([...nav.querySelectorAll('.tab')].map(t=>[t.dataset.t,t]));
   nav.replaceChildren();
@@ -869,7 +904,7 @@ function prepareNightSignal(){
   const close=document.createElement('div');close.className='mobile-only';close.innerHTML='All sections <button class="btn" onclick="closeNightMenu()">Close</button>';nav.append(close);
   const selected=NIGHT_ROUTES.some(r=>r[0]===location.hash.slice(1))?location.hash.slice(1):'live';
   NIGHT_ROUTES.forEach(([id,label],i)=>{
-    if(i===0||i===7){const group=document.createElement('div');group.className='nav-label';group.textContent=i===0?'Monitor & protect':'Manage & maintain';nav.append(group)}
+    if(i===0||id==='bot'){const group=document.createElement('div');group.className='nav-label';group.textContent=i===0?'Monitor & protect':'Manage & maintain';nav.append(group)}
     const t=tabs[id];t.replaceChildren(t.querySelector('svg'),document.createTextNode(label));t.classList.toggle('on',id===selected);nav.append(t);$("tab-"+id).style.display=id===selected?'':'none';
   });
   const heading=document.createElement('div');heading.className='page-heading';heading.innerHTML='<div><h1 id="pageTitle" tabindex="-1"></h1><p id="pageContext">Live data from this server</p></div>';
@@ -891,6 +926,7 @@ function prepareNightSignal(){
   fold(meta,[...meta.querySelectorAll('.row')].slice(1),'CPU details');
   fold(memory,[...memory.querySelectorAll('.row')].slice(1),'Memory details');
   fold(network,[...network.querySelectorAll('.row')],'Network details');
+  const bandwidthButton=document.createElement('button');bandwidthButton.className='btn';bandwidthButton.textContent='Open Bandwidth';bandwidthButton.onclick=()=>goTab('bandwidth');network.append(bandwidthButton);
   const detail=document.createElement('details');detail.className='disk-detail';const summary=document.createElement('summary');summary.textContent='Disk I/O & volumes';detail.append(summary,...storage.childNodes);
   storage.innerHTML='<h3>Storage <span class="mut" id="storageDrive"></span></h3><div class="big"><span id="storagePct">—</span><span class="unit"> %</span></div><div class="bar"><div id="storageBar"></div></div><p class="mut" id="storageUsage" style="margin-top:12px">Waiting for disk data</p>';storage.append(detail);
   const trend=document.createElement('section');trend.className='overview-trend';trend.innerHTML='<h2>CPU in the last hour <span class="mut" id="overviewCpuNow">—</span></h2><canvas id="cvOverview" height="140" aria-label="CPU usage over the last hour"></canvas><p><span>60 min ago</span><span>Now</span></p><button class="btn" style="margin-top:16px" onclick="goTab(\'charts\')">View resource history</button>';metrics.after(trend);
@@ -919,6 +955,7 @@ function activateTab(t){
   const menuWasOpen=document.body.classList.contains('menu-open');closeNightMenu(false);if(menuWasOpen)$("pageTitle").focus();
   history.replaceState(null,'','#'+t.dataset.t);
   if(t.dataset.t=="live")drawOverview();
+  if(t.dataset.t=="bandwidth"){renderBandwidth(bandwidthLatest);loadBandwidthUsage();loadBandwidthConnections()}
   if(t.dataset.t=="charts")drawAll();
   if(t.dataset.t=="sec"){loadSec();loadTraps()}
   if(t.dataset.t=="tools"){loadServices();loadNetstat();loadSysinfo()}
@@ -1201,6 +1238,7 @@ async function poll(){
     const s=await r.json();if(!s.ts)throw new Error("No live data");
     setConnection("online","Live");
     const c=s.cpu,m=s.ram;
+    bandwidthLatest=s;if(!$("tab-bandwidth").style.display)renderBandwidth(s);
     $("hostname").textContent=s.hostname||"";
     $("pageContext").textContent=(s.hostname?s.hostname+' · ':'')+'Live readings updated '+new Date(s.ts*1000).toLocaleTimeString();
     $("cpuRing").style.strokeDashoffset=440*(1-Math.max(0,Math.min(100,c.pct))/100);
@@ -1230,9 +1268,10 @@ async function poll(){
     $("rdpIps").textContent=(s.rdp_ips||[]).join(", ")||"—";
     lastProcs=s.procs||[];
     $("procTbl").querySelector("tbody").innerHTML=lastProcs.slice(0,25).map(p=>"<tr><td class='mono'>"+Number(p.pid)+"</td><td><a href='#' onclick='showProc("+Number(p.pid)+");return false' style='color:var(--acc)'>"+eh(p.name)+"</a></td><td class='mut'>"+eh(p.user||"—")+"</td><td class='mono' style='color:"+colorOf(Number(p.cpu))+"'>"+Number(p.cpu).toFixed(1)+"</td><td class='mono'>"+hb(p.rss)+"</td><td><button class='btn danger' onclick=\"killEnc("+Number(p.pid)+",'"+enc(p.name)+"')\">End</button></td></tr>").join("");
-    liveHist.push({t:s.ts,c:c.pct,r:m.pct,up:s.up_bps,down:s.down_bps,dr:s.disk_r_bps,dw:s.disk_w_bps});
+    liveHist.push({t:s.ts,c:c.pct,r:m.pct,up:s.up_bps,down:s.down_bps,dr:s.disk_r_bps,dw:s.disk_w_bps,nics:s.nic_rate||{}});
     liveHist=liveHist.filter(p=>p.t>=s.ts-3600).slice(-2000);
     if(!$("tab-live").style.display)drawOverview();
+    if(!$("tab-bandwidth").style.display)drawBandwidth();
     lastApps=s.apps||[];
     if(!$("tab-apps").style.display)renderApps();
     if(!$("tab-charts").style.display)drawAll();
@@ -1250,9 +1289,88 @@ async function loadDay(){
   try{
     const r=await fetch("/api/history");const h=await r.json();
     dayHist=h.points||[];rdpHist=h.rdpmon||[];
+    if(!$("tab-bandwidth").style.display)drawBandwidth();
     if(!$("tab-live").style.display)drawOverview();
     if(!$("tab-charts").style.display)drawAll();
   }catch(e){}
+}
+
+/* ---------- bandwidth: host counters, retained usage and socket activity ---------- */
+function bwRate(value){return Number.isFinite(value)?($("bwUnit").value==='mib'?(value/1048576).toFixed(2)+' MiB/s':(value*8/1e6).toFixed(2)+' Mbps'):'—'}
+function bwGiB(value){return Number.isFinite(value)?(value/1073741824).toFixed(2)+' GiB':'—'}
+function renderBandwidth(s){
+  if(!s||!s.ts)return;
+  const select=$("bwAdapter"),selected=select.value,nics=s.nics||[];
+  const names=nics.map(n=>n.name);
+  if(JSON.stringify([...select.options].slice(1).map(o=>o.value))!==JSON.stringify(names)){
+    select.replaceChildren(new Option('All adapters',''),...names.map(name=>new Option(name,name)));
+    select.value=names.includes(selected)?selected:'';
+  }
+  const rate=select.value?(s.nic_rate||{})[select.value]:{down:s.down_bps,up:s.up_bps};
+  $("bwDown").textContent=bwRate(rate?.down);$("bwUp").textContent=bwRate(rate?.up);
+  $("bwLiveStatus").textContent=s.network_error||('Live counters updated '+new Date(s.ts*1000).toLocaleTimeString()+(rate?.reset?' · Adapter counters reset; waiting for a fresh delta.':''));
+  const rows=select.value?nics.filter(n=>n.name===select.value):nics;
+  $("bwNicTable").querySelector('tbody').innerHTML=rows.map(n=>{const r=(s.nic_rate||{})[n.name]||{};return '<tr><td>'+eh(n.name)+'<br><span class="mut">'+(n.up===null?'State unknown':n.up?'Up':'Down')+(n.speed>0?' · '+eh(n.speed)+' Mbps link':'')+'<br>'+eh((n.ips||[]).join(', '))+'</span></td><td>'+eh(bwRate(r.down))+'<br>'+eh(bwRate(r.up))+'</td><td>'+eh(hb(n.recv))+'<br>'+eh(hb(n.sent))+'</td><td>'+eh(n.packets_recv??'—')+' / '+eh(n.packets_sent??'—')+'</td><td>'+eh(Number(n.errin||0)+Number(n.errout||0))+' / '+eh(Number(n.dropin||0)+Number(n.dropout||0))+'</td></tr>'}).join('')||'<tr><td colspan="5">No adapter counters available</td></tr>';
+  drawBandwidth();
+}
+function drawBandwidth(){
+  if(!$("bwRateChart").clientWidth)return;
+  const adapter=$("bwAdapter").value,windowMs=Number($("bwWindow").value),scale=$("bwUnit").value==='mib'?1/1048576:8/1e6;
+  const points=[...dayHist,...liveHist].map(p=>adapter?{t:p.t,...(p.nics?.[adapter]||{})}:p);
+  const values=key=>gridOver(points,key,windowMs,60).map(v=>v==null?null:v*scale);
+  drawLine($("bwRateChart"),[{c:'#8bcfff',data:values('down')},{c:'#a5ddbd',data:values('up')}],$("bwUnit").value==='mib'?' MiB':' Mb');
+}
+async function loadBandwidthUsage(){
+  if(bwUsageBusy)return;bwUsageBusy=true;$("bwUsageStatus").textContent='Updating recorded traffic…';
+  try{
+    const r=await fetch('/api/bandwidth/usage'),data=await r.json();
+    if(!r.ok||data.error||!Array.isArray(data.days))throw new Error(data.error||'Invalid traffic response');
+    if(data.history_error)throw new Error(data.history_error);
+    bandwidthUsage=data;renderBandwidthUsage();
+    $("bwUsageStatus").textContent=(data.collected_at?'Collected '+new Date(data.collected_at*1000).toLocaleString():'Waiting for the first 30-second sample')+' · server dates: '+data.timezone;
+  }catch(e){$("bwUsageStatus").innerHTML='Recorded traffic unavailable; previously loaded values are kept. '+eh(e.message)+' <button class="btn" onclick="loadBandwidthUsage()">Retry</button>'}
+  finally{bwUsageBusy=false}
+}
+function bandwidthDailyRows(){
+  if(!bandwidthUsage)return [];
+  const map=new Map(bandwidthUsage.days.map(r=>[r.date,r])),count=Number($("bwDays").value),rows=[];
+  for(let i=count-1;i>=0;i--){const date=new Date(bandwidthUsage.server_date+'T00:00:00Z');date.setUTCDate(date.getUTCDate()-i);const key=date.toISOString().slice(0,10);rows.push({date:key,record:map.get(key)||null})}
+  return rows;
+}
+function renderBandwidthUsage(){
+  const d=bandwidthUsage;if(!d)return;
+  $("bwToday").textContent=bwGiB(d.today.total);$("bwTodaySplit").textContent='↓ '+bwGiB(d.today.down)+' · ↑ '+bwGiB(d.today.up);
+  $("bwCycle").textContent=bwGiB(d.cycle.total);$("bwCycleDates").textContent=d.cycle_start+' → '+d.cycle_end+' (end exclusive)';
+  $("bwSeven").textContent=bwGiB(d.seven_days.total);$("bwThirty").textContent=bwGiB(d.thirty_days.total);
+  $("bwQuota").textContent=d.quota_bytes?(d.quota_percent.toFixed(1)+'% of '+bwGiB(d.quota_bytes)+' · '+bwGiB(d.quota_remaining)+' remaining'):'No quota configured';
+  $("bwQuotaBar").style.width=(d.quota_bytes?Math.min(100,d.quota_percent):0)+'%';
+  const m=d.measurement||{};
+  $("bwCoverageSummary").textContent=m.legacy_history?'Historical totals below include legacy estimates. Per-adapter delta tracking starts with this update; old totals cannot be corrected retroactively.':'Host-wide recorded deltas, including internal/tunnel traffic. Reboots and new adapters establish a new baseline. This is not an ISP billing meter.';
+  $("bwQuality").textContent=(m.legacy_history?'Includes legacy estimates that cannot be corrected retroactively. ':'')+(m.tracking_since?'Per-adapter baselines introduced '+new Date(m.tracking_since*1000).toLocaleString()+'. ':'')+'Counter reset events: '+(m.reset_events||0)+'. Long gaps crossing midnight: '+(m.cross_day_gaps||0)+'. Retained records begin '+(d.recorded_start||'when sampling starts')+'.';
+  const rows=bandwidthDailyRows();
+  drawLine($("bwDailyChart"),[{c:'#8bcfff',data:rows.map(r=>r.record?r.record.down/1073741824:null)},{c:'#a5ddbd',data:rows.map(r=>r.record?r.record.up/1073741824:null)}],' GiB');
+  $("bwDayTable").querySelector('tbody').innerHTML=rows.slice().reverse().map(r=>'<tr><td>'+eh(r.date)+'</td><td>'+eh(r.record?bwGiB(r.record.down):'No record')+'</td><td>'+eh(r.record?bwGiB(r.record.up):'—')+'</td><td>'+eh(r.record?bwGiB(r.record.down+r.record.up):'—')+'</td></tr>').join('');
+}
+function exportBandwidthCsv(){
+  if(!bandwidthUsage){toast('Load recorded traffic before exporting',true);return}
+  const m=bandwidthUsage.measurement||{};
+  const rows=['server_date,download_bytes,upload_bytes,total_bytes,recorded,legacy_estimate',...bandwidthDailyRows().map(r=>r.record?[r.date,r.record.down,r.record.up,r.record.down+r.record.up,'yes',m.legacy_history&&(!m.legacy_through_date||r.date<=m.legacy_through_date)?'yes':'no'].join(','):[r.date,'','','','no','unknown'].join(','))];
+  const url=URL.createObjectURL(new Blob([rows.join('\r\n')],{type:'text/csv;charset=utf-8'})),link=document.createElement('a');link.href=url;link.download='rdpmonitor-traffic-'+bandwidthUsage.server_date+'.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function loadBandwidthConnections(){
+  if(bwConnectionsBusy)return;bwConnectionsBusy=true;
+  try{
+    const r=await fetch('/api/bandwidth/connections'),data=await r.json();
+    if(!r.ok||data.error||!Array.isArray(data.items))throw new Error(data.error||'Invalid connection response');
+    bandwidthSockets=data;renderBandwidthConnections();
+    $("bwConnectionStatus").textContent='Captured '+new Date(data.captured_at*1000).toLocaleTimeString()+' · '+data.total+' sockets'+(data.truncated?' · first 200 shown':'')+' · up to 50 process groups';
+  }catch(e){$("bwConnectionStatus").innerHTML='Could not refresh connections; previous results are kept. '+eh(e.message)+' <button class="btn" onclick="loadBandwidthConnections()">Retry</button>'}
+  finally{bwConnectionsBusy=false}
+}
+function renderBandwidthConnections(){
+  const d=bandwidthSockets;if(!d)return;const query=$("bwConnectionFilter").value.toLowerCase();
+  $("bwProcessTable").querySelector('tbody').innerHTML=(d.processes||[]).filter(p=>(p.name+' '+p.pid).toLowerCase().includes(query)).map(p=>'<tr><td>'+eh(p.name)+'</td><td>'+eh(p.pid??'—')+'</td><td>'+p.connections+'</td><td>'+p.established+'</td></tr>').join('')||'<tr><td colspan="4">No matching process groups</td></tr>';
+  $("bwConnectionTable").querySelector('tbody').innerHTML=d.items.filter(c=>(c.process+' '+c.pid+' '+c.local+' '+c.remote).toLowerCase().includes(query)).map(c=>'<tr><td>'+eh(c.process)+' / '+eh(c.pid??'—')+'</td><td>'+eh(c.protocol)+' / '+eh(c.state)+'</td><td>'+eh(c.local)+'</td><td>'+eh(c.remote||'—')+'</td></tr>').join('')||'<tr><td colspan="4">No matching sockets</td></tr>';
 }
 
 /* ---------- actions ---------- */
@@ -1431,6 +1549,9 @@ function startApp(){
   appTimers.push(setInterval(()=>{if(!$("tab-sec").style.display)loadSec()},10000));
   appTimers.push(setInterval(()=>{if(!$("tab-backup").style.display)loadBackup()},5000));
   loadSec();loadDay();appTimers.push(setInterval(loadDay,120000));
+  if(!$("tab-bandwidth").style.display){loadBandwidthUsage();loadBandwidthConnections()}
+  appTimers.push(setInterval(()=>{if(!$("tab-bandwidth").style.display)loadBandwidthUsage()},30000));
+  appTimers.push(setInterval(()=>{if(!$("tab-bandwidth").style.display)loadBandwidthConnections()},15000));
 }
 async function authRequest(path,options){
   let response;
@@ -1477,7 +1598,7 @@ async function doLogout(){
 $("loginBtn").onclick=doLogin;
 $("loginToken").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
 initAuth();
-window.addEventListener("resize",()=>{if(!$("tab-charts").style.display)drawAll();if(!$("tab-live").style.display)drawOverview();if(innerWidth>700)closeNightMenu(false)});
+window.addEventListener("resize",()=>{if(!$("tab-charts").style.display)drawAll();if(!$("tab-live").style.display)drawOverview();if(!$("tab-bandwidth").style.display){drawBandwidth();renderBandwidthUsage()}if(innerWidth>700)closeNightMenu(false)});
 window.addEventListener("keydown",e=>{if(e.key==='Escape'&&document.body.classList.contains('menu-open'))closeNightMenu()});
 </script>
 </body>
