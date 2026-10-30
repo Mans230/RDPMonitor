@@ -461,7 +461,7 @@ def sample_once():
                 disk_rate[name] = {"r": max(0, (cur["read_bytes"] - pv["read_bytes"]) / dt),
                                    "w": max(0, (cur["write_bytes"] - pv["write_bytes"]) / dt)}
         _prev["net"] = nmap; _prev["disk"] = dmap
-        snap = {"ts": now,
+        snap = {"ts": now, "hostname": socket.gethostname(),
                 "cpu": {"pct": cpu_pct, "per_core": per_core, "cores": psutil.cpu_count(),
                         "physical": psutil.cpu_count(logical=False), "freq": getattr(freq, "current", None),
                         "freq_max": getattr(freq, "max", None),
@@ -1606,6 +1606,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers(); self.wfile.write(body)
             except OSError as e:
                 self._json(500, {"error": "UI file missing: %r" % e})
+            return
+        if u.path == "/assets/night_signal.css":
+            try:
+                with open(os.path.join(BASE_DIR, "night_signal.css"), "rb") as stream:
+                    body = stream.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/css; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self._security_headers()
+                self.end_headers(); self.wfile.write(body)
+            except OSError:
+                self._json(404, {"error": "Panel stylesheet unavailable"})
             return
         if u.path == "/health": return self._json(200, {"ok": True, "ts": time.time()})
         if u.path == "/api/session":

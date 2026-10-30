@@ -85,6 +85,17 @@ class WebConsoleSecurityTests(unittest.TestCase):
         self.assertEqual(headers.get("X-Frame-Options"), "DENY")
         self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
 
+    def test_panel_stylesheet_is_available_before_login_without_directory_access(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        connection.request("GET", "/assets/night_signal.css")
+        response = connection.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertIn("text/css", response.getheader("Content-Type"))
+        self.assertEqual(response.getheader("Cache-Control"), "no-store")
+        self.assertIn(b"#8bcfff", response.read())
+        connection.close()
+        self.assertEqual(self.request("GET", "/assets/../config.json")[0], 401)
+
     def test_logout_revokes_the_session_and_session_shows_identity(self):
         cookie, csrf = self.login()
         status, _, session = self.request("GET", "/api/session", headers={"Cookie": cookie})
