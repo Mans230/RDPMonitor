@@ -255,6 +255,24 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   .tab{scroll-snap-align:start}
 }
 @media(max-width:620px){.cmd-grid{grid-template-columns:minmax(0,1fr)}.cmd-card:first-child{grid-column:auto}.cmd-list .btn{flex:1 1 140px;justify-content:center}}
+.load-state{font-size:14px;line-height:1.5;margin:8px 0;overflow-wrap:anywhere}
+.load-state:empty{display:none}
+.sethelp{font-size:14px;line-height:1.5;margin-top:6px;color:var(--mut)}
+#tab-automation .setctl{flex-wrap:wrap;min-width:0}
+#tab-automation .setctl input{max-width:100%;min-width:0}
+.user-actions summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+.user-actions .cmd-list{display:flex;flex-wrap:wrap;gap:8px}
+#userTbl td{overflow-wrap:anywhere}
+@media(max-width:640px){
+  #tab-automation .setctl{flex-direction:column;align-items:stretch}
+  #tab-automation .setctl input{width:100%!important}
+  #userTbl,#userTbl tbody,#userTbl tr,#userTbl td{display:block;width:100%}
+  #userTbl thead{display:none}
+  #userTbl tr{padding:12px 0;border-bottom:1px solid var(--bd2)}
+  #userTbl td{border:0;padding:4px 0;white-space:normal}
+  #userTbl td[data-label]::before{content:attr(data-label) ": ";font-weight:600}
+  #userTbl .user-actions .btn{flex:1 1 110px;min-height:44px}
+}
 
 /* ---------- motion: quiet, transform/opacity only ---------- */
 @media (prefers-reduced-motion: no-preference){
@@ -596,6 +614,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   <div id="tab-users" style="display:none">
     <div class="card">
       <h3>Local users <button class="btn" style="margin-inline-start:auto" onclick="loadUsers()">Update</button></h3>
+      <div id="usersStatus" class="load-state" role="status" aria-live="polite"></div>
       <div class="scroll" style="max-height:60vh"><table id="userTbl"><thead><tr><th>User</th><th>Enabled</th><th>Last logon</th><th></th></tr></thead><tbody></tbody></table></div>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
         <input id="newUserName" placeholder="new user name" style="width:180px">
@@ -621,27 +640,30 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
       <h3>Automation <span class="mut" style="text-transform:none;font-weight:400">programs and services the monitor keeps running</span> <button class="btn" style="margin-inline-start:auto" onclick="loadAutomation()">Refresh</button></h3>
       <div class="setgroup">
         <div class="setgrouptitle">Watch RAM — alert when a program exceeds a limit</div>
+        <div id="auto-watch-status" class="load-state" role="status"></div>
         <div id="auto-watch" class="cmd-list" style="margin-bottom:8px"></div>
         <div class="setctl" style="justify-content:flex-start">
-          <input id="watchName" placeholder="process name" style="width:180px">
-          <input id="watchMb" type="number" min="64" placeholder="RAM MB" style="width:120px">
+          <input id="watchName" aria-label="Process name to watch" placeholder="process name" style="width:180px">
+          <input id="watchMb" aria-label="RAM limit in MB" type="number" min="64" placeholder="RAM MB" style="width:120px">
           <button class="btn primary" onclick="autoAdd('watch')">Add</button>
         </div>
       </div>
       <div class="setgroup">
         <div class="setgrouptitle">Keep alive — relaunch a program if it stops</div>
+        <div id="auto-keepalive-status" class="load-state" role="status"></div>
         <div id="auto-keepalive" class="cmd-list" style="margin-bottom:8px"></div>
         <div class="setctl" style="justify-content:flex-start">
-          <input id="kaName" placeholder="process name" style="width:180px">
-          <input id="kaRun" placeholder="optional run command" style="width:220px">
+          <input id="kaName" aria-label="Process name to keep running" placeholder="process name" style="width:180px">
+          <input id="kaRun" aria-label="Optional launch command" placeholder="optional run command" style="width:220px">
           <button class="btn primary" onclick="autoAdd('keepalive')">Add</button>
         </div>
       </div>
       <div class="setgroup">
         <div class="setgrouptitle">Watch services — restart a service if it stops</div>
+        <div id="auto-svcwatch-status" class="load-state" role="status"></div>
         <div id="auto-svcwatch" class="cmd-list" style="margin-bottom:8px"></div>
         <div class="setctl" style="justify-content:flex-start">
-          <input id="svcWatchName" placeholder="service name" style="width:180px">
+          <input id="svcWatchName" aria-label="Service name to watch" placeholder="service name" style="width:180px">
           <button class="btn primary" onclick="autoAdd('svcwatch')">Add</button>
         </div>
       </div>
@@ -994,17 +1016,19 @@ function dotnetDate(s){
   return new Date(Number(m[1])).toLocaleString("en-US");
 }
 async function loadUsers(){
+  $("usersStatus").textContent="Loading users…";
   try{
     const r=await fetch("/api/users");const d=await r.json();
-    if(d.error){toast("Users: "+d.error,true);return}
-    $("userTbl").querySelector("tbody").innerHTML=(d.items||[]).map(u=>"<tr><td class='mono'>"+eh(u.name)+"</td><td><span class='pill "+(u.enabled?"p-ok":"p-warn")+"'>"+(u.enabled?"enabled":"disabled")+"</span></td><td class='mut'>"+eh(dotnetDate(u.last))+"</td><td>"+
+    if(!r.ok||d.error||!Array.isArray(d.items))throw new Error(d.error||"Invalid user response");
+    $("usersStatus").textContent="Updated "+new Date().toLocaleTimeString();
+    $("userTbl").querySelector("tbody").innerHTML=d.items.map(u=>"<tr><td data-label='User'>"+eh(u.name)+"</td><td data-label='Status'><span class='pill "+(u.enabled?"p-ok":"p-warn")+"'>"+(u.enabled?"enabled":"disabled")+"</span></td><td data-label='Last logon' class='mut'>"+eh(dotnetDate(u.last))+"</td><td><details class='user-actions'><summary>Manage "+eh(u.name)+"</summary><div class='cmd-list'>"+
       "<button class='btn' onclick=\"userAct('disable','"+enc(u.name)+"')\">Disable</button> "+
       "<button class='btn' onclick=\"userAct('enable','"+enc(u.name)+"')\">Enable</button> "+
       "<button class='btn' onclick=\"userPass('"+enc(u.name)+"')\">Password</button> "+
       "<button class='btn' onclick=\"userRename('"+enc(u.name)+"')\">Rename</button> "+
       "<button class='btn danger' onclick=\"userAct('delete','"+enc(u.name)+"')\">Delete</button>"+
-      "</td></tr>").join("")||'<tr><td colspan=4 class="mut">None</td></tr>';
-  }catch(e){toast("Users load failed: "+e,true)}
+      "</div></details></td></tr>").join("")||'<tr><td colspan=4 class="mut">No local users found</td></tr>';
+  }catch(e){$("usersStatus").innerHTML="Could not update users. Previously loaded accounts are kept. "+eh(e.message)+" <button class='btn' onclick='loadUsers()'>Retry</button>"}
 }
 function userAct(op,encName){
   const name=decodeURIComponent(encName);
@@ -1067,7 +1091,7 @@ function renderSetting(it){
   const val=it.value==null?"":it.value;
   const num=it.type==="int"?(" type='number' min='"+(it.min!=null?it.min:"")+"' max='"+(it.max!=null?it.max:"")+"'"):"";
   return "<div class='setrow'><div class='setlabel'>"+eh(it.label)+(it.unit?" <span class='mut'>("+eh(it.unit)+")</span>":"")+"</div>"+
-    "<div class='setctl'><input id='"+id+"' value=\""+eh(String(val))+"\""+num+"><button class='btn primary' onclick=\"saveSetting('"+it.key+"')\">Save</button></div></div>";
+    "<div class='setctl'><input id='"+id+"' value=\""+eh(String(val))+"\""+num+"><button class='btn primary' onclick=\"saveSetting('"+it.key+"')\">Save</button></div>"+(it.help?"<p class='sethelp'>"+eh(it.help)+"</p>":"")+"</div>";
 }
 function saveSetting(key){const el=$("set-"+key);if(el)applySetting(key,el.value.trim(),false)}
 function toggleSetting(key,on){
@@ -1082,12 +1106,15 @@ async function applySetting(key,value,confirmFlag){
 
 /* ---------- automation tab ---------- */
 async function loadAutomation(){
-  for(const which of ["watch","keepalive","svcwatch"]){
+  await Promise.all(["watch","keepalive","svcwatch"].map(async which=>{
+    const status=$("auto-"+which+"-status");status.textContent="Loading…";
     try{
       const r=await fetch("/api/automation?list="+which);const d=await r.json();
-      $("auto-"+which).innerHTML=(d.items||[]).map(x=>"<button class='btn' onclick=\"autoDel('"+which+"','"+enc(x.name)+"')\">"+eh(x.name)+(x.ram_mb?(" - "+(x.ram_mb/1024).toFixed(1)+" GB"):"")+" &times;</button>").join("")||"<span class='mut'>None</span>";
-    }catch(e){}
-  }
+      if(!r.ok||d.error||!Array.isArray(d.items))throw new Error(d.error||"Invalid automation response");
+      $("auto-"+which).innerHTML=d.items.map(x=>"<button class='btn' onclick=\"autoDel('"+which+"','"+enc(x.name)+"')\">"+eh(x.name)+(x.ram_mb?(" - "+(x.ram_mb/1024).toFixed(1)+" GB"):"")+" &times;</button>").join("")||"<span class='mut'>No entries configured</span>";
+      status.textContent="Updated "+new Date().toLocaleTimeString();
+    }catch(e){status.innerHTML="Could not update this list. Saved entries were not changed. "+eh(e.message)+" <button class='btn' onclick='loadAutomation()'>Retry</button>"}
+  }));
 }
 function autoAdd(which){
   const body={action:"automation",list:which,op:"add",name:""};

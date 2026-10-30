@@ -120,7 +120,7 @@ class UnifiedResourceAlertTests(unittest.TestCase):
         self.assertEqual(self.policy.observe(10, 44, 11055, self.config)["kind"], "recovery")
 
     def test_muted_incident_never_emits_orphan_recovery(self):
-        self.assertIsNone(self.policy.observe(99, 10, 10000, self.config, muted=True))
+        self.assertIsNone(self.policy.observe(85, 10, 10000, self.config, muted=True))
         self.assertIsNone(self.policy.observe(10, 10, 10010, self.config))
         self.assertIsNone(self.policy.observe(10, 10, 10190, self.config))
 
