@@ -17,6 +17,15 @@ import RDPWebConsole as wc  # noqa: E402
 
 
 class WebConsoleSecurityTests(unittest.TestCase):
+    def test_public_firewall_scope_uses_supported_family_specific_ranges(self):
+        from unittest import mock
+        with mock.patch.object(wc, "run_cmd", return_value=(0, "OK")) as run:
+            ok, _ = wc.firewall_apply(["0.0.0.0/0"], 8399)
+        self.assertTrue(ok)
+        args = run.call_args.args[0]
+        self.assertIn("remoteip=0.0.0.0/1,128.0.0.0/1", args)
+        self.assertNotIn("remoteip=any", args)
+
     @classmethod
     def setUpClass(cls):
         cls._saved = {name: getattr(wc, name) for name in
