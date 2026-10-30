@@ -1,5 +1,5 @@
 /* Owner setup forms. Secrets are sent only in confirmed POST bodies. */
-let setupLoaded=false,setupBusy=false,setupJobsBusy=false,setupJobSignature='',setupTokenTimer;
+let setupLoaded=false,setupBusy=false,setupJobsBusy=false,setupJobSignature='',setupTokenTimer,setupImagesActive=false,setupLastRefresh=0;
 const setupFields={drive:[['client_id','OAuth client ID (optional)'],['client_secret','OAuth client secret (optional)','password']],onedrive:[['client_id','OAuth client ID (optional)'],['client_secret','OAuth client secret (optional)','password']],dropbox:[],s3:[['provider','S3 provider (AWS / Wasabi / Minio / Other)'],['access_key_id','Access key ID'],['secret_access_key','Secret access key','password'],['endpoint','Endpoint URL (optional)'],['region','Region (optional)']],b2:[['account','Application key ID'],['key','Application key','password']],sftp:[['host','Server hostname'],['user','Username'],['pass','Password','password'],['port','Port (optional)']],ftp:[['host','Server hostname'],['user','Username'],['pass','Password','password']],webdav:[['url','WebDAV URL'],['vendor','Vendor (other / nextcloud / owncloud)'],['user','Username'],['pass','Password','password']]};
 function setupLines(id){return $(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
 function setupJump(index){document.querySelectorAll('#tab-setup section')[index].scrollIntoView({behavior:'smooth',block:'start'})}
@@ -45,6 +45,7 @@ async function loadSetup(reset=false){
     }
     if(!d.cloud.remotes.length)$('setupRemotes').textContent=d.cloud.error?'Remote list unavailable. Retry refresh.':'No cloud accounts yet. Add one below.';
     const images=d.images,active=['imaging','uploading'].includes(images.phase);
+    setupImagesActive=active;setupLastRefresh=Date.now();
     $('setupImageStatus').textContent=(images.phase||'Idle')+' · '+(images.enabled?'Imaging enabled':'Imaging disabled')+(images.percent!=null&&images.phase==='uploading'?' · '+images.percent+'%':'')+' '+(images.detail||'');
     $('setupImageStart').disabled=active||!images.enabled;
     $('setupImageFiles').replaceChildren();
@@ -90,7 +91,7 @@ function renderSetupJobs(jobs){
 async function pollSetupJobs(){
   if(setupJobsBusy||$('tab-setup').style.display||document.activeElement.closest('#setupJobs form'))return;
   setupJobsBusy=true;
-  try{const r=await fetch('/api/setup/jobs'),d=await r.json();if(!r.ok)throw new Error(d.error||'Operation status unavailable');renderSetupJobs(d.jobs);const signature=d.jobs.map(j=>j.id+j.state).join();if(signature!==setupJobSignature){setupJobSignature=signature;loadSetup()}}
+  try{const r=await fetch('/api/setup/jobs'),d=await r.json();if(!r.ok)throw new Error(d.error||'Operation status unavailable');renderSetupJobs(d.jobs);const signature=d.jobs.map(j=>j.id+j.state).join();if(signature!==setupJobSignature||(setupImagesActive&&Date.now()-setupLastRefresh>=10000)){setupJobSignature=signature;loadSetup()}}
   catch(e){$('setupError').textContent=e.message+'. Reopen the panel if access settings changed.'}
   finally{setupJobsBusy=false}
 }
