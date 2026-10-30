@@ -844,6 +844,19 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 </main>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog id="passwordDialog" class="card" aria-labelledby="passwordDialogTitle" style="margin:auto;width:min(420px,90vw);color:var(--tx)">
+  <form id="passwordForm">
+    <h2 id="passwordDialogTitle">Reset password</h2>
+    <p id="passwordAccount" class="mut"></p>
+    <label for="resetPassword">New password</label>
+    <input id="resetPassword" type="password" required autocomplete="new-password" style="width:100%">
+    <label><input id="revealResetPassword" type="checkbox"> Show password</label>
+    <div class="cmd-list" style="margin-top:14px">
+      <button class="btn primary" type="submit">Continue</button>
+      <button class="btn" type="button" onclick="$('passwordDialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>
 <div class="modalbg" id="modalbg" onclick="if(event.target===this)this.style.display='none'">
   <div class="modal" id="modalBox"></div>
 </div>
@@ -1172,9 +1185,23 @@ function userAct(op,encName){
   if(!confirm(op+" user "+name+"?"))return;
   confirmedUserAct({op:op,name:name}).then(j=>{toast(j&&j.ok?("Done: "+op):("Failed: "+((j&&j.out)||"")),!(j&&j.ok));setTimeout(loadUsers,600)});
 }
-function userPass(encName){
+function requestPassword(name){
+  const dialog=$("passwordDialog");
+  if(dialog.open)return Promise.resolve(null);
+  const input=$("resetPassword"),reveal=$("revealResetPassword"),form=$("passwordForm");
+  $("passwordAccount").textContent="Windows local account: "+name;
+  input.value="";input.type="password";reveal.checked=false;
+  return new Promise(resolve=>{
+    let password=null;
+    reveal.onchange=()=>{input.type=reveal.checked?"text":"password"};
+    form.onsubmit=event=>{event.preventDefault();if(!input.value)return;password=input.value;dialog.close()};
+    dialog.onclose=()=>{input.value="";input.type="password";reveal.checked=false;form.onsubmit=null;reveal.onchange=null;dialog.onclose=null;resolve(password)};
+    dialog.showModal();input.focus();
+  });
+}
+async function userPass(encName){
   const name=decodeURIComponent(encName);
-  const pw=prompt("New password for "+name+":");if(!pw)return;
+  const pw=await requestPassword(name);if(!pw)return;
   if(!confirm("Set a new password for "+name+"?"))return;
   confirmedUserAct({op:"password",name:name,value:pw}).then(j=>{toast(j&&j.ok?"Password set":"Failed",!(j&&j.ok))});
 }
@@ -1581,6 +1608,7 @@ function showLogin(msg){
   const title=$("loginTitle");if(title?.tagName==='H2')title.outerHTML='<h1 id="loginTitle">RDPMonitor</h1>';
   appTimers.forEach(clearInterval);appTimers=[];started=false;
   if(typeof setupLoaded!=="undefined"){setupLoaded=false;$("setupLoginToken").textContent="";document.querySelectorAll("#tab-setup input,#tab-setup textarea").forEach(i=>i.value="")}
+  if($("passwordDialog")?.open)$("passwordDialog").close();
   $("app").style.display="none";$("loginBg").style.display="grid";
   $("loginErr").textContent=msg||"";CSRF="";
 }

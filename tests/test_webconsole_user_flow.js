@@ -23,6 +23,7 @@ function browser(accepted = true, prepareOK = true) {
     }
   });
   vm.runInContext(source, context);
+  context.requestPassword=async()=>accepted?'Fake@123':null;
   return {context, calls, fields};
 }
 
@@ -43,6 +44,22 @@ test('security watch flags distinguish enabled disabled and unknown',()=>{
   assert.equal(context.watchStatus(true),'Enabled');assert.equal(context.watchStatus(false),'Disabled');
   for(const value of [undefined,null,'false',0])assert.equal(context.watchStatus(value),'Unknown');
   assert.match(html,/watchStatus\(c\.rdp_watch\)\+" \/ "\+watchStatus\(c\.net_watch\)/);
+});
+
+test('password dialog masks secrets and clears on submit or cancellation',async()=>{
+  const fields={passwordDialog:{open:false,showModal(){this.open=true},close(){this.open=false;this.onclose()}},
+    resetPassword:{value:'',type:'password',focus(){}},revealResetPassword:{checked:false},passwordForm:{},passwordAccount:{}};
+  const context=vm.createContext({$:id=>fields[id],Promise});
+  vm.runInContext(html.slice(html.indexOf('function requestPassword('),html.indexOf('async function userPass(')),context);
+  const pending=context.requestPassword('<account>');assert.equal(fields.passwordAccount.textContent,'Windows local account: <account>');
+  assert.equal(fields.resetPassword.type,'password');
+  assert.equal(await context.requestPassword('other'),null);
+  fields.resetPassword.value='secret';fields.revealResetPassword.checked=true;fields.revealResetPassword.onchange();
+  assert.equal(fields.resetPassword.type,'text');fields.passwordForm.onsubmit({preventDefault(){}});
+  assert.equal(await pending,'secret');assert.equal(fields.resetPassword.value,'');assert.equal(fields.resetPassword.type,'password');
+  const cancelled=context.requestPassword('account');fields.resetPassword.value='discard';fields.passwordDialog.close();
+  assert.equal(await cancelled,null);assert.equal(fields.resetPassword.value,'');
+  assert.match(html,/<input id="resetPassword" type="password" required/);
 });
 
 test('all inline JavaScript parses', () => {
