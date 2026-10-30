@@ -2520,14 +2520,20 @@ def send_panel_info():
     local_only = webconsole_bind() in ("127.0.0.1", "::1", "localhost")
     rows = []
     for label, host in panel_hosts()[:4]:
-        u = panel_login_url(host)
-        if u:
-            rows.append([(f"Open {label} ({host})", u)])
+        if local_only and host not in ("127.0.0.1", "localhost", "::1"):
+            continue
+        address = "[" + host + "]" if ":" in host else host
+        u = f"{webconsole_scheme()}://{address}:{webconsole_port()}/"
+        rows.append([(f"Open {label} ({host})", u)])
     rows.append([("Show login token", "panel:token"), ("Panel status", "run:/panelstatus")])
-    note = ("Tap a link to open the panel and sign in automatically (valid ~10 minutes)."
+    rows.append([("Direct IP:port access", "cmd:/panelremote direct"),
+                 ("Access settings", "cmd:/panelremote")])
+    note = ("Open an HTTPS link, then enter your login token on the sign-in screen. "
+            "Remote settings are saved across restarts. A self-signed certificate "
+            "may show a browser warning. External reachability depends on the provider firewall."
             if not local_only else
-            "Local-only panel (open it inside the RDP session). For LAN/remote access, "
-            "enable remote mode with TLS + an IP allow-list.")
+            "Local-only panel (open it inside the RDP session). Choose Direct IP:port "
+            "access below to enable HTTPS from outside without an extra app.")
     send_url_buttons("<b>WebConsole panel</b>\n" + note, rows)
 
 
@@ -2577,7 +2583,7 @@ def panel_remote(arg=""):
     verb = parts[0].lower() if parts else "on"
     if verb in ("on", "enable", "start"):
         rc, out = _run_webconsole_cli(["remote-enable"])
-    elif verb in ("open", "any", "public"):
+    elif verb in ("direct", "open", "any", "public"):
         rc, out = _run_webconsole_cli(["remote-enable", "--allow", "0.0.0.0/0"])
     elif verb in ("off", "disable", "stop"):
         rc, out = _run_webconsole_cli(["remote-disable"])
@@ -2588,11 +2594,11 @@ def panel_remote(arg=""):
     elif verb in ("deny", "remove") and len(parts) > 1:
         rc, out = _run_webconsole_cli(["remote-allow-remove"] + parts[1:])
     else:
-        send_message("Usage: /panelremote [on | off | status | open | allow <ip> | deny <ip>]\n"
-                     "on = HTTPS + Tailscale/LAN allow-list; open = allow any IP.")
+        send_message("Usage: /panelremote [direct | on | off | status | allow <ip> | deny <ip>]\n"
+                     "direct = HTTPS by IP:port from any IPv4 address; on = restricted HTTPS.")
         return
     audit_record("Panel remote %s -> rc=%s" % (arg or "on", rc))
-    if rc == 0 and verb in ("on", "enable", "start", "open", "any", "public"):
+    if rc == 0 and verb in ("on", "enable", "start", "direct", "open", "any", "public"):
         send_message("Remote access enabled — the panel now listens on 0.0.0.0 over HTTPS.")
         time.sleep(4)  # let the supervisor restart the WebConsole on the new bind
         send_panel_info()
@@ -4138,7 +4144,7 @@ COMMAND_INFO = {
                      "On enables HTTPS on 0.0.0.0 with a self-signed certificate "
                      "and a firewall/IP allow-list (loopback + Tailscale + this "
                      "host). open allows any IP; allow/deny edit the list.",
-                     "/panelremote on|off|status|open|allow <ip>|deny <ip>", False),
+                     "/panelremote direct|on|off|status|allow <ip>|deny <ip>", False),
     "/backup": ("Queues a manual backup on the isolated SYSTEM worker. It "
                 "reports here when it finishes.", "/backup", False),
     "/backupstatus": ("Backup worker state, last successful run, schedule, and "
@@ -5352,7 +5358,7 @@ def show_command_info(cmdline):
         text += "\n\nHTTPS access settings persist across restarts. Choose who can connect."
         rows.extend([
             [("Enable restricted HTTPS", "cmd:/panelremote on"),
-             ("Allow from anywhere", "cmd:/panelremote open")],
+             ("Direct IP:port access", "cmd:/panelremote direct")],
             [("Connection status", "cmd:/panelremote status"),
              ("Disable remote access", "cmd:/panelremote off")],
         ])
@@ -10978,9 +10984,12 @@ def handle_command(text):
         send_panel_token()
 
     elif cmd == "/panelremote":
-        if args and args[0].lower() == "open" and "confirm" not in [a.lower() for a in args[1:]]:
-            send_buttons("[WARN] Allow WebConsole access from every IP?",
-                         confirm_buttons("/panelremote open"))
+        if args and args[0].lower() in ("direct", "open", "any", "public") and "confirm" not in [a.lower() for a in args[1:]]:
+            send_buttons("<b>Enable direct HTTPS access by IP:port?</b>\n"
+                         "The panel will accept connections from any IPv4 address on its configured port. "
+                         "Login still requires your token. Settings and the firewall rule are saved. "
+                         "A self-signed certificate may show a browser warning.",
+                         confirm_buttons("/panelremote direct"))
         else:
             panel_remote(" ".join(a for a in args if a.lower() != "confirm"))
 
