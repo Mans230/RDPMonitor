@@ -102,3 +102,25 @@ th{text-transform:none;letter-spacing:0;font-size:13px;background:var(--card);fo
  .modal{max-height:85dvh;overflow:auto;width:100%}.modalbg{padding:16px;align-items:flex-end}
 }
 @media(max-width:350px){.wrap{padding-inline:16px}.top{margin-inline:-16px;padding-inline:16px}.cpu-gauge{width:128px;height:128px;flex-basis:128px}.overview-cpu{gap:12px}.cpu-meta .row{font-size:12px}.top .hname{font-size:14px}.top .connection{font-size:11px}.card{padding:14px}}
+/* Setup uses the existing Night Signal form and surface hierarchy. */
+.setup-intro,.setup-controls,.setup-remote{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.setup-intro p{flex:1;min-width:180px}
+.setup-grid{margin-top:16px;align-items:start}
+.setup-grid section{scroll-margin-top:110px}
+#setupBrowser{max-height:360px;overflow:auto;overflow-wrap:anywhere}
+.setup-grid label{display:flex;flex-direction:column;gap:7px;margin:14px 0;font-size:14px}
+.setup-grid input,.setup-grid select,.setup-grid textarea,.setup-jobs input,.setup-jobs select{width:100%;min-width:0;box-sizing:border-box}
+.setup-grid textarea{resize:vertical}
+.setup-grid details{margin-top:20px}
+.setup-grid summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+.setup-wide{grid-column:1/-1}
+.setup-remote{padding:10px 0;border-bottom:1px solid var(--border)}
+.setup-remote span{flex:1;overflow-wrap:anywhere}
+.setup-image{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 0;border-bottom:1px solid var(--border)}
+.setup-image div{flex:1;overflow-wrap:anywhere;min-width:0}
+.setup-job{padding:10px 0;overflow-wrap:anywhere}
+.setup-job form{display:flex;align-items:end;flex-wrap:wrap;gap:12px}
+.setup-job label{display:flex;flex-direction:column;flex:1;min-width:160px;gap:8px}
+.setup-job p{white-space:pre-wrap}
+#setupError:not(:empty){padding:12px 0;color:var(--bad)}
+@media(max-width:700px){.setup-grid{grid-template-columns:minmax(0,1fr)}.setup-wide{grid-column:auto}.setup-grid .btn{min-height:44px}.setup-intro{align-items:start}.setup-jobs{min-width:0}}

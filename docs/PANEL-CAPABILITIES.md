@@ -6,16 +6,40 @@ monitor settings, automation, diagnostics/log export, backup status/manual runs,
 isolated restores and restore drills. These use authenticated API requests and
 the existing server-side confirmation flow for changes.
 
-The bot still has fuller setup workflows for:
+## Setup
 
-- rclone/cloud account authorization, remote creation/testing/removal and target selection;
-- system-image capture/upload/cancellation and image management;
-- backup source paths and schedule configuration;
-- public panel activation/allow-list management and retrieving its login token.
+The owner-only **Setup** page now shares these workflows and saved settings with
+the bot. It is available from the sidebar, mobile **More**, and Backup controls.
 
-Some corresponding switches, status displays or desktop launch buttons exist in
-the panel; they do not replace those complete setup workflows. This change adds
-bandwidth monitoring, not the missing cloud/image/backup setup forms.
+- Cloud: verified rclone install/repair, Google Drive/OneDrive/Dropbox sign-in or
+  OAuth JSON import, S3/B2/SFTP/FTP/WebDAV credential forms, provider follow-up
+  questions, OAuth client updates, remote tests/removal and upload destinations.
+  Existing names cannot be overwritten; remotes used by destinations cannot be
+  removed. Provider options use an explicit allow-list. Install/repair names the
+  pinned v1.74.4 build and warns before replacing a newer executable.
+- Backup: browse server drives/files/folders, edit source paths, configure
+  daily/interval/multiple-time schedules, and choose backup remotes and folder.
+  Files are retained when removing sources; retry settings are preserved. Times
+  use the server timezone. Changes are read by the existing SYSTEM worker.
+- System images: inventory, capture, upload, progress, stop, and public share-link
+  creation. Imaging permission remains in Settings. Stop retains partial files.
+- Panel access: local-only HTTP, restricted-IP HTTPS, public IPv4 HTTPS, and
+  temporary owner-token reveal. Applying access settings restarts the panel and
+  requires another login; the page explains certificate/provider-firewall limits.
+
+All changes use authenticated CSRF-protected POST requests and confirmations
+bound to exact arguments. Operator logins cannot access Setup or reveal the
+owner token. Long operations have bounded job history and visible outcomes;
+credentials are excluded from job history, usage events and provider output.
+Provider questions/sign-in expire after ten minutes and can be cancelled.
+In-progress setup jobs are not resumed after a monitor restart; partial cloud
+configuration may need removal and retry. Configuration remains saved.
+
+Browser OAuth runs on the Windows server and requires the user to complete
+provider consent through RDP; a phone cannot receive its localhost callback.
+Token import from another computer is available. OneDrive/provider choices are
+continued through rclone's noninteractive protocol rather than assumed complete:
+https://rclone.org/commands/rclone_config_create/ . No cloud consent is bypassed.
 
 ## Bandwidth
 

@@ -3199,7 +3199,34 @@ def _api_diag_inline(op, arg=""):
     return False, "unknown diagnostic %r" % op
 
 
+_setup_service = None
+_setup_service_lock = threading.Lock()
+
+
+def _panel_setup_service():
+    global _setup_service
+    with _setup_service_lock:
+        if _setup_service is None:
+            from panel_setup import SetupService
+            _setup_service = SetupService(sys.modules[__name__])
+    return _setup_service
+
+
 def _dispatch_panel(action, args):
+    if action == "setup_get":
+        return True, _panel_setup_service().snapshot()
+    if action == "setup_jobs":
+        return True, _panel_setup_service().job_snapshot()
+    if action == "setup_browse":
+        try:
+            return True, _panel_setup_service().browse(args.get("path", ""), args.get("offset", 0))
+        except (OSError, ValueError):
+            return False, "Could not open this server folder. Check its path and permissions."
+    if action == "setup_action":
+        return _panel_setup_service().submit(args)
+    if action == "setup_token":
+        token = webconsole_token()
+        return bool(token), {"token": token} if token else "No stored panel token."
     if action == "block_ip":
         return block_ip(args.get("ip", ""))
     if action == "unblock_ip":
@@ -3452,7 +3479,7 @@ def monitor_control_loop():
 
 def _panel_read_request(req):
     action, args = req.get("action"), req.get("args") or {}
-    return (action in {"users_list", "settings_get", "rdp_status", "traffic_get"}
+    return (action in {"users_list", "settings_get", "rdp_status", "traffic_get", "setup_get", "setup_jobs", "setup_browse"}
             or action in {"trap", "automation"} and args.get("op") == "list")
 
 

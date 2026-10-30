@@ -326,6 +326,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
     <div class="tab" data-t="sec" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Protection</div>
     <div class="tab" data-t="rdpsec" role="tab"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>RDP Security</div>
     <div class="tab" data-t="users" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Users</div>
+    <div class="tab" data-t="setup" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg>Setup</div>
     <div class="tab" data-t="settings" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>Settings</div>
     <div class="tab" data-t="automation" role="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Automation</div>
     <div class="nav-label" role="presentation">Reference</div>
@@ -396,6 +397,42 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   </div>
 
   <!-- ============ BACKUP ============ -->
+  <div id="tab-setup" style="display:none">
+    <div class="setup-intro"><p class="mut">Configure this server using the same settings as the bot. Changes require the owner login and confirmation.</p><button class="btn" onclick="loadSetup(true)">Refresh saved settings</button></div>
+    <div class="setup-controls" id="setupJump"><button class="btn" onclick="setupJump(0)">Cloud accounts</button><button class="btn" onclick="setupJump(1)">Destinations</button><button class="btn" onclick="setupJump(2)">Backup setup</button><button class="btn" onclick="setupJump(3)">System images</button><button class="btn" onclick="setupJump(4)">Panel access</button></div>
+    <div id="setupError" role="alert"></div>
+    <div class="card setup-jobs"><h3>Operations</h3><div id="setupJobs" aria-live="polite">No operations in this session.</div></div>
+    <div class="grid g2 setup-grid">
+      <section class="card"><h3>Cloud accounts · rclone</h3><p id="setupCloudStatus" class="mut">Loading…</p>
+        <div class="setup-controls"><button class="btn" onclick="setupDo('install',{},'Install the verified rclone v1.74.4 build? This replaces the managed executable, including a newer version. Cloud accounts are preserved.')">Install / repair</button></div>
+        <div id="setupRemotes"></div>
+        <details><summary>Add a cloud account</summary><form onsubmit="event.preventDefault();setupCreate(false)" autocomplete="off">
+          <label>Remote name<input id="setupRemoteName" required maxlength="40" placeholder="mycloud"></label>
+          <label>Provider<select id="setupProvider" onchange="setupProviderFields()"><option value="drive">Google Drive</option><option value="onedrive">OneDrive</option><option value="dropbox">Dropbox</option><option value="s3">S3 / Wasabi / MinIO</option><option value="b2">Backblaze B2</option><option value="sftp">SFTP</option><option value="ftp">FTP</option><option value="webdav">WebDAV</option></select></label>
+          <div id="setupProviderFields"></div>
+          <div id="setupOAuth"><p class="mut">Browser sign-in opens on this Windows server. Use RDP to complete it. From another device, run <code>rclone authorize "provider"</code> and paste its JSON below.</p><label>OAuth token JSON<textarea id="setupOAuthToken" rows="3" spellcheck="false" autocomplete="off"></textarea></label><button type="button" class="btn" onclick="setupCreate(true)">Sign in on server</button></div>
+          <details><summary>Additional provider options</summary><label>JSON object<textarea id="setupOptions" rows="3" placeholder='{"region":"us-east-1"}' spellcheck="false"></textarea></label></details>
+          <button class="btn" type="submit">Create remote</button>
+        </form></details>
+        <details><summary>Update an existing OAuth client</summary><label>Remote<select id="setupClientRemote"></select></label><label>Client ID<input id="setupClientId" autocomplete="off"></label><label>Client secret<input id="setupClientSecret" type="password" autocomplete="new-password"></label><button class="btn" onclick="setupClient()">Save OAuth client</button></details>
+      </section>
+      <section class="card"><h3>Upload destinations</h3><p class="mut">Choose a configured remote, then add a folder. Test access before relying on a cloud copy.</p>
+        <label>Image remote<select id="setupImageRemote"><option value="">No cloud upload</option></select></label><label>Image folder<input id="setupImageFolder" placeholder="RDPMonitor-Images"></label>
+        <label>Backup destinations, one per line<textarea id="setupBackupTargets" rows="3" placeholder="mycloud:"></textarea></label><label>Folder appended to each backup destination<input id="setupBackupFolder" placeholder="VPS-Backups"></label>
+        <button class="btn" onclick="setupTargets()">Save destinations</button><label>Test destination<input id="setupTestTarget" list="setupRemoteChoices" placeholder="mycloud:Folder"></label><datalist id="setupRemoteChoices"></datalist><button class="btn" onclick="setupDo('test',{target:$('setupTestTarget').value},'Test access to this cloud destination?')">Test connection</button>
+      </section>
+      <section class="card"><h3>Backup sources &amp; schedule</h3><p class="mut" id="setupTimezone">Times use the server timezone.</p>
+        <details><summary onclick="loadSetupBrowse()">Browse server files</summary><div id="setupBrowser"></div></details>
+        <label>Server files or folders, one path per line<textarea id="setupSourcePaths" rows="4" spellcheck="false" placeholder="C:\Data"></textarea></label><button class="btn" onclick="setupDo('sources',{paths:setupLines('setupSourcePaths')},'Replace the backup source list? An empty list leaves scheduled backups with no sources. Files are retained.')">Save source paths</button>
+        <form onsubmit="event.preventDefault();setupSchedule()"><label>Automatic backups<select id="setupScheduleEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label>Schedule mode<select id="setupScheduleMode" onchange="setupScheduleHint()"><option value="daily">Daily</option><option value="interval">Every N hours</option><option value="times">Several times per day</option></select></label><label id="setupScheduleLabel">Time · HH:MM<input id="setupScheduleValue" required placeholder="03:00"></label><button class="btn" type="submit">Save schedule</button></form>
+      </section>
+      <section class="card"><h3>System images</h3><p id="setupImageStatus" class="mut">Loading…</p><p class="mut">Full system capture can use substantial disk space. Keep all VHDX files together and verify a restore in a VM.</p><div class="setup-controls"><button class="btn" id="setupImageStart" onclick="setupDo('image_start',{},'Capture a full system image now? This uses disk space and may automatically upload to the saved destination.')">Capture system image</button><button class="btn" onclick="setupDo('image_stop',{},'Stop the current image capture or upload? Partial files will remain.')">Stop operation</button><button class="btn" onclick="goTab('settings')">Imaging permission</button></div><div id="setupImageFiles"></div></section>
+      <section class="card setup-wide"><h3>Panel access</h3><p id="setupRemoteStatus" class="mut">Loading…</p><p class="mut">Changing access restarts the panel and ends this session. Local mode opens inside RDP at http://127.0.0.1:8399/. Remote mode uses HTTPS and the login token. The generated certificate may show a browser warning; the provider firewall must also permit this port.</p>
+        <form onsubmit="event.preventDefault();setupRemote()"><label>Access mode<select id="setupAccessMode"><option value="local">Local server only</option><option value="restricted">HTTPS · selected IPs</option><option value="public">HTTPS · any IPv4 address</option></select></label><label>Allowed IPs or CIDRs, one per line<textarea id="setupAllowedIps" rows="2" placeholder="203.0.113.10/32"></textarea></label><button class="btn" type="submit">Apply access settings</button></form>
+        <details ontoggle="if(!this.open)$('setupLoginToken').textContent='' "><summary>Login token</summary><button class="btn" onclick="setupRevealToken()">Reveal owner token</button><code id="setupLoginToken" style="overflow-wrap:anywhere"></code><p class="mut">Anyone with this token can control the panel. It is hidden automatically after one minute.</p></details>
+      </section>
+    </div>
+  </div>
   <div id="tab-backup" style="display:none">
     <div class="grid g4">
       <div class="card"><h3>Worker</h3><div class="big" id="backupState" style="font-size:24px">—</div><div class="mut" id="backupMessage">Loading…</div></div>
@@ -410,7 +447,8 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn primary" id="backupNowBtn" onclick="backupNow()">Backup now</button>
           <button class="btn" onclick="runDrill()">Run restore drill</button>
-          <button class="btn" onclick="openBackupGui()">Open settings window</button>
+          <button class="btn" onclick="goTab('setup')">Configure backups &amp; cloud</button>
+          <button class="btn" onclick="openBackupGui()">Desktop settings</button>
           <button class="btn" onclick="loadBackup()">Refresh</button>
         </div>
         <div class="note">Starting a backup is safe to repeat: the worker rejects overlapping jobs.</div>
@@ -810,6 +848,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   <div class="modal" id="modalBox"></div>
 </div>
 
+<script src="/assets/setup.js"></script>
 <script>
 let CSRF="",started=false,toastTimer,loginBusy=false,appTimers=[];
 let liveHist=[],dayHist=[],rdpHist=[],lastApps=[],lastProcs=[];
@@ -896,7 +935,7 @@ function drawAll(){
 }
 
 /* ---------- tabs ---------- */
-const NIGHT_ROUTES=[['live','Overview'],['bandwidth','Bandwidth'],['sec','Protection'],['backup','Backups'],['apps','Processes'],['rdpsec','RDP access'],['users','Local users'],['settings','Settings'],['bot','Command center'],['charts','Resource history'],['tools','System tools'],['automation','Automation'],['diagnostics','Diagnostics'],['docs','Command reference'],['ctl','Maintenance']];
+const NIGHT_ROUTES=[['live','Overview'],['bandwidth','Bandwidth'],['sec','Protection'],['backup','Backups'],['apps','Processes'],['rdpsec','RDP access'],['users','Local users'],['settings','Settings'],['setup','Setup'],['bot','Command center'],['charts','Resource history'],['tools','System tools'],['automation','Automation'],['diagnostics','Diagnostics'],['docs','Command reference'],['ctl','Maintenance']];
 function prepareNightSignal(){
   const nav=$("consoleNavigation"),tabs=Object.fromEntries([...nav.querySelectorAll('.tab')].map(t=>[t.dataset.t,t]));
   nav.replaceChildren();
@@ -963,6 +1002,7 @@ function activateTab(t){
   if(t.dataset.t=="rdpsec")loadRdp();
   if(t.dataset.t=="users")loadUsers();
   if(t.dataset.t=="settings")loadSettings();
+  if(t.dataset.t=="setup")loadSetup();
   if(t.dataset.t=="automation")loadAutomation();
   if(t.dataset.t=="diagnostics")loadDiag("diagnose");
   if(t.dataset.t=="docs")loadDocs();
@@ -1374,7 +1414,7 @@ function renderBandwidthConnections(){
 }
 
 /* ---------- actions ---------- */
-const CONFIRMED_ACTIONS=new Set(["user","reboot","shutdown","kill","kill_app","clean_temp","msg","logoff","service","run_command","start_program","screenshot","backup_now","backup_gui","restore","drill","rdp","settings_set","block_subnet","set_rdp_port","mute","trap","cancel_restart","automation","update_now","exportlogs","send_file","block_ip","unblock_ip","test_alert"]);
+const CONFIRMED_ACTIONS=new Set(["user","reboot","shutdown","kill","kill_app","clean_temp","msg","logoff","service","run_command","start_program","screenshot","backup_now","backup_gui","restore","drill","rdp","settings_set","block_subnet","set_rdp_port","mute","trap","cancel_restart","automation","update_now","exportlogs","send_file","block_ip","unblock_ip","test_alert","setup","setup_token"]);
 function requiresActionConfirmation(body){
   if(!CONFIRMED_ACTIONS.has(body.action))return false;
   if(body.action==="service"&&(body.mode||"status")==="status")return false;
@@ -1539,6 +1579,7 @@ async function loadSec(){
 function showLogin(msg){
   const title=$("loginTitle");if(title?.tagName==='H2')title.outerHTML='<h1 id="loginTitle">RDPMonitor</h1>';
   appTimers.forEach(clearInterval);appTimers=[];started=false;
+  if(typeof setupLoaded!=="undefined"){setupLoaded=false;$("setupLoginToken").textContent="";document.querySelectorAll("#tab-setup input,#tab-setup textarea").forEach(i=>i.value="")}
   $("app").style.display="none";$("loginBg").style.display="grid";
   $("loginErr").textContent=msg||"";CSRF="";
 }
@@ -1546,6 +1587,8 @@ function startApp(){
   $("loginBg").style.display="none";$("app").style.display="";
   if(started)return;started=true;
   appTimers.push(setInterval(poll,2000));poll();
+  if(!$("tab-setup").style.display)loadSetup();
+  appTimers.push(setInterval(pollSetupJobs,3000));
   appTimers.push(setInterval(()=>{if(!$("tab-sec").style.display)loadSec()},10000));
   appTimers.push(setInterval(()=>{if(!$("tab-backup").style.display)loadBackup()},5000));
   loadSec();loadDay();appTimers.push(setInterval(loadDay,120000));
