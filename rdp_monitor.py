@@ -1202,7 +1202,7 @@ def _rclone_version():
 def _rclone_remotes():
     ok, out = _rclone_run(["listremotes"], timeout=60)
     if not ok:
-        return []
+        raise RuntimeError("Could not load rclone remotes: " + redact_log(out)[:300])
     return [ln.strip() for ln in out.splitlines()
             if re.fullmatch(r"[A-Za-z0-9_.\-]+:", ln.strip())]
 
@@ -1227,8 +1227,11 @@ def rclone_status_text():
         lines.append("Status: installed")
         lines.append("Version: " + esc(_rclone_version() or "unknown"))
         lines.append("Path: <code>" + esc(exe) + "</code>")
-        remotes = _rclone_remotes()
-        lines.append("Remotes: " + (esc(", ".join(remotes)) if remotes else "(none)"))
+        try:
+            remotes = _rclone_remotes()
+            lines.append("Remotes: " + (esc(", ".join(remotes)) if remotes else "(none)"))
+        except RuntimeError as exc:
+            lines.append(esc(str(exc)) + "\nUse My remotes to retry; saved remotes were not changed.")
     target = config.get("rclone_remote") or ""
     lines.append("Image upload target: " + (esc(target) if target else "(not set)"))
     lines.append("")
@@ -1275,7 +1278,11 @@ def rclone_advanced_menu():
 
 
 def rclone_remotes_menu():
-    remotes = _rclone_remotes()
+    try:
+        remotes = _rclone_remotes()
+    except RuntimeError as exc:
+        return send_buttons(esc(str(exc)) + "\nSaved remotes were not changed.",
+                            [[("Retry", "rc:list"), ("Back", "rc:menu")]])
     if not remotes:
         return send_buttons(
             "<b>rclone remotes</b>\nNone yet. Choose a provider to create one.",
@@ -2861,22 +2868,28 @@ def _valid_user_name(name):
 def api_users_list():
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command",
-                            "Get-LocalUser | Select-Object Name,Enabled,LastLogon | "
+                            "$ErrorActionPreference='Stop'; Get-LocalUser | Select-Object Name,Enabled,LastLogon | "
                             "ConvertTo-Json -Compress"],
                            capture_output=True, timeout=40, creationflags=NO_WINDOW)
         out = _decode_out(r.stdout)
-    except Exception:
-        out = ""
+        if r.returncode != 0:
+            return False, "Windows user query failed. Retry; no accounts were changed."
+    except Exception as exc:
+        return False, "Windows user query failed: " + redact_log(str(exc))[:200]
     items = []
     try:
         data = json.loads(out) if out.strip() else []
+        if data is None:
+            data = []
         if isinstance(data, dict):
             data = [data]
+        if not isinstance(data, list) or any(not isinstance(i, dict) or not i.get("Name") for i in data):
+            raise ValueError("invalid user response")
         for i in data:
             items.append({"name": i.get("Name"), "enabled": bool(i.get("Enabled")),
                           "last": i.get("LastLogon")})
     except Exception:
-        items = []
+        return False, "Windows returned an invalid user list. Retry; no accounts were changed."
     return True, items
 
 
@@ -8807,7 +8820,7 @@ def alerts_muted():
 
 
 def send_usage_alert(cpu, ram_pct, used_gb, total_gb, level, spike=None):
-    if alerts_muted():
+    if alerts_muted() and level != "critical":
         return
     _icon, title = LEVEL_INFO[level]
     body = (f"CPU   {cpu:5.1f}%\n"
@@ -9217,8 +9230,8 @@ def set_guide():
         "",
         "<b> Behavior of alerts</b>",
         f"• <b>/set interval 300</b> ({c['alert_interval']} Again)",
-        "   You will receive a warning whenever the consumption exceeds the limit",
-        "   (300 = Eat 5 Minutes, 600 = Eat 10 Minutes)",
+        f"   Effective reminder: {ResourceAlertPolicy.timings(c)['reminder_seconds']} seconds (minimum 1800).",
+        "   Warning: sustained for 120s; recovery: below warning by 5 points for 180s. Critical bypasses mute.",
         f"• <b>/set spike 30</b> ({c['spike_threshold']}%)",
         "   Immediate alert if the consumption rate jumps within a minute",
         "   Example: It was 20% And suddenly it happened 55% → You will receive an alert immediately without waiting",
@@ -9402,7 +9415,7 @@ SETTINGS_SCHEMA = [
         ("critical", "Critical threshold", "int", 1, 100, "%"),
         ("disk", "Disk warning", "int", 10, 99, "%"),
         ("spike", "Sudden spike", "int", 1, 100, "%"),
-        ("interval", "Alert interval", "int", 30, 86400, "s"),
+        ("interval", "Requested reminder interval", "int", 30, 86400, "s"),
     ]),
     ("Reports", [
         ("daily", "Daily report", "bool", None, None, ""),
@@ -9460,6 +9473,13 @@ def settings_snapshot():
             rows.append({"key": key, "label": label, "type": typ,
                          "min": lo, "max": hi, "unit": unit,
                          "value": config.get(field)})
+            if key == "interval":
+                timing = ResourceAlertPolicy.timings(config)
+                rows[-1]["help"] = ("Effective reminder: %ds (minimum 1800s). Warning must persist %ds; "
+                                     "recovery must persist %ds and be %d percentage points below warning. "
+                                     "Danger and critical bypass the warning delay; critical bypasses mute."
+                                     % (timing["reminder_seconds"], timing["warning_hold_seconds"],
+                                        timing["recovery_hold_seconds"], timing["recovery_margin_percent"]))
         groups.append({"name": gname, "items": rows})
     return groups
 
@@ -10974,7 +10994,8 @@ def handle_command(text):
             f"Alert limits: Warning {config['cpu_alert_threshold']}% | "
             f"Danger {config['danger_threshold']}% | "
             f"critical {config['critical_threshold']}%\n"
-            f"Alert period: {config['alert_interval']} Again\n"
+            f"Effective resource reminder: {ResourceAlertPolicy.timings(config)['reminder_seconds']}s "
+            f"(requested {config['alert_interval']}s; minimum 1800s)\n"
             f"Sudden spike limit: {config['spike_threshold']}% Within a minute\n"
             f"Disk alert limit: {config['disk_threshold']}%\n"
             f"Daily report: {'Activated ' + str(config['daily_report_hour']) + ':00' if config['daily_report_enabled'] else 'Disabled'}\n"

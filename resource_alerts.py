@@ -18,6 +18,14 @@ class ResourceAlertPolicy:
     RECOVERY_MARGIN = 5
     REMINDER_INTERVAL = 1800
 
+    @classmethod
+    def timings(cls, config):
+        return {"reminder_seconds": max(config.get("alert_interval", 300), cls.REMINDER_INTERVAL),
+                "warning_hold_seconds": cls.WARNING_HOLD,
+                "recovery_hold_seconds": cls.RECOVERY_HOLD,
+                "recovery_margin_percent": cls.RECOVERY_MARGIN,
+                "critical_bypasses_mute": True}
+
     def __init__(self):
         self.samples = deque(maxlen=24)
         self.last_level = "ok"
@@ -56,7 +64,7 @@ class ResourceAlertPolicy:
             due = now-self.last_alert >= max(config["alert_interval"], self.REMINDER_INTERVAL)
             escalation = ranks[level] > ranks[self.last_level]
             # A downgrade is never a fresh warning, even after a reminder is due.
-            if not muted and (escalation or (level == self.last_level and due)):
+            if (not muted or level == "critical") and (escalation or (level == self.last_level and due)):
                 self.last_level, self.last_alert = level, now
                 if spike:
                     self.last_spike = now

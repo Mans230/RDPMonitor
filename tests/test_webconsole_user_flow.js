@@ -32,6 +32,34 @@ test('all inline JavaScript parses', () => {
   for (const script of scripts) new vm.Script(script[1]);
 });
 
+test('failed user refresh keeps previous accounts and exposes retry', async () => {
+  const tbody={innerHTML:'previous accounts'};
+  const fields={usersStatus:{textContent:'',innerHTML:''},userTbl:{querySelector:()=>tbody}};
+  const context=vm.createContext({$:id=>fields[id],Date,Error,Array,eh:String,
+    fetch:async()=>({ok:false,json:async()=>({error:'Windows query failed'})})});
+  vm.runInContext(html.slice(html.indexOf('async function loadUsers(){'),html.indexOf('function userAct(')),context);
+  await context.loadUsers();
+  assert.equal(tbody.innerHTML,'previous accounts');
+  assert.match(fields.usersStatus.innerHTML,/Retry/);
+  assert.match(fields.usersStatus.innerHTML,/Windows query failed/);
+});
+
+test('automation errors retain each previous list rather than render None', async () => {
+  const fields={};
+  for(const name of ['watch','keepalive','svcwatch']){
+    fields['auto-'+name]={innerHTML:'saved entry'};
+    fields['auto-'+name+'-status']={textContent:'',innerHTML:''};
+  }
+  const context=vm.createContext({$:id=>fields[id],Promise,Date,Error,Array,eh:String,
+    fetch:async()=>({ok:false,json:async()=>({error:'Monitor unavailable'})})});
+  vm.runInContext(html.slice(html.indexOf('async function loadAutomation(){'),html.indexOf('function autoAdd(')),context);
+  await context.loadAutomation();
+  for(const name of ['watch','keepalive','svcwatch']){
+    assert.equal(fields['auto-'+name].innerHTML,'saved entry');
+    assert.match(fields['auto-'+name+'-status'].innerHTML,/Retry/);
+  }
+});
+
 test('user helper sends exact payload through the common confirmation dispatcher', async () => {
   const {context, calls} = browser();
   await context.confirmedUserAct({op: 'password', name: 'operator', value: 'Fake@123'});
