@@ -53,6 +53,7 @@ from rdp_connectivity import COLLECT_PS, analyze as analyze_rdp_policy, format_r
 from bot_catalog import (build_menus, category_title, canonical_command, help_text,
                          telegram_menu, PAGE_ALIASES, OWNERS)
 from resource_alerts import ResourceAlertPolicy, usage_level as resource_usage_level
+from bot_messages import message_pages
 from bandwidth import usage_summary, TrafficLedger
 from security_events import (canonical_ip, canonical_target, event_timestamp,
                              account_query, failed_query, protected_target, success_query, usable_source)
@@ -2335,10 +2336,81 @@ def _capture_add(text):
     return False
 
 
+_message_views = {}
+_message_views_lock = threading.Lock()
+MESSAGE_VIEW_TTL = 600
+
+
+def _page_markup(token, index, count):
+    row = []
+    if index:
+        row.append({'text': '‹ Previous', 'callback_data': f'pg:{token}:{index-1}'})
+    if index+1 < count:
+        row.append({'text': 'Next ›', 'callback_data': f'pg:{token}:{index+1}'})
+    return {'inline_keyboard': [row]} if row else {'inline_keyboard': []}
+
+
+def send_paged_message(text):
+    """Long reports occupy one bubble; paging never runs an administrative action."""
+    pages = message_pages(text)
+    if len(pages) < 2:
+        return False
+    with _message_views_lock:
+        now = time.monotonic()
+        for token in [k for k,v in _message_views.items() if now-v['time'] >= MESSAGE_VIEW_TTL]:
+            del _message_views[token]
+    for chat in _alert_targets():
+        with _message_views_lock:
+            while len(_message_views) >= 100:
+                del _message_views[min(_message_views, key=lambda k: _message_views[k]['time'])]
+            token = secrets.token_hex(8)
+            _message_views[token] = {'chat': str(chat), 'pages': pages, 'time': now}
+        markup = _page_markup(token, 0, len(pages))
+        body = f'<b>Page 1 / {len(pages)}</b>\n' + pages[0]
+        result = tg_api('sendMessage', chat_id=chat, text=body, parse_mode='HTML', reply_markup=markup)
+        if not result.get('ok'):
+            result = tg_api('sendMessage', chat_id=chat, text=html.unescape(_strip_tags(body)), reply_markup=markup)
+        if not result.get('ok'):
+            for page in pages:
+                _queue_alert(chat, html.unescape(_strip_tags(page)))
+        else:
+            with _message_views_lock:
+                if token in _message_views:
+                    _message_views[token]['message_id'] = (result.get('result') or {}).get('message_id')
+    return True
+
+
+def handle_message_page(callback):
+    """Only an authorized viewer in the originating chat can edit this report."""
+    message = callback.get('message') or {}
+    chat = str((message.get('chat') or {}).get('id', ''))
+    try:
+        _, token, page = callback.get('data', '').split(':')
+        page = int(page)
+        with _message_views_lock:
+            view = _message_views.get(token)
+            if not view or view['chat'] != chat or time.monotonic()-view['time'] >= MESSAGE_VIEW_TTL:
+                raise ValueError()
+            if view.get('message_id') is not None and view['message_id'] != message.get('message_id'):
+                raise ValueError()
+            if not 0 <= page < len(view['pages']):
+                raise ValueError()
+            text = f"<b>Page {page+1} / {len(view['pages'])}</b>\n" + view['pages'][page]
+            markup = _page_markup(token, page, len(view['pages']))
+        result = tg_api('editMessageText', chat_id=chat, message_id=message['message_id'],
+                        text=text, parse_mode='HTML', reply_markup=markup)
+        error = '' if result.get('ok') or 'not modified' in str(result.get('description', '')).lower() else 'Could not change page. Try again.'
+    except (ValueError, KeyError, TypeError):
+        error = 'Report expired. Send the command again.'
+    tg_api('answerCallbackQuery', callback_query_id=callback.get('id'), text=error)
+
+
 def send_message(text):
     if _capture_add(text):
         return
     text = _tag() + message_layout(text)
+    if send_paged_message(text):
+        return
     # Split long messages (Telegram limit 4096 distorted) - Otherwise the transmission fails silently
     chunks = []
     rest = text
@@ -2430,6 +2502,8 @@ def send_plain(text):
         return
     text = _tag() + _strip_tags(text)
     text = _fix_rtl(text)
+    if send_paged_message('<pre>' + esc(text) + '</pre>'):
+        return
     for chat in _alert_targets():
         for i in range(0, len(text), 3900):
             res = tg_api("sendMessage", chat_id=chat, text=text[i:i + 3900])
@@ -3623,6 +3697,8 @@ def _progress_bar(pct):
 
 def backup_progress_text():
     p = _read_json(BACKUP_PROGRESS, {})
+    if not p:
+        return '<b>Backup progress</b>\nNo progress recorded. Check /backupstatus for the worker state.'
     state = p.get("state", "unknown")
     pct = int(p.get("percent", 0) or 0)
     msg = _strip_tags(str(p.get("message", "")))[:120]
@@ -4237,9 +4313,8 @@ COMMAND_INFO = {
               "up/down right now, disk usage with free space, active login "
               "sessions count, and machine uptime. Reads information only - "
               "changes nothing.", "/view", False),
-    "/top": ("Lists the 10 processes consuming the most CPU and the 10 using "
-             "the most RAM right now, with PID, memory and CPU per process. "
-             "Use it to find what is loading the machine.", "/top", False),
+    "/top": ("Top CPU or RAM processes, five per page. Use the buttons to switch metric or ranks. "
+             "CPU is a share of total capacity; idle time is excluded.", "/top [cpu|ram] [1|2]", False),
     "/chart": ("Generates a graph image of CPU and RAM over the last 24 hours "
                "(one sample per minute) and sends it as a photo.",
                "/chart", False),
@@ -5030,10 +5105,10 @@ COMMAND_DOCS = {
         "related": ["/top", "/chart"],
     },
     "/top": {
-        "summary": "Top processes by CPU and by RAM.",
+        "summary": "Top processes by CPU or RAM, five per page.",
         "steps": [("Enumerate", "psutil.process_iter() with cpu_percent and memory_info")],
         "effect": "Read-only.",
-        "output": "A ranked process list with PIDs.",
+        "output": "A ranked list with PIDs, metric switch and ranks 1–5 / 6–10 buttons. CPU uses total machine capacity; PID 0 is excluded.",
         "troubleshoot": "First sample of a new process may read 0%.",
         "related": ["/kill", "/ps"],
     },
@@ -5565,16 +5640,17 @@ def show_command_info(cmdline):
         return send_message("Unknown command. Open /menu for the command list.")
     desc, usage, dangerous = COMMAND_INFO[cmd]
     doc = COMMAND_DOCS.get(cmd, {})
-    text = (f"<b>{esc(cmd)}</b> ? {esc(_command_section(cmd))}\n"
-            f"{esc(desc)}\n\nUsage:\n<code>{esc(usage)}</code>")
+    text = (f"<b>{esc(cmd)}</b> · {esc(_command_section(cmd))}\n"
+            f"{esc(doc.get('summary') or desc)}\n\nUsage: <code>{esc(usage)}</code>")
     if doc.get("effect"):
         text += "\n\nEffect: " + esc(doc["effect"])
     needs_confirmation = dangerous or cmd not in READ_ONLY_COMMANDS or bool(args)
     if needs_confirmation:
-        text += "\n\nReview the target and effect. Confirming may change this device or its access."
+        text += "\nConfirmation required. Review the target and effect."
     rows = []
     if not any(mark in command for mark in ("<", ">", "|")):
-        text += "\n\nSelected: <code>" + esc(command) + "</code>"
+        if args:
+            text += "\nSelected: <code>" + esc(command) + "</code>"
         if needs_confirmation:
             rows.extend(confirm_buttons(command))
         else:
@@ -5589,13 +5665,13 @@ def show_command_info(cmdline):
     if cmd == "/rdpallow" and not args:
         rows.append([("Review allowlist apply", "cmd:/rdpallow apply")])
     if cmd == "/panelremote" and not args:
-        text += "\n\nHTTPS access settings persist across restarts. Choose who can connect."
         rows.extend([
             [("Enable restricted HTTPS", "cmd:/panelremote on"),
              ("Direct IP:port access", "cmd:/panelremote direct")],
             [("Connection status", "cmd:/panelremote status"),
              ("Disable remote access", "cmd:/panelremote off")],
         ])
+    rows.append([("Full details", "dc:" + cmd)])
     rows.append([("Back to category", "menu:" + OWNERS[cmd]), ("Home", "menu:root")])
     send_buttons(text, rows)
 
@@ -5615,7 +5691,11 @@ def handle_reviewed_command(pid):
 
 def handle_menu_callback(data):
     """Executed by pressing a button: List/Order details/Direct implementation"""
-    if data.startswith("menu:"):
+    if data.startswith('dc:'):
+        send_message(docs_card_text(data[3:]))
+    elif data.startswith('tp:'):
+        send_top_report(data[3:].split(':'))
+    elif data.startswith("menu:"):
         show_menu_page(data[5:])
     elif data.startswith("cmd:"):
         show_command_info(data[4:])
@@ -5719,17 +5799,20 @@ def get_top_processes(n=10):
     procs = []
     for p in psutil.process_iter(['pid', 'name', 'memory_info']):
         try:
+            if p.info['pid'] == 0:
+                continue  # Windows idle time is not application usage.
             p.cpu_percent(None)  # Account configuration
             procs.append(p)
         except Exception:
             pass
     time.sleep(0.5)
     items = []
+    capacity = max(1, psutil.cpu_count() or 1)
     for p in procs:
         try:
             mi = p.info.get('memory_info')
             items.append((p.info.get('name') or '?', p.info['pid'],
-                          p.cpu_percent(None),
+                          min(100.0, max(0.0, p.cpu_percent(None) / capacity)),
                           (mi.rss / (1024 ** 2)) if mi else 0.0))
         except Exception:
             pass
@@ -6057,14 +6140,14 @@ def format_uptime():
 def format_report():
     cpu, ram_pct, used_gb, total_gb = get_usage()
     disks = get_disks()
-    return report_card("Consumption report",
-        ("Resources", [("CPU", f"{cpu:.1f}%"), ("RAM", f"{ram_pct:.1f}%"),
-                       ("Memory used", f"{used_gb:.2f} / {total_gb:.2f} GB")]),
-        ("Network · current speed", [("↓ Download", f"{_net_speed['down']:.1f} Mbps"),
-                                     ("↑ Upload", f"{_net_speed['up']:.1f} Mbps")]),
-        ("Storage", [(str(dev), f"{pct:.0f}% used · {free:.0f} GB free")
-                     for dev, pct, free, _total in disks] or [("Disks", "Unavailable")]),
-        ("Activity", [("Active users", len(psutil.users())), ("Uptime", format_uptime())]))
+    rows = [("CPU", f"{cpu:.1f}%"), ("RAM", f"{ram_pct:.1f}%"),
+            ("Memory used", f"{used_gb:.2f} / {total_gb:.2f} GB"),
+            ("↓ Download", f"{_net_speed['down']:.1f} Mbps"),
+            ("↑ Upload", f"{_net_speed['up']:.1f} Mbps")]
+    rows += [(str(dev), f"{pct:.0f}% used · {free:.0f} GB free")
+             for dev, pct, free, _total in disks] or [("Disks", "Unavailable")]
+    rows += [("Active users", len(psutil.users())), ("Uptime", format_uptime())]
+    return report_card("Consumption report", (None, rows))
 
 
 def format_net_report():
@@ -6077,25 +6160,41 @@ def format_net_report():
             ("↑ Uploaded", f"{c.bytes_sent / 1024 ** 3:.2f} GB")]))
 
 
-def format_top_report():
+def format_top_report(mode=None, page=1):
     top_cpu, top_ram = get_top_processes(10)
-    blocks = ["<b>Top processes</b>"]
+    blocks = [f"<b>Top processes · {'CPU' if mode == 'cpu' else 'RAM'}</b>" if mode else "<b>Top processes</b>"]
     for title, processes in [("By CPU", top_cpu), ("By memory", top_ram)]:
-        lines = [f"<b>{title}</b>"]
+        if mode and title != ('By CPU' if mode == 'cpu' else 'By memory'):
+            continue
+        lines = [] if mode else [f"<b>{title}</b>"]
         entries = []
-        for i, (name, pid, cpu, mem) in enumerate(processes, 1):
+        start = (page-1)*5 if mode else 0
+        processes = processes[start:start+5] if mode else processes
+        for i, (name, pid, cpu, mem) in enumerate(processes, start+1):
             display = name if len(name) <= 28 else name[:27] + '…'
             memory = f"{mem:.0f} MB" if mem < 1024 else f"{mem / 1024:.2f} GB"
             values = (f"{cpu:.1f}% · {memory} · PID {pid}" if title == "By CPU"
                       else f"{memory} · {cpu:.1f}% · PID {pid}")
-            entries.append(f"{i}. {display}\n   {values}")
+            entries.append(f"{i}. {display}\n{values}")
         if entries:
             legend = "CPU · RAM · PID" if title == "By CPU" else "RAM · CPU · PID"
-            lines.append("<pre>" + esc(legend + '\n\n' + '\n'.join(entries)) + "</pre>")
+            lines.append("<pre>" + esc(legend + '\n' + '\n'.join(entries)) + "</pre>")
         else:
             lines.append("No process data available.")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+def send_top_report(args=()):
+    if len(args)>2 or (args and args[0] not in ('cpu', 'ram')) or (len(args)>1 and args[1] not in ('1', '2')):
+        send_message('Usage: /top [cpu|ram] [1|2]')
+        return
+    mode = args[0] if args else 'cpu'
+    page = int(args[1]) if len(args)>1 else 1
+    other = 'ram' if mode == 'cpu' else 'cpu'
+    rows = [[('Show RAM' if mode == 'cpu' else 'Show CPU', f'tp:{other}:1'),
+             ('Ranks 6–10' if page == 1 else 'Ranks 1–5', f'tp:{mode}:{3-page}')]]
+    send_buttons(format_top_report(mode, page) + f'\n<i>Page {page}/2 · CPU is % of total capacity</i>', rows)
 
 
 def format_rdp_report():
@@ -7613,6 +7712,8 @@ def fetch_diagnosis_events(minutes, levels="1,2"):
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                            capture_output=True, timeout=180, creationflags=NO_WINDOW)
+        if r.returncode != 0:
+            return None
     except Exception as e:
         print(f"[diagnosis] error: {e}")
         return None
@@ -7683,8 +7784,8 @@ def diagnose_report(hours=24):
     if events is None:
         return "[X] Failed to read logs (Try from a manager account)"
     if not events:
-        return (f"[OK] <b>Diagnosis</b> - Another {hours} hours\n"
-                "There are no critical events or errors. The system is clean ")
+        return (f"<b>Event diagnosis · last {hours} hours</b>\n"
+                "No matching critical/error events were found in the queried logs.")
     groups = {}
     for log, prov, eid, ts, msg in events:
         g = groups.setdefault((prov, eid),
@@ -7716,7 +7817,7 @@ def logstats_report(days=7):
     if events is None:
         return "[X] Failed to read logs (Try from a manager account)"
     if not events:
-        return f" Another {days} days: There are no errors at all "
+        return f"No matching error events found in the queried logs for the last {days} days."
     counts = {}
     for _log, prov, eid, _ts, _msg in events:
         counts[(prov, eid)] = counts.get((prov, eid), 0) + 1
@@ -8619,6 +8720,8 @@ def bigfiles_job():
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command", PS_BIGFILES],
                            capture_output=True, timeout=600, creationflags=NO_WINDOW)
+        if r.returncode != 0:
+            raise RuntimeError('File scan unavailable. Try again with administrator access.')
         rows = [ln.strip() for ln in _decode_out(r.stdout).splitlines()
                 if "|" in ln][:20]
     except Exception as e:
@@ -8726,6 +8829,8 @@ def startup_job():
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command", PS_STARTUP],
                            capture_output=True, timeout=120, creationflags=NO_WINDOW)
+        if r.returncode != 0:
+            raise RuntimeError('Startup inventory unavailable. Try again with administrator access.')
         section, run_rows, task_rows = "", [], []
         for ln in _decode_out(r.stdout).splitlines():
             ln = ln.strip()
@@ -8797,8 +8902,7 @@ def when_report(metric="cpu", threshold=80, hours=24):
     key = "c" if metric == "cpu" else "r"
     hits = [h for h in pts if h.get(key, 0) >= threshold]
     if not hits:
-        return rtl(f"[OK] There are no moments of transcendence {metric.upper()} {threshold}% "
-                   f"During another {hours} hours")
+        return rtl(f"No recorded {metric.upper()} samples reached {threshold}% in the last {hours} hours.")
     ranges = []
     start = prev = None
     for h in pts:
@@ -8858,6 +8962,8 @@ def updates_job():
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-Command", PS_UPDATES],
                            capture_output=True, timeout=300, creationflags=NO_WINDOW)
+        if r.returncode != 0:
+            raise RuntimeError('Windows Update query unavailable. Update and restart status are unknown.')
         for ln in _decode_out(r.stdout).splitlines():
             p0 = ln.split("|", 1)
             if len(p0) == 2:
@@ -8868,9 +8974,8 @@ def updates_job():
     except Exception as e:
         send_message(rtl(f"[X] Update check failed: {e}"))
         return
-    lines = [rtl("<b>Windows updates</b>"), "",
-             rtl(" There is a pending restart" if info.get("REBOOT") == "True"
-                 else "[OK] There is no pending restart")]
+    lines = ["<b>Windows updates</b>", "",
+             'Restart required: ' + {'True':'Yes', 'False':'No'}.get(info.get('REBOOT'), 'Unknown')]
     if info.get("COUNT") is not None:
         lines.append(rtl(f" Pending updates: {info['COUNT']}"))
         for t in titles:
@@ -9044,7 +9149,7 @@ def speedtest_job(silent=False):
         send_message(
             f" <b>Internet speed</b>\n"
             f"DL  Download: {down:.1f} Mbps\n"
-            f"UL  Raise: {up:.1f} Mbps\n"
+            f"UL  Upload: {up:.1f} Mbps\n"
             f" Response: {ping_ms:.0f} ms"
         )
     except Exception as e:
@@ -9779,6 +9884,18 @@ def handle_command(text):
     cmd = parts[0].lower().split("@")[0]  # Ignore @Name_Bot in groups
     args = parts[1:]
 
+    if not args and cmd in {'/exec', '/kill', '/download', '/run', '/msg', '/logoff',
+                           '/adduser', '/deluser', '/disableuser', '/enableuser', '/renameuser',
+                           '/block', '/blocksubnet', '/unblock', '/ps', '/nettest', '/svc', '/restore'}:
+        desc, usage, _ = COMMAND_INFO[cmd]
+        text = f'<b>{esc(cmd)}</b>\n{esc(COMMAND_DOCS.get(cmd, {}).get("summary") or desc)}\n\n<pre>{esc(usage)}</pre>'
+        if cmd in {'/adduser','/deluser','/disableuser','/enableuser','/renameuser'} and not config.get('user_management'):
+            text += '\nUser management is disabled. Enable with /set users on.'
+        if cmd in {'/exec','/run'} and not config.get('exec_enabled'):
+            text += '\nCommand execution is disabled. Enable with /set exec on.'
+        send_message(text)
+        return
+
     # ---------- Monitoring ----------
     if cmd == "/view":
         send_message(format_report())
@@ -9793,8 +9910,7 @@ def handle_command(text):
         send_plain(traffic_report(days))
 
     elif cmd == "/top":
-        send_message("Operations are being analyzed...")
-        send_message(format_top_report())
+        send_top_report(args)
 
     elif cmd == "/chart":
         if not HAS_MATPLOTLIB:
@@ -10258,7 +10374,7 @@ def handle_command(text):
 
     elif cmd == "/blocklist":
         if not _blocked:
-            send_message(" What’s in any IP Currently blocked")
+            send_message("No IP addresses are currently blocked.")
         else:
             lines = ["<b>IP Blocked in firewall</b>\n"]
             for ip, ts in sorted(_blocked.items()):
@@ -10458,7 +10574,7 @@ def handle_command(text):
             else:
                 send_message(msg)
             return
-        send_message(rtl("Immunization screening is underway..."))
+        send_message("Checking RDP security settings...")
         threading.Thread(target=harden_report, args=(fix,), daemon=True).start()
 
     elif cmd == "/bigfiles":
@@ -10505,9 +10621,7 @@ def handle_command(text):
         getlog_job()
 
     elif cmd == "/test":
-        send_message(rtl(f"[OK] <b>Test message — I arrived!</b> "
-                         f"The hour {datetime.now():%H:%M:%S}\n"
-                         "Notifications channel is running 100%"))
+        send_message(f"<b>Test notification</b>\nSent at {datetime.now():%H:%M:%S}")
 
     elif cmd == "/updates":
         send_message(rtl("Checking for Windows updates (It may take a minute)..."))
@@ -10576,7 +10690,7 @@ def handle_command(text):
             subprocess.run(["shutdown", "/s", "/t", "30"],
                            capture_output=True, timeout=15, creationflags=NO_WINDOW)
         else:
-            msg = rtl("[WARN] Extinguishing stops everything!\n"
+            msg = rtl("[WARN] Shut down this server? All running programs will stop.\n"
                       "To confirm click Confirm Below\n"
                       "To cancel after confirmation: /cancel_restart")
             btns = confirm_buttons("/shutdown")
@@ -10782,7 +10896,7 @@ def handle_command(text):
         lockdown = lockdown_active()
         if not args or args[0] == "list":
             send_message(
-                f" <b>Palace RDP On IP Specific</b> (port {port})\n"
+                f"<b>RDP IP allowlist</b> · port {port}\n"
                 f"Status: {'Activated [OK]' if active else 'Inactive'}\n"
                 "The IP allowed: " + (", ".join(ips) if ips else "There is no")
                 + "\n\nAddition: /rdpallow add 1.2.3.4\n"
@@ -11371,7 +11485,7 @@ def handle_command(text):
         show_menu_page("root")
 
     elif cmd == "/help":
-        send_message(HELP_TEXT)
+        show_menu_page('root')
 
     elif cmd == "/docs":
         if args:
@@ -11509,7 +11623,9 @@ def telegram_loop():
                         continue
                     d = cb.get("data", "")
                     audit_record(f"{uid}: [button] {_scrub_secrets(d)[:60]}")
-                    if d.startswith("run:"):
+                    if d.startswith("pg:"):
+                        handle_message_page(cb)
+                    elif d.startswith("run:"):
                         queued = _enqueue_command(handle_run_callback, (d[4:],), uid)
                         tg_api("answerCallbackQuery", callback_query_id=cbid,
                                text="Queued for review" if queued else "Server busy - try again shortly")
