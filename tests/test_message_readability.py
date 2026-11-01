@@ -37,7 +37,7 @@ class MessageReadabilityTests(unittest.TestCase):
     def test_missing_disk_data_is_explicit(self):
         with mock.patch.object(rm, 'get_usage', return_value=(0, 0, 0, 12)), \
              mock.patch.object(rm, 'get_disks', return_value=[]):
-            self.assertIn('<pre>Disks: Unavailable</pre>', rm.format_report())
+            self.assertIn('Disks: Unavailable', rm.format_report())
 
     def test_network_speed_and_cumulative_volume_keep_distinct_units(self):
         with mock.patch.object(rm.psutil, 'net_io_counters', return_value=SimpleNamespace(bytes_recv=2*1024**3, bytes_sent=1024**3)):
@@ -66,8 +66,9 @@ class MessageReadabilityTests(unittest.TestCase):
 
     def test_report_blocks_escape_payload_without_nested_formatting(self):
         text = rm.report_card('Test', ('Resources', [('Process', '<worker>&'), ('CPU', '7.5%')]))
-        self.assertIn('<b>Resources</b>\n<pre>Process: &lt;worker&gt;&amp;\nCPU: 7.5%</pre>', text)
+        self.assertIn('<b>Test</b>\n<pre>Resources\nProcess: &lt;worker&gt;&amp;\nCPU: 7.5%</pre>', text)
         self.assertNotIn('<pre><b>', text)
+        self.assertEqual(text.count('<pre>'), 1)
 
     def test_process_blocks_use_bounded_names_and_small_memory_in_mb(self):
         process = ('A' * 80, 1234, 7.5, 6)

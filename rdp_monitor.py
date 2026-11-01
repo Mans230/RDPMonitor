@@ -2407,14 +2407,15 @@ def message_layout(text):
 
 def report_card(title, *sections):
     """Keep Telegram's shaded monospace blocks with clear, escaped labels."""
-    blocks = [f"<b>{esc(title)}</b>"]
+    blocks = []
     for heading, rows in sections:
-        lines = [f"<b>{esc(heading)}</b>"] if heading else []
+        lines = [str(heading)] if heading else []
         values = [f"{label}: {value}" for label, value in rows]
         if values:
-            lines.append("<pre>" + esc("\n".join(values)) + "</pre>")
+            lines.extend(values)
             blocks.append("\n".join(lines))
-    return "\n\n".join(blocks)
+    title = f"<b>{esc(title)}</b>"
+    return title + ("\n<pre>" + esc("\n\n".join(blocks)) + "</pre>" if blocks else "")
 
 
 def esc(text):
@@ -6109,8 +6110,7 @@ def format_rdp_report():
         lines.append("No user sessions found.")
     if ips:
         lines.append(f"\n<b>Connected IPs · port {int(config.get('rdp_port', 3389))}</b>")
-        for ip in ips:
-            lines.append(f"<pre>{esc(ip)}</pre>")
+        lines.append("<pre>" + esc("\n".join(str(ip) for ip in ips)) + "</pre>")
     return "\n".join(lines)
 
 
