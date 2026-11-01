@@ -1,7 +1,41 @@
 """Host network summaries. Connection counts are not process byte accounting."""
 import math
 import copy
+import os
 from datetime import datetime, timedelta
+
+
+def boot_identity():
+    """Use the immutable OS-start event, not a drifting wall-clock estimate.
+
+    Microsoft-Windows-Kernel-General event 12 records an OS startup. The BCD
+    boot-environment GUID identifies an installation, not a particular boot,
+    so it must not be used here. Missing/cleared logs use the conservative
+    timestamp fallback. Linux exposes a per-boot identifier directly.
+    """
+    import subprocess
+    import xml.etree.ElementTree as ET
+    try:
+        if os.name == "nt":
+            result = subprocess.run([
+                "wevtutil", "qe", "System",
+                "/q:*[System[Provider[@Name='Microsoft-Windows-Kernel-General'] and EventID=12]]",
+                "/c:1", "/rd:true", "/f:xml", "/uni:true"
+            ], capture_output=True, timeout=8, creationflags=0x08000000)
+            if result.returncode == 0 and result.stdout.strip():
+                event = ET.fromstring(result.stdout)
+                system = event.find(".//{*}System")
+                if system is not None:
+                    record = system.find("{*}EventRecordID")
+                    created = system.find("{*}TimeCreated")
+                    if record is not None and (record.text or "").isdigit() and created is not None and created.get("SystemTime"):
+                        return "windows-start:" + record.text + ":" + created.get("SystemTime")
+        elif os.path.isfile("/proc/sys/kernel/random/boot_id"):
+            with open("/proc/sys/kernel/random/boot_id") as stream:
+                return "linux:" + stream.read().strip()
+    except (OSError, ValueError, subprocess.SubprocessError, ET.ParseError):
+        pass
+    return None
 
 
 class TrafficLedger:
@@ -10,7 +44,7 @@ class TrafficLedger:
     Fresh boots/adapters establish a baseline; pre-observation bytes are never
     assigned to today. Existing aggregate history is retained and flagged.
     """
-    def __init__(self, saved, boot, now):
+    def __init__(self, saved, boot, now, boot_id=None):
         if not isinstance(saved, dict):
             raise ValueError("invalid traffic history")
         days = saved.get("days", saved)
@@ -23,6 +57,7 @@ class TrafficLedger:
                 raise ValueError("invalid traffic totals")
         self.days = {day: {"down": float(values["down"]), "up": float(values["up"])} for day, values in days.items()}
         self.boot = boot
+        self.boot_id = boot_id
         self.meta = copy.deepcopy(saved.get("measurement", {}))
         if not self.meta:
             self.meta = {"tracking_since": now, "legacy_history": bool(days), "reset_events": 0,
@@ -31,6 +66,8 @@ class TrafficLedger:
         # across processes. Exact float equality discards a valid saved baseline.
         saved_boot = saved.get("boot")
         same_boot = isinstance(saved_boot, (int, float)) and abs(saved_boot - boot) <= 5
+        if saved.get("boot_id") and boot_id:
+            same_boot = saved["boot_id"] == boot_id
         self.previous = copy.deepcopy(saved.get("last_nics")) if same_boot else None
         self.last_sample = saved.get("last_sample") if self.previous is not None else None
 
@@ -58,7 +95,7 @@ class TrafficLedger:
         return down, up
 
     def snapshot(self):
-        return copy.deepcopy({"days": self.days, "boot": self.boot, "last_nics": self.previous,
+        return copy.deepcopy({"days": self.days, "boot": self.boot, "boot_id": self.boot_id, "last_nics": self.previous,
                               "last_sample": self.last_sample, "measurement": self.meta})
 
 

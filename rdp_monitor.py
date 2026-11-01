@@ -8213,7 +8213,8 @@ def load_traffic():
                 data = json.load(f)
         else:
             data = {}
-        _traffic_ledger = TrafficLedger(data, psutil.boot_time(), time.time())
+        from bandwidth import boot_identity
+        _traffic_ledger = TrafficLedger(data, psutil.boot_time(), time.time(), boot_id=boot_identity())
         _traffic = _traffic_ledger.days
         _traffic_load_error = None
     except Exception as exc:

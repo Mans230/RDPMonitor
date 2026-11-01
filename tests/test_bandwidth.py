@@ -12,6 +12,31 @@ import rdp_monitor as rm
 
 
 class BandwidthAccountingTests(unittest.TestCase):
+    def test_kernel_boot_identity_survives_large_clock_estimate_drift(self):
+        ledger = TrafficLedger({}, 100, 1000, boot_id='boot-A')
+        ledger.observe({'eth': {'bytes_sent': 100, 'bytes_recv': 200}}, 1000)
+        resumed = TrafficLedger(ledger.snapshot(), 113.746, 1094, boot_id='boot-A')
+        self.assertEqual(resumed.observe({'eth': {'bytes_sent': 150, 'bytes_recv': 280}}, 1094), (80, 50))
+        rebooted = TrafficLedger(resumed.snapshot(), 114, 1100, boot_id='boot-B')
+        self.assertEqual(rebooted.observe({'eth': {'bytes_sent': 1000, 'bytes_recv': 2000}}, 1100), (0, 0))
+
+    def test_native_boot_identity_matches_a_separate_python_process(self):
+        import subprocess
+        import sys
+        from bandwidth import boot_identity
+        expected = boot_identity()
+        actual = subprocess.check_output([sys.executable, '-c', 'import json;from bandwidth import boot_identity;print(json.dumps(boot_identity()))'], text=True)
+        self.assertEqual(expected, json.loads(actual))
+
+    def test_windows_identity_comes_from_each_startup_event_not_the_bcd_entry(self):
+        from bandwidth import boot_identity
+        from types import SimpleNamespace
+        template='<Events><Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System><EventRecordID>{}</EventRecordID><TimeCreated SystemTime="2026-10-25T01:00:00Z"/></System></Event></Events>'
+        with mock.patch('bandwidth.os.name','nt'),mock.patch('subprocess.run',side_effect=[SimpleNamespace(returncode=0,stdout=template.format(10).encode()),SimpleNamespace(returncode=0,stdout=template.format(11).encode())]) as run:
+            first,second=boot_identity(),boot_identity()
+        self.assertNotEqual(first,second)
+        self.assertIn('Microsoft-Windows-Kernel-General',run.call_args.args[0][3])
+
     def test_fresh_baseline_never_attributes_boot_totals_to_today(self):
         ledger = TrafficLedger({}, 10, 1000)
         self.assertEqual(ledger.observe({'eth': {'bytes_sent': 50000, 'bytes_recv': 90000}}, 1000), (0, 0))
