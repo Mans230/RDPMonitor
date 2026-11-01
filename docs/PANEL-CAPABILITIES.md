@@ -59,7 +59,7 @@ assigning pre-observation totals to today. Long sample gaps crossing midnight ar
 flagged because daily allocation follows the sample date. Corrupt history is
 reported and preserved instead of overwritten with empty successful results.
 
-Windows boot identity uses the Kernel-General OS-start event rather than inferred solely from
+Windows boot identity uses the Kernel-General OS-start event rather than relying solely on
 `psutil.boot_time()`: the wall-clock estimate can drift by more than five seconds
 while the machine remains running. A stable boot ID preserves restart catch-up;
 a different ID establishes a new baseline. Unsupported systems and older saved

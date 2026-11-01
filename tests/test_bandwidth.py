@@ -28,6 +28,15 @@ class BandwidthAccountingTests(unittest.TestCase):
         actual = subprocess.check_output([sys.executable, '-c', 'import json;from bandwidth import boot_identity;print(json.dumps(boot_identity()))'], text=True)
         self.assertEqual(expected, json.loads(actual))
 
+    def test_windows_identity_comes_from_each_startup_event_not_the_bcd_entry(self):
+        from bandwidth import boot_identity
+        from types import SimpleNamespace
+        template='<Events><Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System><EventRecordID>{}</EventRecordID><TimeCreated SystemTime="2026-10-25T01:00:00Z"/></System></Event></Events>'
+        with mock.patch('bandwidth.os.name','nt'),mock.patch('subprocess.run',side_effect=[SimpleNamespace(returncode=0,stdout=template.format(10).encode()),SimpleNamespace(returncode=0,stdout=template.format(11).encode())]) as run:
+            first,second=boot_identity(),boot_identity()
+        self.assertNotEqual(first,second)
+        self.assertIn('Microsoft-Windows-Kernel-General',run.call_args.args[0][3])
+
     def test_fresh_baseline_never_attributes_boot_totals_to_today(self):
         ledger = TrafficLedger({}, 10, 1000)
         self.assertEqual(ledger.observe({'eth': {'bytes_sent': 50000, 'bytes_recv': 90000}}, 1000), (0, 0))
