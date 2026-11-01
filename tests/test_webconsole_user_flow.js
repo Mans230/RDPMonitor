@@ -430,3 +430,11 @@ test('suite update settings preserve drafts during polling and validate the inte
  assert.equal(fields.suiteUpdateHours.value,'12');context.saveSuiteUpdates();assert.equal(calls[0].args.hours,12);assert.equal(calls[0].args.enabled,false);
  fields.suiteUpdateHours.value='0';context.saveSuiteUpdates();assert.equal(calls.length,1);assert.ok(messages.length);
 });
+test('private update credential is masked and only clears after accepted saving',async()=>{
+ const fields={suiteUpdateCredential:{value:'fixture-private-token'}};let ok=false,calls=0;
+ const context=vm.createContext({$:id=>fields[id],confirm:()=>true,toast:()=>{},act:async()=>{calls++;return {ok,out:'saved'}}});
+ vm.runInContext(setupSource,context);context.loadSuiteUpdate=()=>{};
+ await context.saveSuiteUpdateCredential();assert.equal(fields.suiteUpdateCredential.value,'fixture-private-token');
+ ok=true;await context.saveSuiteUpdateCredential();assert.equal(fields.suiteUpdateCredential.value,'');assert.equal(calls,2);
+ assert.match(html,/id="suiteUpdateCredential" type="password"/);
+});

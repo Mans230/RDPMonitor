@@ -10,6 +10,7 @@ async function loadSuiteUpdate(){
     const response=await fetch('/api/suite-update'),data=await response.json();
     if(!response.ok)throw new Error(data.error||'Update status unavailable');
     $('suiteUpdateVersion').textContent='Installed: '+(data.current||'unknown').slice(0,12)+(data.state.available?' · Available: '+data.state.available.slice(0,12):'');
+    $('suiteUpdateCredentialStatus').textContent=data.credential_saved?'A GitHub credential is saved.':'No GitHub credential saved. Public repositories do not need one.';
     $('suiteUpdateStatus').textContent=(data.installed?'':'Updater task is not installed. Run the suite installer. ')+(data.state.phase||'not checked')+' · '+(data.state.message||'No check yet.')+(data.state.checked_at?' · Last check: '+new Date(data.state.checked_at*1000).toLocaleString():'');
     if(!suiteUpdateLoaded){$('suiteUpdateEnabled').value=String(data.settings.enabled);$('suiteUpdateHours').value=data.settings.interval_hours;suiteUpdateLoaded=true}
   }catch(error){$('suiteUpdateStatus').textContent=error.message+' · Refresh status to retry.'}
@@ -24,6 +25,13 @@ function saveSuiteUpdates(){
   const hours=Number($('suiteUpdateHours').value);
   if(!Number.isInteger(hours)||hours<1||hours>168){toast('Choose an interval from 1 to 168 hours.',true);return}
   return suiteUpdateAction('configure',{enabled:$('suiteUpdateEnabled').value==='true',hours});
+}
+async function saveSuiteUpdateCredential(remove=false){
+  const input=$('suiteUpdateCredential');
+  if(!remove&&!input.value.trim()){toast('Enter a GitHub read credential.',true);return}
+  if(!confirm(remove?'Remove the updater GitHub credential? Private release checks will stop working.':'Save this GitHub credential using Windows encryption?'))return;
+  const result=await act({action:'suite_update',op:'credential',value:remove?'':input.value.trim()},true);
+  if(result?.ok){input.value='';toast(result.out);loadSuiteUpdate()}
 }
 function setupAddSource(path){const paths=setupLines('setupSourcePaths');if(!paths.includes(path))paths.push(path);$('setupSourcePaths').value=paths.join('\n');toast('Added to the form. Save source paths to apply.')}
 async function loadSetupBrowse(path='',offset=0){

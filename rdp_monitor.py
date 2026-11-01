@@ -3258,6 +3258,11 @@ def _dispatch_panel(action, args):
             if op == "configure":
                 manager.configure(args.get("enabled"), args.get("hours", 24))
                 return True, "Automatic update settings saved."
+            if op == "credential":
+                if not isinstance(args.get("value"), str):
+                    return False, "A credential string is required."
+                manager.credential(args.get("value"))
+                return True, "Updater GitHub credential saved or removed."
             if op in {"check", "apply"}:
                 return True, manager.queue(op)
             return False, "Unknown update operation."

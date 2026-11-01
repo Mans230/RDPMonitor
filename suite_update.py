@@ -128,6 +128,7 @@ class Manager:
         version = read_json(self.root / ".production-version.json")
         return {"settings": settings, "state": state, "current": version.get("commit"),
                 "source": "https://github.com/" + REPO + "/releases", "installed": (self.home / "installed.json").exists(),
+                "credential_saved": (self.home / "github.json").exists(),
                 "next_check": (state.get("checked_at", 0) + settings["interval_hours"] * 3600) if settings["enabled"] else None}
 
     def configure(self, enabled, hours=24):
@@ -135,6 +136,22 @@ class Manager:
             raise ValueError("Use on/off and an interval of 1–168 hours.")
         self.prepare()
         atomic(self.home / "settings.json", {"enabled": enabled, "interval_hours": int(hours)})
+
+    def credential(self, value=None):
+        """Machine DPAPI plus private ACLs; never return a saved value to a UI."""
+        path = self.home / "github.json"
+        if value is not None:
+            self.prepare()
+            if value == "":path.unlink(missing_ok=True);return
+            if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_]{20,255}", value):
+                raise ValueError("Enter a valid GitHub credential without spaces.")
+            import rdp_monitor
+            atomic(path, {"token_enc": rdp_monitor.dpapi_protect(value, machine=True)})
+            return
+        saved = read_json(path)
+        if not saved:return None
+        import rdp_monitor
+        return rdp_monitor.dpapi_unprotect(saved["token_enc"])
 
     def queue(self, operation):
         if operation not in {"check", "apply"}:
@@ -164,21 +181,26 @@ class Manager:
         previous.update(phase=phase, message=message, updated=time.time(), **extra)
         atomic(self.home / "status.json", previous)
 
-    @staticmethod
-    def fetch(url, limit=MAX_ZIP):
+    def fetch(self, url, limit=MAX_ZIP, accept="application/vnd.github+json"):
         import requests
         hosts = {"api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}
         for _ in range(6):
             parsed = urlparse(url)
             if parsed.scheme != "https" or parsed.hostname not in hosts or parsed.username or parsed.password or parsed.port not in (None, 443):
                 raise ValueError("Update URL is outside the trusted HTTPS hosts.")
-            with requests.get(url, headers={"User-Agent": "RDPMonitor-Updater", "Accept": "application/vnd.github+json"},
+            headers = {"User-Agent": "RDPMonitor-Updater", "Accept": accept}
+            if parsed.hostname == "api.github.com" and parsed.path.lower().startswith("/repos/" + REPO.lower() + "/"):
+                token = self.credential()
+                if token:headers["Authorization"] = "Bearer " + token
+            with requests.get(url, headers=headers,
                               timeout=(15, 90), stream=True, allow_redirects=False) as response:
                 if response.status_code in (301, 302, 303, 307, 308):
                     url = response.headers.get("Location", "")
                     continue
                 if response.status_code == 404:
-                    raise LookupError("No published suite update is available yet.")
+                    raise LookupError("Release unavailable. A private repository needs a saved GitHub read credential.")
+                if response.status_code in (401, 403):
+                    raise ValueError("GitHub access rejected or rate limited. Check updater credential and repository access.")
                 response.raise_for_status()
                 chunks, size = [], 0
                 for block in response.iter_content(65536):
@@ -201,7 +223,11 @@ class Manager:
         expected = "https://github.com/" + REPO + "/releases/download/" + tag + "/" + ASSET
         if asset.get("browser_download_url", "").lower() != expected.lower() or not 0 < int(asset.get("size", 0)) <= MAX_ZIP:
             raise ValueError("Release asset URL or size is invalid.")
-        payload = self.fetch(asset["browser_download_url"])
+        asset_id = asset.get("id")
+        endpoint = API + "/releases/assets/" + str(asset_id)
+        if not isinstance(asset_id, int) or asset_id < 1 or asset.get("url", "").lower() != endpoint.lower():
+            raise ValueError("Release asset API identity is invalid.")
+        payload = self.fetch(endpoint, accept="application/octet-stream")
         if sha(payload) != asset["digest"].split(":", 1)[1]:
             raise ValueError("Release checksum mismatch; nothing was installed.")
         manifest, files = self.unpack(payload)
@@ -497,6 +523,7 @@ def main():
     if operation in {"on", "off"}:
         manager.configure(operation == "on", int(sys.argv[2]) if len(sys.argv)>2 else 24);return
     if operation in {"check", "apply"}:print(manager.queue(operation));return
+    if operation == "auth-stdin":manager.credential(sys.stdin.read().strip());return
     if operation == "--scheduled":
         manager.run(WindowsRuntime(manager.root));return
     raise ValueError("Use status, on, off, check or apply.")

@@ -36,6 +36,9 @@ jobs:
     needs: tests
     runs-on: windows-latest
     timeout-minutes: 10
+    concurrency:
+      group: suite-stable-release
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -50,6 +53,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
+          $Current=gh api ('repos/'+$env:GITHUB_REPOSITORY+'/git/ref/heads/main') --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify current main.' }
+          if ($Current -ne $env:GITHUB_SHA) { Write-Output 'Superseded main build; no release published.'; exit 0 }
           $Tag='suite-'+$env:GITHUB_RUN_NUMBER+'-'+$env:GITHUB_SHA.Substring(0,12)
           gh release create $Tag rdpmonitor-update.zip --target $env:GITHUB_SHA --title ('Suite '+$Tag) --notes 'Validated bot and panel update. Configuration, tokens, TLS certificates, backups and runtime history are excluded.' --latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

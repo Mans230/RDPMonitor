@@ -130,11 +130,11 @@ class SuiteUpdateTests(unittest.TestCase):
 
     def test_download_url_rejects_non_https_local_hosts_and_embedded_credentials(self):
         for url in ['http://github.com/a','https://127.0.0.1/a','https://evil.example/a','https://user:secret@github.com/a','https://github.com:8399/a']:
-            with self.subTest(url=url),self.assertRaises(ValueError):update.Manager.fetch(url)
+            with self.subTest(url=url),self.assertRaises(ValueError):self.manager.fetch(url)
 
     def test_release_asset_digest_tag_and_successful_ci_are_all_required(self):
         payload,manifest,_=package();tag='suite-2-'+manifest['commit'][:12]
-        release={'tag_name':tag,'assets':[{'name':update.ASSET,'digest':'sha256:'+update.sha(payload),'size':len(payload),'browser_download_url':'https://github.com/'+update.REPO+'/releases/download/'+tag+'/'+update.ASSET}]}
+        release={'tag_name':tag,'assets':[{'id':123,'url':update.API+'/releases/assets/123','name':update.ASSET,'digest':'sha256:'+update.sha(payload),'size':len(payload),'browser_download_url':'https://github.com/'+update.REPO+'/releases/download/'+tag+'/'+update.ASSET}]}
         replies=[json.dumps(release).encode(),payload,json.dumps({'object':{'type':'commit','sha':manifest['commit']}}).encode(),json.dumps({'workflow_runs':[{'head_sha':manifest['commit'],'head_branch':'main','conclusion':'success'}]}).encode()]
         with mock.patch.object(self.manager,'fetch',side_effect=replies):self.assertEqual(self.manager.release()[0],manifest)
         bad=json.loads(json.dumps(release));bad['assets'][0]['digest']='sha256:'+'0'*64
@@ -179,6 +179,27 @@ class SuiteUpdateTests(unittest.TestCase):
                 self.assertEqual(scheduler.run_full_backup({}),'busy')
             job.assert_not_called()
             self.assertEqual(scheduler.run_full_backup({}),'ok')
+
+    def test_saved_github_credential_is_machine_encrypted_and_not_in_status(self):
+        import rdp_monitor
+        token='github_pat_fixture_1234567890'
+        with mock.patch.object(rdp_monitor,'dpapi_protect',return_value='encrypted-fixture') as protect,mock.patch.object(rdp_monitor,'dpapi_unprotect',return_value=token):
+            self.manager.credential(token)
+            protect.assert_called_once_with(token,machine=True)
+            self.assertNotIn(token,(self.manager.home/'github.json').read_text())
+            self.assertNotIn(token,json.dumps(self.manager.status()))
+            self.assertTrue(self.manager.status()['credential_saved'])
+            self.assertEqual(self.manager.credential(),token)
+            self.manager.credential('');self.assertFalse(self.manager.status()['credential_saved'])
+
+    def test_github_credential_is_never_forwarded_to_download_redirects(self):
+        first=mock.MagicMock();first.status_code=302;first.headers={'Location':'https://release-assets.githubusercontent.com/fixture'}
+        second=mock.MagicMock();second.status_code=200;second.iter_content.return_value=[b'archive']
+        first.__enter__.return_value=first;second.__enter__.return_value=second
+        with mock.patch.object(self.manager,'credential',return_value='private-fixture-token'),mock.patch('requests.get',side_effect=[first,second]) as get:
+            self.assertEqual(self.manager.fetch(update.API+'/releases/assets/123',accept='application/octet-stream'),b'archive')
+        self.assertEqual(get.call_args_list[0].kwargs['headers']['Authorization'],'Bearer private-fixture-token')
+        self.assertNotIn('Authorization',get.call_args_list[1].kwargs['headers'])
 
 
 if __name__=='__main__':unittest.main()
