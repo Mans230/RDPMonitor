@@ -6,25 +6,34 @@ from datetime import datetime, timedelta
 
 
 def boot_identity():
-    """Read a kernel boot identifier independent of wall-clock estimates.
+    """Use the immutable OS-start event, not a drifting wall-clock estimate.
 
-    Windows SystemBootEnvironmentInformation (90) begins with BootIdentifier,
-    as defined by System Informer's phnt headers. Unsupported systems retain
-    the conservative boot-timestamp fallback.
+    Microsoft-Windows-Kernel-General event 12 records an OS startup. The BCD
+    boot-environment GUID identifies an installation, not a particular boot,
+    so it must not be used here. Missing/cleared logs use the conservative
+    timestamp fallback. Linux exposes a per-boot identifier directly.
     """
+    import subprocess
+    import xml.etree.ElementTree as ET
     try:
         if os.name == "nt":
-            import ctypes
-            query = ctypes.windll.ntdll.NtQuerySystemInformation
-            query.argtypes = [ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong)]
-            query.restype = ctypes.c_long
-            data = ctypes.create_string_buffer(32);length = ctypes.c_ulong()
-            if query(90, data, 32, ctypes.byref(length)) == 0 and length.value >= 16 and any(data.raw[:16]):
-                return "windows:" + data.raw[:16].hex()
+            result = subprocess.run([
+                "wevtutil", "qe", "System",
+                "/q:*[System[Provider[@Name='Microsoft-Windows-Kernel-General'] and EventID=12]]",
+                "/c:1", "/rd:true", "/f:xml", "/uni:true"
+            ], capture_output=True, timeout=8, creationflags=0x08000000)
+            if result.returncode == 0 and result.stdout.strip():
+                event = ET.fromstring(result.stdout)
+                system = event.find(".//{*}System")
+                if system is not None:
+                    record = system.find("{*}EventRecordID")
+                    created = system.find("{*}TimeCreated")
+                    if record is not None and (record.text or "").isdigit() and created is not None and created.get("SystemTime"):
+                        return "windows-start:" + record.text + ":" + created.get("SystemTime")
         elif os.path.isfile("/proc/sys/kernel/random/boot_id"):
             with open("/proc/sys/kernel/random/boot_id") as stream:
                 return "linux:" + stream.read().strip()
-    except (OSError, AttributeError):
+    except (OSError, ValueError, subprocess.SubprocessError, ET.ParseError):
         pass
     return None
 
