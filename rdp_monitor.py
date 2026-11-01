@@ -2338,8 +2338,7 @@ def _capture_add(text):
 def send_message(text):
     if _capture_add(text):
         return
-    text = _tag() + text
-    text = _fix_rtl(text)  # Unifying the direction of all Arabic lines in all tool messages
+    text = _tag() + message_layout(text)
     # Split long messages (Telegram limit 4096 distorted) - Otherwise the transmission fails silently
     chunks = []
     rest = text
@@ -2375,18 +2374,17 @@ _ARABIC_RE = re.compile(r"[\u0600-\u06FF]")
 
 
 def _fix_rtl(text):
-    """Central processor of direction: Every line in Arabic begins with a marker RTL
-    - It is prohibited to mix numbers and English with the Arabic position in Telegram
-    - Excludes blocks <pre> (Digital trend tables LTR)"""
-    parts = re.split(r"(<pre>.*?</pre>)", text, flags=re.DOTALL)
+    """Mark Arabic lines RTL and leave English LTR, preserving pre/code payloads."""
+    parts = re.split(r"(<(?:pre|code)\b[^>]*>.*?</(?:pre|code)>)", text, flags=re.DOTALL)
     out = []
     for part in parts:
-        if part.startswith("<pre>"):
+        if part.startswith(("<pre", "<code")):
             out.append(part)
             continue
         lines = []
         for ln in part.split("\n"):
-            if _ARABIC_RE.search(ln) and not ln.startswith(RLM):
+            ln = ln.lstrip(RLM)
+            if _ARABIC_RE.search(ln):
                 ln = RLM + ln
             lines.append(ln)
         out.append("\n".join(lines))
@@ -2394,8 +2392,28 @@ def _fix_rtl(text):
 
 
 def rtl(text):
-    """Forces direction RTL On the line - It is prohibited to mix numbers and English with Arabic"""
-    return RLM + text
+    """Use Arabic direction only on lines containing Arabic, preserving code."""
+    return _fix_rtl(text)
+
+
+def message_layout(text):
+    """Separate standalone HTML headings without altering command/code blocks."""
+    parts = re.split(r"(<(?:pre|code)\b[^>]*>.*?</(?:pre|code)>)", str(text), flags=re.DOTALL)
+    for i, part in enumerate(parts):
+        if not part.startswith(("<pre", "<code")):
+            parts[i] = re.sub(r"(?m)^([ \t]*<b>[^<\n]+</b>)[ \t]*\n(?!\n)", r"\1\n\n", part)
+    return _fix_rtl("".join(parts))
+
+
+def report_card(title, *sections):
+    """Mobile-friendly HTML: short sections with escaped labels and values."""
+    blocks = [f"<b>{esc(title)}</b>"]
+    for heading, rows in sections:
+        lines = [f"<b>{esc(heading)}</b>"] if heading else []
+        lines.extend(f"{esc(label)}: <b>{esc(value)}</b>" for label, value in rows)
+        if lines:
+            blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def esc(text):
@@ -2424,7 +2442,7 @@ def send_buttons(text, rows):
     if _capture_add(text):
         return
     plain = _strip_tags(text)
-    text = _tag() + _fix_rtl(text)
+    text = _tag() + message_layout(text)
     markup = {"inline_keyboard": [
         [{"text": t, "callback_data": d} for t, d in row] for row in rows]}
     for chat in _alert_targets():
@@ -2590,7 +2608,7 @@ def _mk_button(label, value):
 def send_url_buttons(text, rows):
     """Inline keyboard that can mix URL buttons and callback buttons."""
     plain = _strip_tags(text)
-    text = _tag() + _fix_rtl(text)
+    text = _tag() + message_layout(text)
     markup = {"inline_keyboard": [[_mk_button(t, v) for t, v in row] for row in rows]}
     for chat in _alert_targets():
         res = tg_api("sendMessage", chat_id=chat, text=text, parse_mode="HTML", reply_markup=markup)
@@ -3581,7 +3599,7 @@ def tg_send_tracked(text):
     if not targets:
         return None
     chat = targets[0]
-    res = tg_api("sendMessage", chat_id=chat, text=_tag() + _fix_rtl(text),
+    res = tg_api("sendMessage", chat_id=chat, text=_tag() + message_layout(text),
                  parse_mode="HTML")
     if not res.get("ok"):
         res = tg_api("sendMessage", chat_id=chat, text=_strip_tags(text))
@@ -3593,7 +3611,7 @@ def tg_edit_tracked(msg_id, text):
     if not targets or not msg_id:
         return
     tg_api("editMessageText", chat_id=targets[0], message_id=msg_id,
-           text=_tag() + _fix_rtl(text), parse_mode="HTML")
+           text=_tag() + message_layout(text), parse_mode="HTML")
 
 
 def _progress_bar(pct):
@@ -5621,7 +5639,7 @@ def handle_menu_callback(data):
 
 def send_photo(path, caption=None, *, cleanup=False):
     """Send a photo; True means the caller must retain it for queued retries."""
-    caption = _tag() + (caption or "")
+    caption = _tag() + message_layout(caption or "")
     queued = False
     for chat in _alert_targets():
         if not _send_file_once("photo", chat, path, caption):
@@ -5632,7 +5650,7 @@ def send_photo(path, caption=None, *, cleanup=False):
 
 def send_document(path, caption=None, *, cleanup=False):
     """Send a file to every target. Returns True if any target was queued for retry."""
-    caption = _tag() + (caption or "")
+    caption = _tag() + message_layout(caption or "")
     queued = False
     for chat in _alert_targets():
         if not _send_file_once("document", chat, path, caption):
@@ -5998,14 +6016,9 @@ def send_daily_report():
     traffic_line = ""
     rec = _traffic.get(datetime.now().strftime("%Y-%m-%d"))
     if rec:
-        traffic_line = (f"\n Data today: DL  {rec['down'] / 1024:.2f} GB "
-                        f"| UL  {rec['up'] / 1024:.2f} GB")
-    txt = (
-        f"<b>Daily report</b> - {datetime.now():%Y-%m-%d}\n"
-        f" Processor: Average {s['cpu_avg']:.0f}% / higher {s['cpu_max']:.0f}%\n"
-        f" rams: Average {s['ram_avg']:.0f}% / higher {s['ram_max']:.0f}%\n"
-        f" Number of measurements: {s['points']}" + traffic_line
-    )
+        traffic_line = (f"\n\n<b>Data today</b>\n↓ Downloaded: <b>{rec['down'] / 1024:.2f} GB</b>\n"
+                        f"↑ Uploaded: <b>{rec['up'] / 1024:.2f} GB</b>")
+    txt = format_usage_summary(f"Daily report · {datetime.now():%Y-%m-%d}", s) + traffic_line
     chart = make_chart(24)
     if chart:
         send_photo(chart, txt)
@@ -6023,82 +6036,70 @@ def send_weekly_report():
         extra = "\n\n" + logstats_summary()
     except Exception:
         extra = ""
-    send_message(
-        f"<b>Weekly report</b>\n"
-        f" Processor: Average {s['cpu_avg']:.0f}% / higher {s['cpu_max']:.0f}%\n"
-        f" rams: Average {s['ram_avg']:.0f}% / higher {s['ram_max']:.0f}%\n"
-        f" Number of measurements: {s['points']}" + extra
-    )
+    send_message(format_usage_summary("Weekly report", s) + extra)
 
 
 # ----------------------------- Text reports -----------------------------
 
+def format_usage_summary(title, stats):
+    return report_card(title,
+        ("CPU", [("Average", f"{stats['cpu_avg']:.1f}%"), ("Peak", f"{stats['cpu_max']:.1f}%")]),
+        ("RAM", [("Average", f"{stats['ram_avg']:.1f}%"), ("Peak", f"{stats['ram_max']:.1f}%")]),
+        (None, [("Samples", stats['points'])]))
+
+
 def format_uptime():
-    secs = int(time.time() - psutil.boot_time())
-    h, m = secs // 3600, (secs % 3600) // 60
-    return f"{h}h {m}m"
+    return format_duration(max(0, time.time() - psutil.boot_time()))
 
 
 def format_report():
     cpu, ram_pct, used_gb, total_gb = get_usage()
     disks = get_disks()
-    disk_line = ""
-    if disks:
-        dev, pct, free, _total = disks[0]
-        disk_line = f" disk {dev} : {pct:.0f}% (remaining {free:.0f} GB)\n"
-    return (
-        rtl("<b>Consumption report</b>") + "\n"
-        + rtl(f" Processor (CPU): <b>{cpu:.1f}%</b>") + "\n"
-        + rtl(f" rams (RAM): <b>{ram_pct:.1f}%</b>") + "\n"
-        + rtl(f"User: {used_gb:.2f} GB Who {total_gb:.2f} GB") + "\n"
-        + rtl(f" network: DL  {_net_speed['down']:.1f} | UL  {_net_speed['up']:.1f} Mbps") + "\n"
-        + rtl(disk_line.strip()) + "\n"
-        + rtl(f" Active users: {len(psutil.users())}") + "\n"
-        + rtl(f" Duration of operation: {format_uptime()}")
-    )
+    return report_card("Consumption report",
+        ("Resources", [("CPU", f"{cpu:.1f}%"), ("RAM", f"{ram_pct:.1f}%"),
+                       ("Memory used", f"{used_gb:.2f} / {total_gb:.2f} GB")]),
+        ("Network · current speed", [("↓ Download", f"{_net_speed['down']:.1f} Mbps"),
+                                     ("↑ Upload", f"{_net_speed['up']:.1f} Mbps")]),
+        ("Storage", [(str(dev), f"{pct:.0f}% used · {free:.0f} GB free")
+                     for dev, pct, free, _total in disks] or [("Disks", "Unavailable")]),
+        ("Activity", [("Active users", len(psutil.users())), ("Uptime", format_uptime())]))
 
 
 def format_net_report():
     c = psutil.net_io_counters()
-    return (
-        rtl("<b>Use the network</b>") + "\n"
-        + rtl(f"DL  Download now: <b>{_net_speed['down']:.2f} Mbps</b>") + "\n"
-        + rtl(f"UL  Upload now: <b>{_net_speed['up']:.2f} Mbps</b>") + "\n"
-        + rtl(" Since turning on the device:") + "\n"
-        + rtl(f"He arrived: {c.bytes_recv / 1024 ** 3:.2f} GB") + "\n"
-        + rtl(f"He came out: {c.bytes_sent / 1024 ** 3:.2f} GB")
-    )
+    return report_card("Network report",
+        ("Current speed", [("↓ Download", f"{_net_speed['down']:.2f} Mbps"),
+                           ("↑ Upload", f"{_net_speed['up']:.2f} Mbps")]),
+        ("Adapter totals · since boot or counter reset", [
+            ("↓ Downloaded", f"{c.bytes_recv / 1024 ** 3:.2f} GB"),
+            ("↑ Uploaded", f"{c.bytes_sent / 1024 ** 3:.2f} GB")]))
 
 
 def format_top_report():
     top_cpu, top_ram = get_top_processes(10)
-    lines = ["<b>Highest consuming processes</b>", "",
-             " <b>Depending on the processor:</b>", "<pre>"]
-    for i, (name, pid, cpu, mem) in enumerate(top_cpu, 1):
-        lines.append(esc(f"{i:2}. {name[:26]:26} {cpu:5.1f}% {mem:6.0f} MB"))
-    lines.append("</pre>\n <b>According to the rams:</b>\n<pre>")
-    for i, (name, pid, cpu, mem) in enumerate(top_ram, 1):
-        lines.append(esc(f"{i:2}. {name[:26]:26} {mem / 1024:5.2f} GB {cpu:5.1f}%"))
-    lines.append("</pre>")
-    return "\n".join(lines)
+    blocks = ["<b>Top processes</b>"]
+    for title, processes in [("By CPU", top_cpu), ("By memory", top_ram)]:
+        lines = [f"<b>{title}</b>"]
+        for i, (name, pid, cpu, mem) in enumerate(processes, 1):
+            lines.append(f"{i}. <b>{esc(name[:40])}</b> · PID {pid}\n"
+                         f"CPU {cpu:.1f}% · RAM {mem / 1024:.2f} GB")
+        blocks.append("\n".join(lines) if processes else f"<b>{title}</b>\nNo process data available.")
+    return "\n\n".join(blocks)
 
 
 def format_rdp_report():
     sess = get_rdp_sessions()
     ips = get_rdp_ips()
-    lines = ["<b>Sessions RDP Active</b>", ""]
+    lines = ["<b>RDP sessions</b>", ""]
     if sess:
-        lines.append("<pre>")
         for s in sess:
-            lines.append(esc(f"{s['user'][:20]:20} {s['state'][:10]:10} ID {s['id']}"))
-        lines.append("</pre>")
+            lines.append(f"<b>{esc(s['user'])}</b>\nState: {esc(s['state'])} · Session ID: {esc(s['id'])}\n")
     else:
-        lines.append("There are currently no user sessions registered")
+        lines.append("No user sessions found.")
     if ips:
-        lines.append(f"\n <b>IPs connected to a port RDP ({config.get('rdp_port', 3389)}):</b>\n<pre>")
+        lines.append(f"\n<b>Connected IPs · port {int(config.get('rdp_port', 3389))}</b>")
         for ip in ips:
-            lines.append(esc(ip))
-        lines.append("</pre>")
+            lines.append(f"• <code>{esc(ip)}</code>")
     return "\n".join(lines)
 
 
@@ -6202,14 +6203,14 @@ def format_users_report():
     if not users:
         return "[X] I couldn’t read the user list"
     users.sort(key=lambda u: (not u["admin"], u["name"].lower()))
-    lines = [rtl("<b>User accounts on the device / Local accounts</b>\n")]
+    lines = ["<b>Local user accounts</b>\n"]
     for u in users:
-        state = "" if u["enabled"] else " Disabled"
-        role = " Supervisor" if u["admin"] else ""
-        lines.append(
-            rtl(f"{role} <b>{esc(u['name'])}</b> — {state}") + "\n"
-            + rtl(f"    Password changed: {u['pwlastset']} · "
-                  f"It ends: {u['pwexpires']} · Last entry: {u['lastlogon']}"))
+        lines.append(report_card(u['name'], (None, [
+            ("Status", "Enabled" if u['enabled'] else "Disabled"),
+            ("Role", "Administrator" if u['admin'] else "Standard user"),
+            ("Password changed", u['pwlastset']), ("Password expires", u['pwexpires']),
+            ("Last logon", u['lastlogon'])])))
+        lines.append("")
     lines.append("\n" + rtl("Management: /adduser /disableuser /enableuser "
                             "/deluser /renameuser"))
     return "\n".join(lines)
@@ -6479,14 +6480,14 @@ def get_temps():
 
 def temps_report_message(temps):
     if not temps:
-        return (" I could not read the temperature on this device.\n"
-                "What is sensitive about it? WMI Available and what’s in it nvidia-smi (Card NVIDIA).\n"
-                "For full readings, pin it LibreHardwareMonitor Then try again.")
-    lines = ["<b>Temperature reading</b>"]
+        return ("<b>Temperatures unavailable</b>\n\n"
+                "No supported temperature sensors were found.\n"
+                "Install LibreHardwareMonitor for additional sensors, then try /temp again.")
+    rows = []
     for k, v in sorted(temps.items()):
-        mark = "" if v >= config.get("temp_threshold", 85) else ""
-        lines.append(f"{mark} {k}: {v:.0f}°C")
-    return "\n".join(lines)
+        mark = " · High" if v >= config.get("temp_threshold", 85) else ""
+        rows.append((k, f"{v:.0f}°C{mark}"))
+    return report_card("Temperatures", (None, rows))
 
 
 def temp_job():
@@ -8768,18 +8769,14 @@ def _sysinfo_job():
         return
     mem = psutil.virtual_memory()
     sw = psutil.swap_memory()
-    lines = [
-        rtl("<b>System information</b>"), "",
-        rtl(f" System: {esc(info.get('CAPTION', '?'))}"),
-        rtl(f" Version: {esc(info.get('VERSION', '?'))}"),
-        rtl(f" Processor: {esc(info.get('CPU', '?')[:50])}"),
-        rtl(f" rams: {mem.percent:.0f}% User from {info.get('RAM', '?')} GB"),
-        rtl(f" Migration file: {sw.percent:.0f}% User"),
-        rtl(f" Duration of operation: {format_uptime()}"),
-        rtl(" There is a pending restart (Updates)" if info.get("REBOOT") == "True"
-            else "[OK] There is no pending restart"),
-    ]
-    send_message("\n".join(lines))
+    send_message(report_card("System information",
+        ("Windows", [("System", info.get('CAPTION', 'Unavailable')),
+                     ("Version", info.get('VERSION', 'Unavailable')),
+                     ("Restart required", {"True": "Yes", "False": "No"}.get(info.get('REBOOT'), 'Unknown'))]),
+        ("Hardware", [("CPU", info.get('CPU', 'Unavailable')),
+                      ("RAM used", f"{mem.percent:.0f}% of {info.get('RAM', '?')} GB"),
+                      ("Page file used", f"{sw.percent:.0f}%")]),
+        (None, [("Uptime", format_uptime())])))
 
 
 def when_report(metric="cpu", threshold=80, hours=24):
@@ -8909,14 +8906,16 @@ LEVEL_INFO = {
 
 
 def format_duration(secs):
-    """Duration in seconds to read Arabic text"""
-    secs = int(secs)
-    h, m = secs // 3600, (secs % 3600) // 60
-    if h and m:
-        return f"{h} hour and {m} Minute"
-    if h:
-        return f"{h} hours"
-    return f"{m} Minute"
+    """Compact duration, including days for long-running servers."""
+    secs = max(0, int(secs))
+    days, secs = divmod(secs, 86400)
+    hours, secs = divmod(secs, 3600)
+    minutes = secs // 60
+    if days:
+        return f"{days}d {hours}h {minutes}m"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m" if minutes else "Under 1m"
 
 
 def parse_duration(text):
@@ -8945,14 +8944,17 @@ def send_usage_alert(cpu, ram_pct, used_gb, total_gb, level, spike=None):
     if alerts_muted() and level != "critical":
         return
     _icon, title = LEVEL_INFO[level]
-    body = (f"CPU   {cpu:5.1f}%\n"
-            f"RAM   {ram_pct:5.1f}%   ({used_gb:.1f}/{total_gb:.1f} GB)\n"
-            f"limits  warn {config['cpu_alert_threshold']}  "
-            f"danger {config['danger_threshold']}  "
-            f"critical {config['critical_threshold']}")
+    text = report_card(title.title(),
+        ("Current usage", [("CPU", f"{cpu:.1f}%"), ("RAM", f"{ram_pct:.1f}%"),
+                           ("Memory used", f"{used_gb:.2f} / {total_gb:.2f} GB")]),
+        ("Alert thresholds", [("CPU warning", f"{config['cpu_alert_threshold']}%"),
+                              ("RAM warning", f"{config['ram_alert_threshold']}%"),
+                              ("Danger", f"{config['danger_threshold']}%"),
+                              ("Critical", f"{config['critical_threshold']}%")]))
     if spike:
-        body += f"\nSudden spike: CPU {spike['cpu_delta']:+.0f}, RAM {spike['ram_delta']:+.0f} percentage points"
-    send_message(f"<b>{title}</b>\n<pre>{esc(body)}</pre>")
+        text += (f"\n\n<b>Sudden spike</b>\nCPU: {spike['cpu_delta']:+.0f} percentage points\n"
+                 f"RAM: {spike['ram_delta']:+.0f} percentage points")
+    send_message(text)
 
 
 def check_watched_processes():
@@ -9075,16 +9077,16 @@ def monitor_loop():
                 if notice["kind"] == "threshold":
                     send_usage_alert(cpu, ram_pct, used_gb, total_gb, notice["level"], notice["spike"])
                 elif notice["kind"] == "recovery":
-                    send_message("<b>Usage back to normal</b>\n<pre>"
-                                 + esc(f"CPU {cpu:.1f}%\nRAM {ram_pct:.1f}%\n"
-                                       f"Duration: {format_duration(notice['duration'])}\n"
-                                       f"Peak CPU: {notice['peak_cpu']:.1f}%\n"
-                                       f"Peak RAM: {notice['peak_ram']:.1f}%") + "</pre>")
+                    send_message(report_card("Usage back to normal",
+                        ("Current usage", [("CPU", f"{cpu:.1f}%"), ("RAM", f"{ram_pct:.1f}%")]),
+                        ("Incident summary", [("Duration", format_duration(notice['duration'])),
+                            ("Peak CPU", f"{notice['peak_cpu']:.1f}%"),
+                            ("Peak RAM", f"{notice['peak_ram']:.1f}%")])))
                 else:
                     spike = notice["spike"]
-                    send_buttons("<b>SUDDEN SPIKE</b>\n<pre>" + esc(
-                        f"CPU {cpu:.1f}% ({spike['cpu_delta']:+.0f} points)\n"
-                        f"RAM {ram_pct:.1f}% ({spike['ram_delta']:+.0f} points)") + "</pre>",
+                    send_buttons(report_card("Sudden usage spike", (None, [
+                        ("CPU", f"{cpu:.1f}% ({spike['cpu_delta']:+.0f} percentage points)"),
+                        ("RAM", f"{ram_pct:.1f}% ({spike['ram_delta']:+.0f} percentage points)")])),
                         [[("Review top processes", "cmd:/top")]])
 
             # --- Automatic restart (Check every minute) ---
