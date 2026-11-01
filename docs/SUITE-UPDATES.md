@@ -25,6 +25,15 @@ and every packaged file hash before replacing code. Older/divergent releases
 are refused. This trusts GitHub and repository maintainers; it is not a
 separate publisher-signature or offline verification scheme.
 
+Private repositories require a GitHub credential with Contents and Actions read
+access for this repository. Save/remove it in the owner-only update panel, or
+pipe it privately to `python suite_update.py auth-stdin`. It is stored with
+machine-scope Windows DPAPI under the Administrators/SYSTEM-only update folder;
+status APIs expose only whether it is saved. Tokens are sent only to this
+repository's GitHub API paths, never redirected to the asset CDN. Private assets
+download through the authenticated asset API. Do not paste credentials in chat
+or put them in command arguments. Public repositories need no credential.
+
 Packages exclude configuration, tokens, TLS keys/certificates, backups, rclone
 accounts, history, logs, tests and agent files. Paths, sizes, duplicate names,
 links and Python syntax are validated before extraction. Changed Python
