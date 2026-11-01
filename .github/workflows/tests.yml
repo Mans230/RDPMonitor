@@ -30,3 +30,26 @@ jobs:
         run: node --test tests/test_webconsole_user_flow.js
       - name: Verify dependency snapshot
         run: python -B scripts/lock_dependencies.py
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: tests
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.14'
+      - name: Package validated runtime code
+        run: python scripts/package_update.py rdpmonitor-update.zip $env:GITHUB_SHA $env:GITHUB_RUN_NUMBER
+      - name: Publish stable suite release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $Tag='suite-'+$env:GITHUB_RUN_NUMBER+'-'+$env:GITHUB_SHA.Substring(0,12)
+          gh release create $Tag rdpmonitor-update.zip --target $env:GITHUB_SHA --title ('Suite '+$Tag) --notes 'Validated bot and panel update. Configuration, tokens, TLS certificates, backups and runtime history are excluded.' --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

@@ -408,6 +408,26 @@ def _restic_job(cfg, tg, kind_bot, started, progress_cb, cancel_event):
 
 
 def run_full_backup(cfg, tg=None, manual=False, progress_cb=None, cancel_event=None):
+    # The updater and backup worker share a cross-process lease. Checking only
+    # status.json leaves a race between the check and stopping the worker.
+    import contextlib
+    import sys
+    from pathlib import Path
+    root = Path(backup_engine.TOOL_ROOT).parent
+    with contextlib.ExitStack() as stack:
+        home = root / "control" / "updates"
+        if home.is_dir():
+            if str(root) not in sys.path:sys.path.insert(0, str(root))
+            from suite_update import update_lock, BusyError
+            try:
+                stack.enter_context(update_lock(home / "activity.lock"))
+            except BusyError:
+                log("Suite update is in progress; backup deferred.", "WARN")
+                return "busy"
+        return _run_full_backup_unlocked(cfg, tg, manual, progress_cb, cancel_event)
+
+
+def _run_full_backup_unlocked(cfg, tg=None, manual=False, progress_cb=None, cancel_event=None):
     """Complete mission: pre-hook -> copy -> deliver -> verify -> Telegram -> post-hook -> ping.
 
     Returns a status string: "ok" | "partial" | "warn" | "error" | "cancelled".

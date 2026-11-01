@@ -11,7 +11,7 @@ CATEGORIES = {
     "cloud": ("Cloud & system images", ["cloud", "rclone", "image"]),
     "control": ("Device actions", ["screenshot", "exec", "kill", "run", "msg", "download", "restart", "shutdown", "cancel_restart", "svc"]),
     "diagnostics": ("Diagnostics & logs", ["diagnose", "logstats", "botlog", "exportlogs", "dumps", "bigfiles", "sysinfo", "startup", "updates"]),
-    "settings": ("Settings & alerts", ["set", "status", "mute", "clean", "test", "configbackup", "update"]),
+    "settings": ("Settings & alerts", ["set", "status", "mute", "clean", "test", "configbackup", "suiteupdate", "update"]),
     "panel": ("Web panel", ["panel", "panelstatus", "paneltoken", "panelremote"]),
     "docs": ("Help & navigation", ["docs", "help", "menu"]),
 }

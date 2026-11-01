@@ -553,6 +553,39 @@ def image_progress_line():
             f"- elapsed {format_duration(elapsed)}")
 
 
+def _image_update_guard(fn):
+    def guarded(*args, **kwargs):
+        from pathlib import Path
+        home = Path(BASE_DIR) / "control" / "updates"
+        if not home.is_dir():
+            return fn(*args, **kwargs)
+        from suite_update import update_lock, BusyError
+        lease = update_lock(home / "activity.lock")
+        try:
+            lease.__enter__()
+        except BusyError:
+            send_message("[X] An update or image operation is active. Retry after it finishes.")
+            return
+        try:
+            result = fn(*args, **kwargs)
+        except BaseException:
+            lease.__exit__(*sys.exc_info())
+            raise
+        def release_when_done():
+            try:
+                while _image_state.get("phase") in ("imaging", "uploading"):
+                    time.sleep(2)
+            finally:
+                lease.__exit__(None, None, None)
+        if _image_state.get("phase") in ("imaging", "uploading"):
+            threading.Thread(target=release_when_done, daemon=True).start()
+        else:
+            lease.__exit__(None, None, None)
+        return result
+    return guarded
+
+
+@_image_update_guard
 def image_start(remote=None):
     """Depicts the complete system VHDX And the system is working (Shadow Copy) He raises it later if he kicks it correctly"""
     if _image_state.get("phase") in ("imaging", "uploading"):
@@ -1097,6 +1130,7 @@ def image_list_text():
     return "\n".join(lines)
 
 
+@_image_update_guard
 def image_upload(args):
     """Upload an existing image (no new image is created)."""
     remote = config.get("rclone_remote")
@@ -3213,6 +3247,22 @@ def _panel_setup_service():
 
 
 def _dispatch_panel(action, args):
+    if action == "suite_update_get":
+        from suite_update import Manager
+        return True, Manager(BASE_DIR).status()
+    if action == "suite_update_action":
+        from suite_update import Manager
+        manager = Manager(BASE_DIR)
+        try:
+            op = args.get("op")
+            if op == "configure":
+                manager.configure(args.get("enabled"), args.get("hours", 24))
+                return True, "Automatic update settings saved."
+            if op in {"check", "apply"}:
+                return True, manager.queue(op)
+            return False, "Unknown update operation."
+        except (ValueError, RuntimeError, OSError) as exc:
+            return False, str(exc)
     if action == "setup_get":
         return True, _panel_setup_service().snapshot()
     if action == "setup_jobs":
@@ -3479,7 +3529,7 @@ def monitor_control_loop():
 
 def _panel_read_request(req):
     action, args = req.get("action"), req.get("args") or {}
-    return (action in {"users_list", "settings_get", "rdp_status", "traffic_get", "setup_get", "setup_jobs", "setup_browse"}
+    return (action in {"users_list", "settings_get", "rdp_status", "traffic_get", "setup_get", "setup_jobs", "setup_browse", "suite_update_get"}
             or action in {"trap", "automation"} and args.get("op") == "list")
 
 
@@ -4345,8 +4395,10 @@ COMMAND_INFO = {
                       "/configbackup", False),
     "/cancel_restart": ("Cancels a scheduled restart/shutdown inside the cancel window.",
                         "/cancel_restart", False),
-    "/update": ("Self-updates from the configured HTTPS URL and SHA-256 fingerprint.",
+    "/update": ("Legacy single-file updater; use /suiteupdate for the bot and panel together.",
                 "/update", True),
+    "/suiteupdate": ("Update the bot and web panel together from validated GitHub releases; configure automatic installation.",
+                     "/suiteupdate [status | check | now | on | off]", False),
     "/unblock": ("Removes a firewall block for an IP.", "/unblock <ip>", True),
     "/allow": ("Manage trusted Telegram user IDs allowed to control the device.",
                "/allow list | add <id> | del <id>", False),
@@ -4408,7 +4460,7 @@ PANEL_COVERAGE = {
     "/botlog": "diagnostics", "/diagnose": "diagnostics",
     "/logstats": "diagnostics", "/exportlogs": "diagnostics", "/dumps": "diagnostics",
     "/watch": "automation", "/keepalive": "automation", "/svcwatch": "automation",
-    "/trap": "sec", "/allow": "bot-only", "/update": "ctl",
+    "/trap": "sec", "/allow": "bot-only", "/update": "ctl", "/suiteupdate": "setup",
     "/configbackup": "diagnostics", "/cancel_restart": "ctl",
     "/nettest": "diagnostics", "/test": "ctl", "/noop": "bot-only",
     "/start": "bot-only", "/menu": "bot-only", "/help": "bot-only",
@@ -10138,6 +10190,36 @@ def handle_command(text):
                 send_message(msg)
     elif cmd == "/cancel_restart":
         cancel_restart()
+
+    elif cmd == "/suiteupdate":
+        from suite_update import Manager
+        manager = Manager(BASE_DIR)
+        mode = args[0].lower() if args else "status"
+        if mode == "status":
+            status = manager.status()
+            settings, state = status["settings"], status["state"]
+            send_buttons("<b>Bot + web panel updates</b>\n"
+                         + ("Automatic installation: on" if settings["enabled"] else "Automatic installation: off")
+                         + "\nCheck interval: " + str(settings["interval_hours"]) + " hours\n"
+                         + esc(state.get("message", "No check yet."))
+                         + "\nCurrent: " + esc((status.get("current") or "unknown")[:12]),
+                         [[("Check release", "run:/suiteupdate check"), ("Install latest", "run:/suiteupdate now")],
+                          [("Auto on", "run:/suiteupdate on"), ("Auto off", "run:/suiteupdate off")]])
+        elif mode in {"check", "now", "on", "off"}:
+            if mode != "check" and "confirm" not in [a.lower() for a in args]:
+                send_buttons("Change suite update settings or install the latest release? Installation restarts the bot and panel; settings are preserved.",
+                             confirm_buttons("/suiteupdate " + mode))
+                return
+            try:
+                if mode in {"on", "off"}:
+                    manager.configure(mode == "on")
+                    send_message("[OK] Automatic bot + panel updates " + mode + ". Check interval: 24 hours.")
+                else:
+                    send_message(manager.queue("apply" if mode == "now" else "check"))
+            except Exception as exc:
+                send_message("[X] " + esc(redact_log(str(exc))))
+        else:
+            send_message("Use /suiteupdate status | check | now | on | off")
 
     elif cmd == "/update":
         if "confirm" not in [a.lower() for a in args]:

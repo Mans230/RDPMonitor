@@ -132,6 +132,25 @@ class WebConsoleSecurityTests(unittest.TestCase):
                 _, _, prepared = self.request('POST','/api/action',{'action':'prepare','target':'setup_token'},headers)
                 self.assertEqual(self.request('POST','/api/action',{'action':'setup_token','nonce':prepared['nonce']},headers)[0],403)
 
+    def test_suite_updates_are_owner_only_and_bind_confirmation_to_settings(self):
+        from unittest import mock
+        self.assertEqual(self.request('GET','/api/suite-update')[0],401)
+        cookie,csrf=self.login();headers={'Cookie':cookie,'X-CSRF-Token':csrf}
+        body={'action':'suite_update','op':'configure','enabled':True,'hours':24}
+        with mock.patch.object(wc,'panel_request',return_value=(True,'saved')) as rpc:
+            self.assertEqual(self.request('POST','/api/action',body,headers)[0],400)
+            _,_,prepared=self.request('POST','/api/action',dict(body,action='prepare',target='suite_update'),headers)
+            self.assertEqual(self.request('POST','/api/action',dict(body,hours=1,nonce=prepared['nonce']),headers)[0],400)
+            rpc.assert_not_called()
+            _,_,prepared=self.request('POST','/api/action',dict(body,action='prepare',target='suite_update'),headers)
+            self.assertTrue(self.request('POST','/api/action',dict(body,nonce=prepared['nonce']),headers)[2]['ok'])
+            self.assertEqual(rpc.call_args.args[0],'suite_update_action')
+            sid=cookie.split('=',1)[1];wc._sessions[sid].update(actor='operator:test',credential_hash='a'*64)
+            with mock.patch.object(wc,'operator_records',return_value={'test':{'token_sha256':'a'*64}}):
+                self.assertEqual(self.request('GET','/api/suite-update',headers=headers)[0],403)
+                _,_,prepared=self.request('POST','/api/action',dict(body,action='prepare',target='suite_update'),headers)
+                self.assertEqual(self.request('POST','/api/action',dict(body,nonce=prepared['nonce']),headers)[0],403)
+
     def test_bandwidth_usage_requires_auth_and_preserves_monitor_failure(self):
         from unittest import mock
         self.assertEqual(self.request('GET', '/api/bandwidth/usage')[0], 401)

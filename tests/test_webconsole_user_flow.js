@@ -420,3 +420,13 @@ test('active imaging refreshes progress even after the launch job has completed'
  await context.pollSetupJobs();assert.equal(refreshed,1);
  vm.runInContext('setupImagesActive=false',context);await context.pollSetupJobs();assert.equal(refreshed,1);
 });
+test('suite update settings preserve drafts during polling and validate the interval',async()=>{
+ const fields=new Proxy({}, {get:(obj,key)=>obj[key]??={value:'',textContent:''}});const calls=[],messages=[];
+ const data={current:'a'.repeat(40),installed:true,settings:{enabled:true,interval_hours:24},state:{phase:'current',message:'Up to date'}};
+ const context=vm.createContext({$:id=>fields[id],fetch:async()=>({ok:true,json:async()=>data}),toast:m=>messages.push(m),Date});
+ vm.runInContext(setupSource,context);context.suiteUpdateAction=(op,args)=>calls.push({op,args});
+ await context.loadSuiteUpdate();assert.equal(fields.suiteUpdateHours.value,24);
+ fields.suiteUpdateHours.value='12';fields.suiteUpdateEnabled.value='false';await context.loadSuiteUpdate();
+ assert.equal(fields.suiteUpdateHours.value,'12');context.saveSuiteUpdates();assert.equal(calls[0].args.hours,12);assert.equal(calls[0].args.enabled,false);
+ fields.suiteUpdateHours.value='0';context.saveSuiteUpdates();assert.equal(calls.length,1);assert.ok(messages.length);
+});

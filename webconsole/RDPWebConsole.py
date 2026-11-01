@@ -1723,6 +1723,12 @@ class Handler(BaseHTTPRequestHandler):
             except RuntimeError as exc:
                 return self._json(503, {"error": str(exc)})
         if u.path == "/api/backup": return self._json(200, backup_info())
+        if u.path == "/api/suite-update":
+            _sid, session = self._session()
+            if session.get("actor") != "owner":
+                return self._json(403, {"error": "Suite updates require the owner login."})
+            ok, out = panel_request("suite_update_get", timeout=10)
+            return self._json(200 if ok else 503, out if ok else {"error": out})
         if u.path in ("/api/setup", "/api/setup/jobs", "/api/setup/browse"):
             _sid, session = self._session()
             if session.get("actor") != "owner":
@@ -1903,6 +1909,12 @@ class Handler(BaseHTTPRequestHandler):
                 if (not rec or rec["target"] != act or rec["expires"] < time.time()
                         or not hmac.compare_digest(rec.get("digest", ""), digest)):
                     return self._json(400, {"error": "fresh confirmation required"})
+            if act == "suite_update":
+                if sess.get("actor") != "owner":
+                    return self._json(403, {"error": "Suite updates require the owner login."})
+                args = {k: v for k, v in body.items() if k not in ("action", "nonce")}
+                ok, out = panel_request("suite_update_action", args, timeout=20)
+                return self._json(200, {"ok": ok, "out": out})
             if act in ("setup", "setup_token"):
                 if sess.get("actor") != "owner":
                     return self._json(403, {"error": "Setup requires the owner login."})

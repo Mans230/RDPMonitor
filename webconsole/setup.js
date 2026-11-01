@@ -3,6 +3,28 @@ let setupLoaded=false,setupBusy=false,setupJobsBusy=false,setupJobSignature='',s
 const setupFields={drive:[['client_id','OAuth client ID (optional)'],['client_secret','OAuth client secret (optional)','password']],onedrive:[['client_id','OAuth client ID (optional)'],['client_secret','OAuth client secret (optional)','password']],dropbox:[],s3:[['provider','S3 provider (AWS / Wasabi / Minio / Other)'],['access_key_id','Access key ID'],['secret_access_key','Secret access key','password'],['endpoint','Endpoint URL (optional)'],['region','Region (optional)']],b2:[['account','Application key ID'],['key','Application key','password']],sftp:[['host','Server hostname'],['user','Username'],['pass','Password','password'],['port','Port (optional)']],ftp:[['host','Server hostname'],['user','Username'],['pass','Password','password']],webdav:[['url','WebDAV URL'],['vendor','Vendor (other / nextcloud / owncloud)'],['user','Username'],['pass','Password','password']]};
 function setupLines(id){return $(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
 function setupJump(index){document.querySelectorAll('#tab-setup section')[index].scrollIntoView({behavior:'smooth',block:'start'})}
+let suiteUpdateLoaded=false,suiteUpdateBusy=false;
+async function loadSuiteUpdate(){
+  if(suiteUpdateBusy)return;suiteUpdateBusy=true;
+  try{
+    const response=await fetch('/api/suite-update'),data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Update status unavailable');
+    $('suiteUpdateVersion').textContent='Installed: '+(data.current||'unknown').slice(0,12)+(data.state.available?' · Available: '+data.state.available.slice(0,12):'');
+    $('suiteUpdateStatus').textContent=(data.installed?'':'Updater task is not installed. Run the suite installer. ')+(data.state.phase||'not checked')+' · '+(data.state.message||'No check yet.')+(data.state.checked_at?' · Last check: '+new Date(data.state.checked_at*1000).toLocaleString():'');
+    if(!suiteUpdateLoaded){$('suiteUpdateEnabled').value=String(data.settings.enabled);$('suiteUpdateHours').value=data.settings.interval_hours;suiteUpdateLoaded=true}
+  }catch(error){$('suiteUpdateStatus').textContent=error.message+' · Refresh status to retry.'}
+  finally{suiteUpdateBusy=false}
+}
+async function suiteUpdateAction(op,args={}){
+  if(!confirm(op==='apply'?'Install the latest validated release? The bot and panel restart. Failed health checks trigger rollback.':'Apply this update operation? Automatic installation can restart the bot and panel when a release is available.'))return;
+  const result=await act({action:'suite_update',op,...args},true);
+  if(result?.ok){toast(result.out);loadSuiteUpdate()}
+}
+function saveSuiteUpdates(){
+  const hours=Number($('suiteUpdateHours').value);
+  if(!Number.isInteger(hours)||hours<1||hours>168){toast('Choose an interval from 1 to 168 hours.',true);return}
+  return suiteUpdateAction('configure',{enabled:$('suiteUpdateEnabled').value==='true',hours});
+}
 function setupAddSource(path){const paths=setupLines('setupSourcePaths');if(!paths.includes(path))paths.push(path);$('setupSourcePaths').value=paths.join('\n');toast('Added to the form. Save source paths to apply.')}
 async function loadSetupBrowse(path='',offset=0){
   const root=$('setupBrowser');
