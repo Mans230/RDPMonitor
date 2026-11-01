@@ -39,6 +39,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 if ($Remove) {
+    & (Join-Path $PSScriptRoot 'install_updates.ps1') -Remove
     Remove-SuiteTasks
     Write-Output 'RDP Suite scheduled tasks removed. Configuration and data were preserved.'
     exit 0
@@ -98,3 +99,4 @@ catch { Write-Output ('Registered RDPSuite, but it could not start now: ' + $_.E
 try { Start-ScheduledTask -TaskName 'RDPSuiteBackup' -ErrorAction Stop }
 catch { Write-Output ('Registered RDPSuiteBackup, but it could not start now: ' + $_.Exception.Message) }
 Write-Output 'RDP Suite installed: startup monitor/panel and isolated SYSTEM backup worker. No Windows logon is required.'
+& (Join-Path $PSScriptRoot 'install_updates.ps1') -Python $Python

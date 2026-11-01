@@ -4,7 +4,7 @@ CONFIRMED_ACTIONS = frozenset({
     "service", "run_command", "start_program", "screenshot", "backup_now", "backup_gui",
     "restore", "drill", "rdp", "settings_set", "block_subnet", "set_rdp_port", "mute",
     "trap", "cancel_restart", "automation", "update_now", "exportlogs", "send_file",
-    "block_ip", "unblock_ip", "test_alert", "setup", "setup_token",
+    "block_ip", "unblock_ip", "test_alert", "setup", "setup_token", "suite_update",
 })
 
 

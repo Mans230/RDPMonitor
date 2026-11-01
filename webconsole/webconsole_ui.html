@@ -399,7 +399,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
   <!-- ============ BACKUP ============ -->
   <div id="tab-setup" style="display:none">
     <div class="setup-intro"><p class="mut">Configure this server using the same settings as the bot. Changes require the owner login and confirmation.</p><button class="btn" onclick="loadSetup(true)">Refresh saved settings</button></div>
-    <div class="setup-controls" id="setupJump"><button class="btn" onclick="setupJump(0)">Cloud accounts</button><button class="btn" onclick="setupJump(1)">Destinations</button><button class="btn" onclick="setupJump(2)">Backup setup</button><button class="btn" onclick="setupJump(3)">System images</button><button class="btn" onclick="setupJump(4)">Panel access</button></div>
+    <div class="setup-controls" id="setupJump"><button class="btn" onclick="setupJump(0)">Cloud accounts</button><button class="btn" onclick="setupJump(1)">Destinations</button><button class="btn" onclick="setupJump(2)">Backup setup</button><button class="btn" onclick="setupJump(3)">System images</button><button class="btn" onclick="setupJump(4)">Panel access</button><button class="btn" onclick="setupJump(5)">Updates</button></div>
     <div id="setupError" role="alert"></div>
     <div class="card setup-jobs"><h3>Operations</h3><div id="setupJobs" aria-live="polite">No operations in this session.</div></div>
     <div class="grid g2 setup-grid">
@@ -430,6 +430,14 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
       <section class="card setup-wide"><h3>Panel access</h3><p id="setupRemoteStatus" class="mut">Loading…</p><p class="mut">Changing access restarts the panel and ends this session. Local mode opens inside RDP at http://127.0.0.1:8399/. Remote mode uses HTTPS and the login token. The generated certificate may show a browser warning; the provider firewall must also permit this port.</p>
         <form onsubmit="event.preventDefault();setupRemote()"><label>Access mode<select id="setupAccessMode"><option value="local">Local server only</option><option value="restricted">HTTPS · selected IPs</option><option value="public">HTTPS · any IPv4 address</option></select></label><label>Allowed IPs or CIDRs, one per line<textarea id="setupAllowedIps" rows="2" placeholder="203.0.113.10/32"></textarea></label><button class="btn" type="submit">Apply access settings</button></form>
         <details ontoggle="if(!this.open)$('setupLoginToken').textContent='' "><summary>Login token</summary><button class="btn" onclick="setupRevealToken()">Reveal owner token</button><code id="setupLoginToken" style="overflow-wrap:anywhere"></code><p class="mut">Anyone with this token can control the panel. It is hidden automatically after one minute.</p></details>
+      </section>
+      <section class="card setup-wide" id="suiteUpdateSection"><h3>Bot &amp; web panel updates</h3>
+        <p class="mut">Install validated releases from Mans230/RDPMonitor. Updates preserve configuration and restart the bot and panel. Active backups and system images postpone installation. A dependency change requires manual installation.</p>
+        <p id="suiteUpdateVersion" class="mut">Loading current version...</p>
+        <p id="suiteUpdateStatus" role="status">No check yet.</p>
+        <div class="setup-controls"><label>Automatic installation<select id="suiteUpdateEnabled"><option value="false">Off</option><option value="true">On</option></select></label><label>Check interval (hours)<input id="suiteUpdateHours" type="number" min="1" max="168" value="24"></label><button class="btn" onclick="saveSuiteUpdates()">Save update settings</button></div>
+        <div class="setup-controls"><button class="btn" onclick="suiteUpdateAction('check')">Check release</button><button class="btn" onclick="suiteUpdateAction('apply')">Install latest release</button><button class="btn" onclick="loadSuiteUpdate()">Refresh status</button><a href="https://github.com/Mans230/RDPMonitor/releases" target="_blank" rel="noopener noreferrer">Release history</a></div>
+        <p class="mut">Automatic installation is off on new installations until the owner enables it. Failed health checks restore the previous code and settings. Checks use the hourly Windows task; no additional application is needed.</p>
       </section>
     </div>
   </div>
@@ -1020,7 +1028,7 @@ function activateTab(t){
   if(t.dataset.t=="rdpsec")loadRdp();
   if(t.dataset.t=="users")loadUsers();
   if(t.dataset.t=="settings")loadSettings();
-  if(t.dataset.t=="setup")loadSetup();
+  if(t.dataset.t=="setup"){loadSetup();loadSuiteUpdate()}
   if(t.dataset.t=="automation")loadAutomation();
   if(t.dataset.t=="diagnostics")loadDiag("diagnose");
   if(t.dataset.t=="docs")loadDocs();
@@ -1303,7 +1311,7 @@ function autoAdd(which){
 }
 function autoDel(which,encName){act({action:"automation",list:which,op:"del",name:decodeURIComponent(encName)}).then(()=>loadAutomation())}
 function sendTest(){act({action:"test_alert"})}
-function updateNow(){if(confirm("Start the software self-update now? The monitor restarts when it finishes."))act({action:"update_now",confirm:true})}
+function updateNow(){goTab('setup');$('suiteUpdateSection').scrollIntoView({behavior:'smooth',block:'start'})}
 function exportLogs(){act({action:"exportlogs",scope:"all"}).then(j=>{if(j&&j.ok)toast("Export queued to Telegram")})}
 function sendFileToChat(){const p=$("sendFilePath").value.trim();if(!p)return;act({action:"send_file",path:p}).then(j=>{if(j&&j.ok)toast("File queued to Telegram")})}
 
@@ -1453,7 +1461,7 @@ function renderBandwidthConnections(){
 }
 
 /* ---------- actions ---------- */
-const CONFIRMED_ACTIONS=new Set(["user","reboot","shutdown","kill","kill_app","clean_temp","msg","logoff","service","run_command","start_program","screenshot","backup_now","backup_gui","restore","drill","rdp","settings_set","block_subnet","set_rdp_port","mute","trap","cancel_restart","automation","update_now","exportlogs","send_file","block_ip","unblock_ip","test_alert","setup","setup_token"]);
+const CONFIRMED_ACTIONS=new Set(["user","reboot","shutdown","kill","kill_app","clean_temp","msg","logoff","service","run_command","start_program","screenshot","backup_now","backup_gui","restore","drill","rdp","settings_set","block_subnet","set_rdp_port","mute","trap","cancel_restart","automation","update_now","exportlogs","send_file","block_ip","unblock_ip","test_alert","setup","setup_token","suite_update"]);
 function requiresActionConfirmation(body){
   if(!CONFIRMED_ACTIONS.has(body.action))return false;
   if(body.action==="service"&&(body.mode||"status")==="status")return false;
@@ -1639,7 +1647,7 @@ async function loadSec(){
 function showLogin(msg){
   const title=$("loginTitle");if(title?.tagName==='H2')title.outerHTML='<h1 id="loginTitle">RDPMonitor</h1>';
   appTimers.forEach(clearInterval);appTimers=[];started=false;
-  if(typeof setupLoaded!=="undefined"){setupLoaded=false;$("setupLoginToken").textContent="";document.querySelectorAll("#tab-setup input,#tab-setup textarea").forEach(i=>i.value="")}
+  if(typeof setupLoaded!=="undefined"){setupLoaded=false;suiteUpdateLoaded=false;$("setupLoginToken").textContent="";document.querySelectorAll("#tab-setup input,#tab-setup textarea").forEach(i=>i.value="")}
   if($("passwordDialog")?.open)$("passwordDialog").close();
   $("app").style.display="none";$("loginBg").style.display="grid";
   $("loginErr").textContent=msg||"";CSRF="";
@@ -1651,6 +1659,7 @@ function startApp(){
   const selectedTab=document.querySelector('.tab.on');
   if(selectedTab)activateTab(selectedTab);
   appTimers.push(setInterval(pollSetupJobs,3000));
+  appTimers.push(setInterval(()=>{if(!$("tab-setup").style.display)loadSuiteUpdate()},10000));
   appTimers.push(setInterval(()=>{if(!$("tab-sec").style.display)loadSec()},10000));
   appTimers.push(setInterval(()=>{if(!$("tab-backup").style.display)loadBackup()},5000));
   loadDay();appTimers.push(setInterval(loadDay,120000));
