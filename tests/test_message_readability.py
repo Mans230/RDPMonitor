@@ -37,7 +37,7 @@ class MessageReadabilityTests(unittest.TestCase):
     def test_missing_disk_data_is_explicit(self):
         with mock.patch.object(rm, 'get_usage', return_value=(0, 0, 0, 12)), \
              mock.patch.object(rm, 'get_disks', return_value=[]):
-            self.assertIn('Disks: <b>Unavailable</b>', rm.format_report())
+            self.assertIn('Disks: Unavailable', rm.format_report())
 
     def test_network_speed_and_cumulative_volume_keep_distinct_units(self):
         with mock.patch.object(rm.psutil, 'net_io_counters', return_value=SimpleNamespace(bytes_recv=2*1024**3, bytes_sent=1024**3)):
@@ -52,9 +52,9 @@ class MessageReadabilityTests(unittest.TestCase):
              mock.patch.object(rm, 'send_message') as send:
             rm.send_usage_alert(75, 40, 4.8, 12, 'warning')
         text = send.call_args.args[0]
-        self.assertIn('CPU warning: <b>70%</b>', text)
-        self.assertIn('RAM warning: <b>80%</b>', text)
-        self.assertNotIn('<pre>', text)
+        self.assertIn('CPU warning: 70%', text)
+        self.assertIn('RAM warning: 80%', text)
+        self.assertIn('<pre>', text)
 
     def test_process_cards_retain_pid_and_escape_process_names(self):
         with mock.patch.object(rm, 'get_top_processes', return_value=([('<worker>', 123, 7.5, 1024)], [])):
@@ -62,7 +62,23 @@ class MessageReadabilityTests(unittest.TestCase):
         self.assertIn('&lt;worker&gt;', text)
         self.assertIn('PID 123', text)
         self.assertIn('No process data available.', text)
-        self.assertNotIn('<pre>', text)
+        self.assertIn('<pre>CPU · RAM · PID', text)
+
+    def test_report_blocks_escape_payload_without_nested_formatting(self):
+        text = rm.report_card('Test', ('Resources', [('Process', '<worker>&'), ('CPU', '7.5%')]))
+        self.assertIn('<b>Test</b>\n<pre>Resources\nProcess: &lt;worker&gt;&amp;\nCPU: 7.5%</pre>', text)
+        self.assertNotIn('<pre><b>', text)
+        self.assertEqual(text.count('<pre>'), 1)
+
+    def test_process_blocks_use_bounded_names_and_small_memory_in_mb(self):
+        process = ('A' * 80, 1234, 7.5, 6)
+        with mock.patch.object(rm, 'get_top_processes', return_value=([process], [process])):
+            text = rm.format_top_report()
+        self.assertEqual(text.count('<pre>'), 2)
+        self.assertIn('6 MB', text)
+        self.assertNotIn('0.01 GB', text)
+        self.assertNotIn('A' * 29, text)
+        self.assertIn('PID 1234', text)
 
     def test_long_uptime_and_short_durations(self):
         self.assertEqual(rm.format_duration((148*60+53)*60), '6d 4h 53m')
