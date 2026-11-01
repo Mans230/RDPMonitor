@@ -2406,12 +2406,13 @@ def message_layout(text):
 
 
 def report_card(title, *sections):
-    """Mobile-friendly HTML: short sections with escaped labels and values."""
+    """Keep Telegram's shaded monospace blocks with clear, escaped labels."""
     blocks = [f"<b>{esc(title)}</b>"]
     for heading, rows in sections:
         lines = [f"<b>{esc(heading)}</b>"] if heading else []
-        lines.extend(f"{esc(label)}: <b>{esc(value)}</b>" for label, value in rows)
-        if lines:
+        values = [f"{label}: {value}" for label, value in rows]
+        if values:
+            lines.append("<pre>" + esc("\n".join(values)) + "</pre>")
             blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
@@ -6080,10 +6081,19 @@ def format_top_report():
     blocks = ["<b>Top processes</b>"]
     for title, processes in [("By CPU", top_cpu), ("By memory", top_ram)]:
         lines = [f"<b>{title}</b>"]
+        entries = []
         for i, (name, pid, cpu, mem) in enumerate(processes, 1):
-            lines.append(f"{i}. <b>{esc(name[:40])}</b> · PID {pid}\n"
-                         f"CPU {cpu:.1f}% · RAM {mem / 1024:.2f} GB")
-        blocks.append("\n".join(lines) if processes else f"<b>{title}</b>\nNo process data available.")
+            display = name if len(name) <= 28 else name[:27] + '…'
+            memory = f"{mem:.0f} MB" if mem < 1024 else f"{mem / 1024:.2f} GB"
+            values = (f"{cpu:.1f}% · {memory} · PID {pid}" if title == "By CPU"
+                      else f"{memory} · {cpu:.1f}% · PID {pid}")
+            entries.append(f"{i}. {display}\n   {values}")
+        if entries:
+            legend = "CPU · RAM · PID" if title == "By CPU" else "RAM · CPU · PID"
+            lines.append("<pre>" + esc(legend + '\n\n' + '\n'.join(entries)) + "</pre>")
+        else:
+            lines.append("No process data available.")
+        blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
 
@@ -6093,13 +6103,14 @@ def format_rdp_report():
     lines = ["<b>RDP sessions</b>", ""]
     if sess:
         for s in sess:
-            lines.append(f"<b>{esc(s['user'])}</b>\nState: {esc(s['state'])} · Session ID: {esc(s['id'])}\n")
+            lines.append(report_card(s['user'], (None, [("State", s['state']), ("Session ID", s['id'])])))
+            lines.append("")
     else:
         lines.append("No user sessions found.")
     if ips:
         lines.append(f"\n<b>Connected IPs · port {int(config.get('rdp_port', 3389))}</b>")
         for ip in ips:
-            lines.append(f"• <code>{esc(ip)}</code>")
+            lines.append(f"<pre>{esc(ip)}</pre>")
     return "\n".join(lines)
 
 
