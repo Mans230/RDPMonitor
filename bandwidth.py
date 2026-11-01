@@ -1,7 +1,32 @@
 """Host network summaries. Connection counts are not process byte accounting."""
 import math
 import copy
+import os
 from datetime import datetime, timedelta
+
+
+def boot_identity():
+    """Read a kernel boot identifier independent of wall-clock estimates.
+
+    Windows SystemBootEnvironmentInformation (90) begins with BootIdentifier,
+    as defined by System Informer's phnt headers. Unsupported systems retain
+    the conservative boot-timestamp fallback.
+    """
+    try:
+        if os.name == "nt":
+            import ctypes
+            query = ctypes.windll.ntdll.NtQuerySystemInformation
+            query.argtypes = [ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong)]
+            query.restype = ctypes.c_long
+            data = ctypes.create_string_buffer(32);length = ctypes.c_ulong()
+            if query(90, data, 32, ctypes.byref(length)) == 0 and length.value >= 16 and any(data.raw[:16]):
+                return "windows:" + data.raw[:16].hex()
+        elif os.path.isfile("/proc/sys/kernel/random/boot_id"):
+            with open("/proc/sys/kernel/random/boot_id") as stream:
+                return "linux:" + stream.read().strip()
+    except (OSError, AttributeError):
+        pass
+    return None
 
 
 class TrafficLedger:
@@ -10,7 +35,7 @@ class TrafficLedger:
     Fresh boots/adapters establish a baseline; pre-observation bytes are never
     assigned to today. Existing aggregate history is retained and flagged.
     """
-    def __init__(self, saved, boot, now):
+    def __init__(self, saved, boot, now, boot_id=None):
         if not isinstance(saved, dict):
             raise ValueError("invalid traffic history")
         days = saved.get("days", saved)
@@ -23,6 +48,7 @@ class TrafficLedger:
                 raise ValueError("invalid traffic totals")
         self.days = {day: {"down": float(values["down"]), "up": float(values["up"])} for day, values in days.items()}
         self.boot = boot
+        self.boot_id = boot_id
         self.meta = copy.deepcopy(saved.get("measurement", {}))
         if not self.meta:
             self.meta = {"tracking_since": now, "legacy_history": bool(days), "reset_events": 0,
@@ -31,6 +57,8 @@ class TrafficLedger:
         # across processes. Exact float equality discards a valid saved baseline.
         saved_boot = saved.get("boot")
         same_boot = isinstance(saved_boot, (int, float)) and abs(saved_boot - boot) <= 5
+        if saved.get("boot_id") and boot_id:
+            same_boot = saved["boot_id"] == boot_id
         self.previous = copy.deepcopy(saved.get("last_nics")) if same_boot else None
         self.last_sample = saved.get("last_sample") if self.previous is not None else None
 
@@ -58,7 +86,7 @@ class TrafficLedger:
         return down, up
 
     def snapshot(self):
-        return copy.deepcopy({"days": self.days, "boot": self.boot, "last_nics": self.previous,
+        return copy.deepcopy({"days": self.days, "boot": self.boot, "boot_id": self.boot_id, "last_nics": self.previous,
                               "last_sample": self.last_sample, "measurement": self.meta})
 
 
