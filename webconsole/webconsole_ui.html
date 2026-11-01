@@ -433,9 +433,9 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
       </section>
       <section class="card setup-wide" id="suiteUpdateSection"><h3>Bot &amp; web panel updates</h3>
         <p class="mut">Install validated releases from Mans230/RDPMonitor. Updates preserve configuration and restart the bot and panel. Active backups and system images postpone installation. A dependency change requires manual installation.</p>
-        <p id="suiteUpdateVersion" class="mut">Loading current version?</p>
+        <p id="suiteUpdateVersion" class="mut">Loading current version...</p>
         <p id="suiteUpdateStatus" role="status">No check yet.</p>
-        <div class="setup-controls"><label>Automatic installation<select id="suiteUpdateEnabled"><option value="false">Off</option><option value="true">On</option></select></label><label>Check interval ? hours<input id="suiteUpdateHours" type="number" min="1" max="168" value="24"></label><button class="btn" onclick="saveSuiteUpdates()">Save update settings</button></div>
+        <div class="setup-controls"><label>Automatic installation<select id="suiteUpdateEnabled"><option value="false">Off</option><option value="true">On</option></select></label><label>Check interval (hours)<input id="suiteUpdateHours" type="number" min="1" max="168" value="24"></label><button class="btn" onclick="saveSuiteUpdates()">Save update settings</button></div>
         <div class="setup-controls"><button class="btn" onclick="suiteUpdateAction('check')">Check release</button><button class="btn" onclick="suiteUpdateAction('apply')">Install latest release</button><button class="btn" onclick="loadSuiteUpdate()">Refresh status</button><a href="https://github.com/Mans230/RDPMonitor/releases" target="_blank" rel="noopener noreferrer">Release history</a></div>
         <p class="mut">Automatic installation is off on new installations until the owner enables it. Failed health checks restore the previous code and settings. Checks use the hourly Windows task; no additional application is needed.</p>
       </section>
