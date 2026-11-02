@@ -38,8 +38,11 @@ Packages exclude configuration, tokens, TLS keys/certificates, backups, rclone
 accounts, history, logs, tests and agent files. Paths, sizes, duplicate names,
 links and Python syntax are validated before extraction. Changed Python
 dependencies require a manual installation; pip is never run automatically.
-The legacy `/update` and `update_url` mechanism remains a separate single-file
-monitor updater. Use `/suiteupdate` for the unified release workflow.
+`/update` installs this unified bot/panel release after confirmation, as does
+the compatible `update_now` panel action. Neither needs `update_url` or
+`update_hash`. Use `/suiteupdate` for status, checks and automatic-installation
+settings. Legacy URL values remain saved for compatibility with older code;
+they do not configure suite releases.
 
 Installation waits for backup/system-image activity. New backup and image jobs
 share a cross-process lease with installation, so a job cannot start between a
