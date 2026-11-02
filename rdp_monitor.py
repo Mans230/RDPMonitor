@@ -3536,12 +3536,7 @@ def _dispatch_panel(action, args):
     if action == "update_now":
         if not args.get("confirm"):
             return False, "confirmation required"
-        url = str(config.get("update_url") or "")
-        hsh = str(config.get("update_hash") or "")
-        if not url.startswith("https://") or not re.fullmatch(r"[0-9a-fA-F]{64}", hsh):
-            return False, "self-update is not configured (set update_url and update_hash)"
-        threading.Thread(target=update_self, daemon=True).start()
-        return True, "update started; the monitor restarts when it finishes"
+        return queue_suite_install()
     if action == "exportlogs":
         scope = str(args.get("scope", "all")).lower()
         if scope not in ("all", "system", "application"):
@@ -4495,7 +4490,7 @@ COMMAND_INFO = {
                       "/configbackup", False),
     "/cancel_restart": ("Cancels a scheduled restart/shutdown inside the cancel window.",
                         "/cancel_restart", False),
-    "/update": ("Legacy single-file updater; use /suiteupdate for the bot and panel together.",
+    "/update": ("Install the latest validated bot and web panel release. No manual update URL is needed.",
                 "/update", True),
     "/suiteupdate": ("Update the bot and web panel together from validated GitHub releases; configure automatic installation.",
                      "/suiteupdate [status | check | now | on | off]", False),
@@ -5281,12 +5276,14 @@ COMMAND_DOCS = {
         "related": ["/status"],
     },
     "/update": {
-        "summary": "Self-update from the configured HTTPS URL and SHA-256.",
-        "steps": [("Download", "HTTPS GET update_url"), ("Verify", "SHA-256 matches update_hash"), ("Apply", "replace the script")],
-        "effect": "The tool updates to the new version.",
-        "output": "A success or failure notice.",
-        "troubleshoot": "Requires HTTPS and a matching hash; disabled by default.",
-        "related": ["/status"],
+        "summary": "Install the latest validated bot + web panel release.",
+        "steps": [("Queue", "RDPSuiteUpdate independent task"),
+                  ("Verify", "Fixed GitHub repository, successful CI and SHA-256"),
+                  ("Install", "Save rollback checkpoint, replace suite code and check health")],
+        "effect": "Restarts the bot and panel. Settings, credentials and history are preserved.",
+        "output": "Queued status, then installed/current/deferred/error in /suiteupdate.",
+        "troubleshoot": "Run the suite updater installer if its task is missing. Private repositories need a saved GitHub read credential. No update_url is required.",
+        "related": ["/suiteupdate"],
     },
     "/allow": {
         "summary": "Manage extra trusted Telegram user IDs.",
@@ -6433,6 +6430,15 @@ def restart_program():
     subprocess.Popen(target, creationflags=flags,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os._exit(0)
+
+
+def queue_suite_install():
+    """Unified bot/panel installation; used by old and current entry points."""
+    from suite_update import Manager
+    try:
+        return True, Manager(BASE_DIR).queue('apply')
+    except Exception as exc:
+        return False, redact_log(str(exc))
 
 
 def update_self():
@@ -9519,10 +9525,10 @@ def set_guide():
         f"• <b>/set sessions on|off</b> ({'Activated' if c['session_alerts'] else 'Off'})",
         "   Immediate alert when someone enters or exits the device",
         "",
-        "<b>UL  Update the tool</b>",
-        f"• <b>/set update Link</b> ({'Specific' if c['update_url'] else 'Not specified'})",
-        "   Direct link to file rdp_monitor.py New (Like GitHub Raw)",
-        "   Then he ordered /update Safely pulls out the new copy and replaces it",
+        "<b>Bot + web panel updates</b>",
+        "• <b>/update</b> installs the latest validated suite release after confirmation.",
+        "• <b>/suiteupdate</b> shows status, checks releases and controls automatic installation.",
+        "   No manual update link is needed. Legacy /set update values do not configure suite releases.",
         "",
         "<b> Security</b>",
         f"• <b>/set name PC2</b> ({c.get('instance_name') or 'Without'})",
@@ -10358,9 +10364,13 @@ def handle_command(text):
 
     elif cmd == "/update":
         if "confirm" not in [a.lower() for a in args]:
-            send_buttons("Start the software update?", confirm_buttons("/update"))
+            send_buttons("<b>Update the bot and web panel?</b>\n"
+                         "Installs the latest validated suite release. The bot and panel restart; "
+                         "settings and history are preserved. No manual update link is needed.",
+                         confirm_buttons("/update"))
         else:
-            threading.Thread(target=update_self, daemon=True).start()
+            ok, message = queue_suite_install()
+            send_message(("" if ok else "[X] ") + esc(message))
 
     elif cmd == "/audit":
         if not _audit:

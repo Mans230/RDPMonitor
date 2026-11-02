@@ -532,13 +532,17 @@ class PanelAutomationTests(unittest.TestCase):
         ok, _ = rm._dispatch_panel("automation", {"list": "nope", "op": "list"})
         self.assertFalse(ok)
 
-    def test_update_requires_confirmation_and_config(self):
-        ok, out = rm._dispatch_panel("update_now", {})
-        self.assertFalse(ok)
-        self.assertIn("confirmation", out)
-        ok, out = rm._dispatch_panel("update_now", {"confirm": True})
-        self.assertFalse(ok)
-        self.assertIn("not configured", out)
+    def test_update_requires_confirmation_and_uses_suite_without_manual_url(self):
+        with mock.patch('suite_update.Manager') as manager:
+            manager.return_value.queue.return_value = 'Queued suite release'
+            ok, out = rm._dispatch_panel("update_now", {})
+            self.assertFalse(ok)
+            self.assertIn("confirmation", out)
+            manager.assert_not_called()
+            ok, out = rm._dispatch_panel("update_now", {"confirm": True})
+            self.assertTrue(ok)
+            self.assertIn('Queued', out)
+            manager.return_value.queue.assert_called_once_with('apply')
 
     def test_send_file_missing(self):
         ok, out = rm._dispatch_panel("send_file", {"path": "Z:\\nope\\missing.txt"})
