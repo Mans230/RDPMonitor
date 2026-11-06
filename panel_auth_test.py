@@ -88,6 +88,14 @@ def main():
             return super().do_GET()
 
     server = wc.LimitedThreadingHTTPServer(('127.0.0.1', 18499), TestHandler)
+    # Non-secret descriptor for a separately configured TEST bot. No bot is started.
+    access_path = RUNTIME / 'access.json'
+    pending_path = RUNTIME / 'access.json.tmp'
+    pending_path.write_text(json.dumps({
+        'bind': wc.BIND, 'port': 18499, 'auth_mode': 'passkey',
+        'passkey_origin': origin, 'trusted_proxy_origin': '' if local else origin,
+    }), encoding='utf-8')
+    os.replace(pending_path, access_path)
     print('TEST only. Open:', origin)
     print('Register a device, match the displayed request ID with `pending`, then approve locally.')
     print('Bot, live integrations and host actions are disabled. Ctrl+C to stop.')

@@ -2017,6 +2017,8 @@ class Handler(BaseHTTPRequestHandler):
                 ok, out = panel_request("suite_update_action", args, timeout=20)
                 return self._json(200, {"ok": ok, "out": out})
             if act in ("setup", "setup_token"):
+                if passkey_mode() and (act == "setup_token" or body.get("op") == "remote"):
+                    return self._json(403, {"error": "Use private Tailscale access and Passkey. Token disclosure and public access changes are disabled."})
                 if sess.get("actor") != "owner":
                     return self._json(403, {"error": "Setup requires the owner login."})
                 args = {k: v for k, v in body.items() if k not in ("action", "nonce")}

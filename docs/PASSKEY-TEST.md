@@ -83,6 +83,30 @@ not migrate credentials automatically.
 
 ## Verification and remaining acceptance work
 
+### Telegram link behavior in this TEST branch
+
+`/panel` now offers only **Open private panel** and **Panel status**. It requires
+an exact HTTPS `.ts.net` origin, matching Passkey origin and a loopback backend.
+Missing or inconsistent configuration produces setup instructions without an IP,
+localhost, token or signed-login fallback. The old `/paneltoken`, `/token` and
+`panel:token` callback cannot read/decrypt/send a panel token. These commands are
+hidden from the menu; old buttons remain safe. The `setup_token` backend request
+is also retired. `/panelremote` cannot enable public access, even with `confirm`.
+It reports private access instructions; `status` reports configuration, without
+claiming the client is connected or the service is reachable.
+
+The runner writes a **non-secret** descriptor at
+`test-runtime/panel-auth/access.json` after binding its TEST port. For a separate
+TEST bot only, set its `panel_private_access_file` config value to that absolute
+path. Otherwise the bot validates the corresponding fields in its existing
+`webconsole_state.json`. A local-only runner descriptor does not advertise a
+tailnet link. This implementation starts no Telegram bot and sends no live chat
+messages. Do not point the production bot at this prototype.
+
+In Passkey mode, HTTP setup requests cannot reveal a panel token or change
+access back to a public bind. Existing firewall rules on the production host
+have not been changed or removed by this branch.
+
 ```powershell
 .\test-runtime\venv\Scripts\python.exe -B -m unittest discover -s tests -v
 node --test tests/test_webconsole_user_flow.js tests/test_passkeys.js
@@ -95,7 +119,7 @@ replay/expiry, wrong Origin, missing verification, bad signatures, counters,
 operator permissions, owner/operator revocation and simulated Serve headers.
 Node tests cover the browser codec and registration/login/error flows.
 
-Local result: 306 Python tests and 34 Node tests passed; all 31 locked runtime
+Local result: 307 Python tests and 34 Node tests passed; all 31 locked runtime
 versions matched. A real TEST-runner smoke check also served the login UI and
 Passkey configuration and denied token login and host-management actions.
 
