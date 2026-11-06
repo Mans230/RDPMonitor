@@ -287,10 +287,22 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 </head>
 <body>
 <div class="loginbg" id="loginBg">
-  <div class="loginbox"><h1 id="loginTitle">RDPMonitor</h1><p>Enter your personal operator token or the owner token. A secure, time-limited session is created.</p>
+  <div class="loginbox"><h1 id="loginTitle">RDPMonitor</h1><p id="loginDescription">Enter your personal operator token or the owner token. A secure, time-limited session is created.</p>
+    <div id="tokenLogin">
     <label for="loginToken" class="field-label">Login token</label>
     <input id="loginToken" type="password" autocomplete="current-password" placeholder="Enter your token" aria-describedby="loginErr">
-    <button class="btn primary" id="loginBtn">Login</button><div class="loginerr" id="loginErr" role="alert"></div>
+    <button class="btn primary" id="loginBtn">Login</button></div>
+    <div id="passkeyLogin" hidden>
+      <button class="btn primary" id="passkeyBtn" type="button">Sign in with passkey</button>
+      <details><summary>Register this device</summary>
+        <label for="passkeyLabel" class="field-label">Device name</label>
+        <input id="passkeyLabel" maxlength="60" placeholder="My laptop" autocomplete="off">
+        <button class="btn" id="registerPasskeyBtn" type="button">Create passkey</button>
+        <p>New devices need local administrator approval. Match the request ID before approval.</p>
+      </details>
+      <p id="passkeyStatus" role="status" aria-live="polite"></p>
+    </div>
+    <div class="loginerr" id="loginErr" role="alert"></div>
   </div>
 </div>
 <a class="skip-link" id="skipNavigation" href="#tab-bot">Skip navigation</a>
@@ -876,6 +888,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 </div>
 
 <script src="/assets/setup.js"></script>
+<script src="/assets/passkeys.js"></script>
 <script>
 let CSRF="",started=false,toastTimer,loginBusy=false,appTimers=[];
 let liveHist=[],dayHist=[],rdpHist=[],lastApps=[],lastProcs=[];
@@ -1697,6 +1710,9 @@ async function doLogin(){
   finally{loginBusy=false;$("loginBtn").disabled=false}
 }
 async function initAuth(){
+  try{
+    if(typeof configurePasskeys === "function")await configurePasskeys({authRequest,enterSession});
+  }catch(e){showLogin(e.message);return}
   try{const {response:r,data:j}=await authRequest("/api/session");if(r.ok&&j.ok)enterSession(j);else showLogin(r.status===401?"":(j.error||"Could not check the session. Retry sign-in."))}
   catch(e){showLogin(e.message)}
 }

@@ -1,0 +1,3 @@
+# Isolated feature-test overlay. Production lockfile is unchanged.
+fido2==2.2.1
+cryptography==50.0.2
