@@ -22,6 +22,9 @@ class PasskeyError(ValueError):pass
 
 class Passkeys:
     def __init__(self,path,origin,clock=time.time):
+        from importlib.metadata import version
+        if version('fido2') != '2.2.1':
+            raise PasskeyError('Install the pinned requirements-passkey.txt dependencies first.')
         parsed=urlsplit(origin)
         if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path or not parsed.hostname or (parsed.scheme!='https' and not (parsed.scheme=='http' and parsed.hostname=='localhost')):
             raise PasskeyError('An exact HTTPS origin or explicit localhost test origin is required.')

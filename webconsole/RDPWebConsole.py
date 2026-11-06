@@ -1739,7 +1739,14 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 self._json(404, {"error": "Setup script unavailable"})
             return
-        if u.path == "/health": return self._json(200, {"ok": True, "ts": time.time()})
+        if u.path == "/health":
+            if passkey_mode():
+                try:
+                    passkey_store()
+                except Exception:
+                    return self._json(503, {"ok": False, "auth": "passkey"})
+            return self._json(200, {"ok": True, "ts": time.time(),
+                                    "auth": "passkey" if passkey_mode() else "token"})
         if u.path == "/api/auth/config":
             return self._json(200, {"mode": "passkey" if passkey_mode() else "token"})
         if u.path == "/api/session":
@@ -2168,6 +2175,18 @@ class Handler(BaseHTTPRequestHandler):
 
 # ---------------------------------------------------------------- main
 def main():
+    if sys.argv[1:2] and sys.argv[1] in ("private-enable", "passkey-pending", "passkey-approve", "passkey-revoke"):
+        try:
+            from private_cli import execute
+            return execute(sys.modules[__name__], sys.argv[1:])
+        except (ValueError, OSError, ImportError) as exc:
+            print("Private access setup failed:", str(exc))
+            return 1
+    if passkey_mode() and sys.argv[1:2] and sys.argv[1] in (
+            "token", "rotate-token", "operator-add", "remote-enable", "remote-disable",
+            "remote-allow-add", "remote-allow-remove", "install-remote"):
+        print("Use Tailscale Serve and the local passkey management commands.")
+        return 1
     if sys.argv[1:2] and sys.argv[1] in ("operator-add", "operator-remove", "operator-list"):
         operation = sys.argv[1]
         records = STATE.setdefault("operators", {})
@@ -2236,6 +2255,16 @@ def main():
     if not acquire_instance_lock():
         print("RDPWebConsole is already running for this installation.")
         return 1
+    if passkey_mode():
+        from private_panel import validated_url
+        if BIND not in ("127.0.0.1", "::1", "localhost") or not validated_url(STATE):
+            print("Refusing to start: Passkey mode requires loopback binding and an exact Tailscale Serve origin.")
+            return 1
+        try:
+            passkey_store()
+        except Exception:
+            print("Refusing to start: verify private credential storage and install requirements-passkey.txt.")
+            return 1
     if not harden_private_storage():
         print("Refusing to start: could not protect the WebConsole directory ACL.")
         return 1
@@ -2272,7 +2301,7 @@ def main():
     print(" bind=%s:%d | exec=%s" % (BIND, PORT, "on" if EXEC_ENABLED else "off"))
     print(" local autostart: python RDPWebConsole.py install")
     print("=" * 60)
-    if BIND == "127.0.0.1" and IS_WIN:
+    if BIND == "127.0.0.1" and IS_WIN and not passkey_mode():
         threading.Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:%d/" % PORT)).start()
     try:
         srv.serve_forever()

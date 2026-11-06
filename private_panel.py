@@ -24,3 +24,34 @@ def validated_url(state):
         return origin + '/'
     except ValueError:
         return None
+
+
+def monitor_health(root, timeout=15):
+    """Probe the local ACL-protected mailbox; never create an HTTP auth bypass."""
+    import json
+    import secrets
+    import time
+    from pathlib import Path
+    control = Path(root) / 'control'
+    control.mkdir(parents=True, exist_ok=True)
+    rid = secrets.token_hex(16)
+    request = control / ('request-' + rid + '.json')
+    result = control / ('result-' + rid + '.json')
+    temporary = control / ('request-' + rid + '.tmp')
+    try:
+        temporary.write_text(json.dumps({'id': rid, 'action': 'settings_get', 'args': {},
+            'created': time.time(), 'expires': time.time() + timeout}), encoding='utf-8')
+        temporary.replace(request)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                data = json.loads(result.read_text(encoding='utf-8'))
+                if data.get('id') == rid and data.get('ok') is True and data.get('out', {}).get('groups'):
+                    return
+            except (OSError, ValueError, AttributeError):
+                pass
+            time.sleep(0.1)
+        raise RuntimeError('Monitor mailbox health check failed')
+    finally:
+        for path in (temporary, request, result):
+            path.unlink(missing_ok=True)

@@ -1,0 +1,3 @@
+# Optional private-panel runtime dependencies; install before enabling Passkeys.
+fido2==2.2.1
+cryptography==50.0.2
