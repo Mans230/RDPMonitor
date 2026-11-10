@@ -38,17 +38,22 @@ class Passkeys:
               CREATE TABLE IF NOT EXISTS challenges(id TEXT PRIMARY KEY,kind TEXT NOT NULL,
                 address TEXT NOT NULL,state TEXT NOT NULL,expires REAL NOT NULL);
               CREATE TABLE IF NOT EXISTS pending(id TEXT PRIMARY KEY,credential BLOB NOT NULL,
-                label TEXT NOT NULL,expires REAL NOT NULL,counter INTEGER NOT NULL DEFAULT 0);
+                label TEXT NOT NULL,expires REAL NOT NULL,counter INTEGER NOT NULL DEFAULT 0,
+                notified_at REAL NOT NULL DEFAULT 0);
               CREATE TABLE IF NOT EXISTS credentials(fingerprint TEXT PRIMARY KEY,
                 credential BLOB NOT NULL,actor TEXT NOT NULL,counter INTEGER NOT NULL,
                 active INTEGER NOT NULL,created REAL NOT NULL);
             ''')
+            db.execute('BEGIN IMMEDIATE')
             if 'counter' not in [r['name'] for r in db.execute('PRAGMA table_info(pending)')]:
                 db.execute('ALTER TABLE pending ADD COLUMN counter INTEGER NOT NULL DEFAULT 0')
+            if 'notified_at' not in [r['name'] for r in db.execute('PRAGMA table_info(pending)')]:
+                db.execute('ALTER TABLE pending ADD COLUMN notified_at REAL NOT NULL DEFAULT 0')
             db.execute('INSERT OR IGNORE INTO metadata VALUES(?,?)',('origin',origin))
             db.execute('INSERT OR IGNORE INTO metadata VALUES(?,?)',('user_handle',secrets.token_hex(32)))
             if db.execute("SELECT value FROM metadata WHERE key='origin'").fetchone()[0]!=origin:
                 raise PasskeyError('Origin changed; use an explicit credential migration.')
+            db.commit()
 
     def connect(self):
         db=sqlite3.connect(self.path,timeout=5,isolation_level=None)
@@ -79,7 +84,11 @@ class Passkeys:
                     credentials=credentials,user_verification='required',resident_key_requirement='required')
             else:
                 if not credentials:
-                    db.rollback();raise PasskeyError('No approved passkey. Register a device and request local approval.')
+                    pending = db.execute('SELECT 1 FROM pending WHERE expires>?', (self.clock(),)).fetchone()
+                    db.rollback()
+                    if pending:
+                        raise PasskeyError('Passkey registration is waiting for approval. Open the Telegram bot and approve your device request, or ask the local administrator. Do not create another passkey; sign in after approval.')
+                    raise PasskeyError('No approved passkey yet. Register this device once, then approve the matching Telegram request before signing in. Local administrator approval is also available.')
                 options,state=self.server.authenticate_begin(user_verification='required')
             nonce=secrets.token_urlsafe(32)
             db.execute('INSERT INTO challenges VALUES(?,?,?,?,?)',(hashlib.sha256(nonce.encode()).hexdigest(),kind,address,json.dumps(state),self.clock()+120))
@@ -152,3 +161,25 @@ class Passkeys:
     def revoke(self,fingerprint):
         with closing(self.connect()) as db:
             db.execute('UPDATE credentials SET active=0 WHERE fingerprint=?',(fingerprint,))
+
+    def claim_notifications(self, limit=10):
+        """Lease a bounded batch; a crashed sender can retry after 60 seconds."""
+        with closing(self.connect()) as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows = db.execute('SELECT * FROM pending WHERE expires>? AND notified_at<=0 AND notified_at>=? LIMIT ?',
+                              (self.clock(), -self.clock(), limit)).fetchall()
+            for row in rows:
+                db.execute('UPDATE pending SET notified_at=? WHERE id=?', (-(self.clock()+60), row['id']))
+            db.commit()
+            return [{'id': row['id'], 'label': row['label'], 'expires': row['expires'],
+                     'fingerprint': hashlib.sha256(row['credential']).hexdigest()} for row in rows]
+
+    def notification_result(self, request_id, sent):
+        with closing(self.connect()) as db:
+            db.execute('UPDATE pending SET notified_at=? WHERE id=? AND notified_at<0',
+                       (self.clock() if sent else 0, request_id))
+
+    def reject(self, request_id):
+        with closing(self.connect()) as db:
+            result = db.execute('DELETE FROM pending WHERE id=? AND expires>?', (request_id, self.clock()))
+            return result.rowcount == 1

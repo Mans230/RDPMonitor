@@ -179,3 +179,24 @@ prior enabled state was saved under ignored test-runtime/. Restore its prior
 setting only after the migrated bot, private route and loopback listener pass
 health checks. The public 8399 listener and its panel firewall rule must be
 verified closed as part of rollout. This source change alone does not close them.
+
+## Telegram owner approval
+
+New device registrations generate a notification in the primary owner's private
+bot chat, with the device label, matching request ID, public-key fingerprint and
+Approve device / Reject buttons. The primary private-chat owner must approve;
+trusted operators, forwarded/group callbacks and expired or replayed requests
+cannot activate a credential. Group-only primary-chat installations retain local
+administrator approval. Local CLI approval and revocation remain available for
+recovery.
+
+SQLite notification leases prevent concurrent duplicate sends and recover after
+sender crashes; failed sends retry. Requests still expire ten minutes after
+registration. No private key, biometric data or login token is sent to Telegram.
+The panel retains the pending ID after a denied sign-in and tells the owner to
+approve the existing registration instead of creating another key. Registration
+controls are visually separated from the sign-in button.
+
+Follow-up validation: 322 Python tests and 36 Node tests passed for Telegram
+approval, notification retries/leases, owner-only callbacks, expiry/replay,
+pending registration feedback and sign-in behavior.

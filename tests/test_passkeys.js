@@ -5,7 +5,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../webconsole/passkeys.js'),'utf8');
 
-function fixture(mode='passkey'){
+function fixture(mode='passkey',override){
   const fields={},calls=[],sessions=[];
   const el=id=>fields[id]||(fields[id]={hidden:false,value:'My laptop'});
   const options={publicKey:{challenge:'AQID',rp:{id:'localhost'},user:{id:'BAUG'},excludeCredentials:[{id:'BwgJ'}]}};
@@ -19,6 +19,7 @@ function fixture(mode='passkey'){
   vm.runInContext(source,context);
   const authRequest=async(path,request)=>{
     calls.push({path,request});
+    if(override){const result=override(path,request);if(result)return result}
     const data=path.endsWith('config')?{mode}:path.endsWith('begin')?structuredClone(options):
       path.includes('register')?{pending_id:'012345abcdef',approved:false}:{csrf:'session-csrf',actor:'owner'};
     return {response:{ok:true},data};
@@ -32,7 +33,7 @@ test('registration shows local approval request and does not enter a session',as
   await f.el('registerPasskeyBtn').onclick();
   assert.deepEqual(f.calls.map(x=>x.path),['/api/auth/config','/api/auth/register/begin','/api/auth/register/complete']);
   assert.equal(f.sessions.length,0);
-  assert.match(f.el('passkeyStatus').textContent,/012345abcdef.*local administrator approval/);
+  assert.match(f.el('passkeyStatus').textContent,/012345abcdef.*approval in the Telegram bot/);
   const body=JSON.parse(f.calls[2].request.body);
   assert.equal(body.credential.response.attestationObject,'BwgJ');
   assert.equal(body.label,'My laptop');
@@ -75,4 +76,15 @@ test('panel setup has no legacy IP access selector or token reveal controls',()=
   for(const obsolete of ['setupAccessMode','setupAllowedIps','setupLoginToken','setupRevealToken','id="loginToken"'])assert.equal(html.includes(obsolete),false);
   assert.match(html,/Private panel access/);
   assert.match(html,/setupPrivateUrl/);
+});
+
+test('retrying sign-in while approval is pending preserves the request and creates no new key',async()=>{
+  const f=fixture('passkey',path=>path==='/api/auth/login/begin'?{response:{ok:false},data:{error:'Waiting for local administrator approval. Do not create another passkey.'}}:null);
+  await f.configure();await f.el('registerPasskeyBtn').onclick();
+  await f.el('passkeyBtn').onclick();
+  assert.match(f.el('passkeyStatus').textContent,/012345abcdef.*waiting for approval in the Telegram bot/);
+  assert.match(f.el('passkeyStatus').textContent,/Do not create another/);
+  assert.match(f.el('loginErr').textContent,/approval/);
+  assert.equal(f.calls.filter(c=>c.path==='/api/auth/register/begin').length,1);
+  assert.equal(f.sessions.length,0);
 });
