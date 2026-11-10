@@ -281,11 +281,11 @@
 **Related:** /view
 
 ### /top
-- Purpose: Lists the 10 processes consuming the most CPU and the 10 using the most RAM right now, with PID, memory and CPU per process. Use it to find what is loading the machine.
-- Usage: `/top`
+- Purpose: Top CPU or RAM processes, five per page. Use the buttons to switch metric or ranks. CPU is a share of total capacity; idle time is excluded.
+- Usage: `/top [cpu|ram] [1|2]`
 - Panel: apps
 
-**What it does:** Top processes by CPU and by RAM.
+**What it does:** Top processes by CPU or RAM, five per page.
 
 **Steps (backend commands):**
 1. Enumerate
@@ -294,7 +294,7 @@
    ```
 
 **Effect:** Read-only.
-**Output:** A ranked process list with PIDs.
+**Output:** A ranked list with PIDs, metric switch and ranks 1–5 / 6–10 buttons. CPU uses total machine capacity; PID 0 is excluded.
 **Troubleshoot:** First sample of a new process may read 0%.
 **Related:** /kill /ps
 
@@ -1651,6 +1651,11 @@
 **Troubleshoot:** Change values with /set.
 **Related:** /set
 
+### /suiteupdate
+- Purpose: Update the bot and web panel together from validated GitHub releases; configure automatic installation.
+- Usage: `/suiteupdate [status | check | now | on | off]`
+- Panel: setup
+
 ### /test
 - Purpose: Sends a test message to confirm the bot can reach you.
 - Usage: `/test`
@@ -1670,132 +1675,108 @@
 **Related:** /status
 
 ### /update
-- Purpose: Self-updates from the configured HTTPS URL and SHA-256 fingerprint.
+- Purpose: Install the latest validated bot and web panel release. No manual update URL is needed.
 - Usage: `/update`
 - Panel: ctl
 - Risk: dangerous (confirmation required)
 
-**What it does:** Self-update from the configured HTTPS URL and SHA-256.
+**What it does:** Install the latest validated bot + web panel release.
 
 **Steps (backend commands):**
-1. Download
+1. Queue
    ```
-   HTTPS GET update_url
+   RDPSuiteUpdate independent task
    ```
 2. Verify
    ```
-   SHA-256 matches update_hash
+   Fixed GitHub repository, successful CI and SHA-256
    ```
-3. Apply
+3. Install
    ```
-   replace the script
+   Save rollback checkpoint, replace suite code and check health
    ```
 
-**Effect:** The tool updates to the new version.
-**Output:** A success or failure notice.
-**Troubleshoot:** Requires HTTPS and a matching hash; disabled by default.
-**Related:** /status
+**Effect:** Restarts the bot and panel. Settings, credentials and history are preserved.
+**Output:** Queued status, then installed/current/deferred/error in /suiteupdate.
+**Troubleshoot:** Run the suite updater installer if its task is missing. Private repositories need a saved GitHub read credential. No update_url is required.
+**Related:** /suiteupdate
 
 ## Web panel
 
 ### /panel
-- Purpose: WebConsole panel: shows the local URL and a button to reveal the login token on demand.
+- Purpose: Opens the private Tailscale panel. Sign in with a passkey.
 - Usage: `/panel`
 - Panel: panel
 
-**What it does:** Shows the WebConsole URL and a token button.
+**What it does:** Opens the private panel over Tailscale.
 
 **Steps (backend commands):**
-1. Read
+1. Validate
    ```
-   webconsole_state.json port
+   Exact HTTPS Serve origin + loopback backend + Passkey mode
    ```
 
-**Effect:** Read-only.
-**Output:** The URL and a Get-token button.
-**Troubleshoot:** Local-only unless remote mode is configured.
-**Related:** /paneltoken /panelstatus
+**Effect:** Read-only; no authentication secret is sent.
+**Output:** Private URL and a status button.
+**Troubleshoot:** Connect Tailscale on the client, then use your passkey.
+**Related:** /panelstatus
 
 ### /panelremote
-- Purpose: Turns remote access to the WebConsole panel on or off. On enables HTTPS on 0.0.0.0 with a self-signed certificate and a firewall/IP allow-list (loopback + Tailscale + this host). open allows any IP; allow/deny edit the list.
-- Usage: `/panelremote on|off|status|open|allow <ip>|deny <ip>`
+- Purpose: Private access is configured locally with Tailscale Serve and Passkey. Public access commands are disabled.
+- Usage: `/panelremote status`
 - Panel: panel
 
-**What it does:** Turns remote access to the panel on or off.
+**What it does:** Public access commands were retired.
 
 **Steps (backend commands):**
-1. Generate
-   ```
-   self-signed TLS cert -> webconsole/tls/panel.crt.pem
-   ```
-2. Set
-   ```
-   webconsole_state.json bind=0.0.0.0 + allowed_ips
-   ```
-3. Firewall
-   ```
-   netsh advfirewall add rule remoteip=<allow-list>
-   ```
-4. Restart
-   ```
-   supervisor rebinds the WebConsole on 0.0.0.0:8399
-   ```
 
-**Effect:** The panel answers on https://<host-ip>:8399/ for allowed IPs only.
-**Output:** Enabled/disabled and the reachable URLs.
-**Troubleshoot:** on allows loopback + Tailscale 100.64.0.0/10 + this host; use allow <ip> for more, open for any IP, off to revert.
+**Effect:** No firewall or bind changes.
+**Output:** Private access instructions or configuration status.
+**Troubleshoot:** Configure Tailscale Serve locally; use /panel.
 **Related:** /panel /panelstatus
 
 ### /panelstatus
-- Purpose: Checks whether the WebConsole is reachable and whether a login token is stored.
+- Purpose: Shows private panel configuration; connectivity must be checked from your device.
 - Usage: `/panelstatus`
 - Panel: panel
 
-**What it does:** Checks whether the WebConsole is reachable.
+**What it does:** Shows private access configuration.
 
 **Steps (backend commands):**
-1. Probe
+1. Read
    ```
-   HTTP GET /health on 127.0.0.1:<port>
+   Private access descriptor
    ```
 
 **Effect:** Read-only.
-**Output:** Reachable yes/no and token stored.
-**Troubleshoot:** If down, check the RDPSuite task.
+**Output:** URL, Tailscale and Passkey configuration; no reachability claim.
+**Troubleshoot:** Open /panel from your connected tailnet device.
 **Related:** /panel
 
 ### /paneltoken
-- Purpose: Reveals the current WebConsole login token in chat.
-- Usage: `/paneltoken`
+- Purpose: Removed. Use /panel with Tailscale and Passkey.
+- Usage: `/panel`
 - Panel: panel
 
-**What it does:** Reveals the WebConsole login token.
+**What it does:** Token disclosure was removed.
 
 **Steps (backend commands):**
-1. Read
-   ```
-   token_enc -> DPAPI unprotect
-   ```
 
-**Effect:** The token is sent.
-**Output:** The token.
-**Troubleshoot:** Rotate if leaked.
+**Effect:** No token is read or sent.
+**Output:** Use /panel with Tailscale and Passkey.
+**Troubleshoot:** Configure private access locally.
 **Related:** /panel
 
 ### /token
-- Purpose: Reveals the WebConsole login token.
-- Usage: `/token`
+- Purpose: Removed. Use /panel with Tailscale and Passkey.
+- Usage: `/panel`
 - Panel: panel
 
-**What it does:** Reveals the WebConsole login token.
+**What it does:** Token disclosure was removed.
 
 **Steps (backend commands):**
-1. Read
-   ```
-   webconsole_state.json token_enc -> DPAPI unprotect
-   ```
 
-**Effect:** The panel login token is sent.
-**Output:** The token (keep it private).
-**Troubleshoot:** Rotate with the panel rotate-token command if leaked.
-**Related:** /panel /paneltoken
+**Effect:** No token is read or sent.
+**Output:** Use /panel with Tailscale and Passkey.
+**Troubleshoot:** Configure private access locally.
+**Related:** /panel

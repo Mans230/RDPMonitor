@@ -2664,14 +2664,20 @@ def panel_hosts():
     return hosts
 
 
-def panel_login_url(host):
-    """One-time auto-login link: valid ~10 minutes, no permanent token in the URL."""
-    tok = webconsole_token()
-    if not tok:
-        return None
-    exp = str(int(time.time()) + 600)
-    otp = hmac.new(tok.encode("utf-8"), exp.encode("ascii"), hashlib.sha256).hexdigest()
-    return f"{webconsole_scheme()}://{host}:{webconsole_port()}/?exp={exp}&otp={otp}"
+def private_panel_settings():
+    """Read only the access descriptor; never decrypt a panel credential."""
+    path = config.get("panel_private_access_file") or WEBCONSOLE_STATE
+    return _read_json(path, {})
+
+
+def private_panel_url():
+    from private_panel import validated_url
+    return validated_url(private_panel_settings())
+
+
+def panel_login_url(host=None):
+    """Compatibility helper: plain private link, never a bearer login link."""
+    return private_panel_url()
 
 
 def _mk_button(label, value):
@@ -2707,55 +2713,35 @@ def webconsole_token():
 
 
 def send_panel_info():
-    if not webconsole_token():
-        send_message("No panel token stored yet. Start the WebConsole first.")
+    url = private_panel_url()
+    if not url:
+        send_message("<b>Private panel is not configured</b>\n"
+                     "Set up Tailscale Serve and Passkey locally first. "
+                     "No public IP link or chat login token is provided.")
         return
-    local_only = webconsole_bind() in ("127.0.0.1", "::1", "localhost")
-    rows = []
-    for label, host in panel_hosts()[:4]:
-        if local_only and host not in ("127.0.0.1", "localhost", "::1"):
-            continue
-        address = "[" + host + "]" if ":" in host else host
-        u = f"{webconsole_scheme()}://{address}:{webconsole_port()}/"
-        rows.append([(f"Open {label} ({host})", u)])
-    rows.append([("Show login token", "panel:token"), ("Panel status", "run:/panelstatus")])
-    rows.append([("Direct IP:port access", "cmd:/panelremote direct"),
-                 ("Access settings", "cmd:/panelremote")])
-    note = ("Open an HTTPS link, then enter your login token on the sign-in screen. "
-            "Remote settings are saved across restarts. A self-signed certificate "
-            "may show a browser warning. External reachability depends on the provider firewall."
-            if not local_only else
-            "Local-only panel (open it inside the RDP session). Choose Direct IP:port "
-            "access below to enable HTTPS from outside without an extra app.")
-    send_url_buttons("<b>WebConsole panel</b>\n" + note, rows)
+    send_url_buttons("<b>Private panel</b>\n"
+                     "Connect Tailscale on this device, then open the panel and sign in "
+                     "with your passkey (fingerprint or device lock).\n"
+                     "New devices require local administrator approval.",
+                     [[("Open private panel", url)], [("Panel status", "run:/panelstatus")]])
 
 
 def send_panel_token():
-    tok = webconsole_token()
-    if not tok:
-        send_message("No panel token found. Start the WebConsole, then try again.")
-        return
-    audit_record("Panel token revealed")
-    send_message("<b>WebConsole login token</b>\n"
-                 f"<code>{esc(tok)}</code>\n"
-                 "Keep it private — it grants full control of the panel.")
+    # Old commands and already-sent callback buttons must fail closed too.
+    send_message("Panel login tokens are no longer sent in chat. Use /panel: "
+                 "connect Tailscale and sign in with your passkey.")
 
 
 def send_panel_status():
-    url = webconsole_url()
-    up = False
-    try:
-        import ssl as _ssl
-        import urllib.request
-        ctx = _ssl._create_unverified_context()
-        with urllib.request.urlopen(url + "health", timeout=3, context=ctx) as r:
-            up = bool(json.loads(r.read().decode()).get("ok"))
-    except Exception:
-        up = False
-    send_message("<b>Panel status</b>\n"
+    url = private_panel_url()
+    if not url:
+        send_message("<b>Private panel</b>\nConfiguration: incomplete. "
+                     "Set up Tailscale Serve and Passkey locally. No public fallback.")
+        return
+    send_message("<b>Private panel</b>\n"
                  f"URL: <code>{esc(url)}</code>\n"
-                 f"Reachable: {'yes' if up else 'no'}\n"
-                 f"Token stored: {'yes' if webconsole_token() else 'no'}")
+                 "Access: Tailscale Serve\nSign-in: Passkey\n"
+                 "Connectivity: not verified from your device. Connect Tailscale and open /panel.")
 
 
 def _run_webconsole_cli(cli_args, timeout=90):
@@ -2771,33 +2757,12 @@ def _run_webconsole_cli(cli_args, timeout=90):
 
 
 def panel_remote(arg=""):
-    """Turn the WebConsole remote (HTTPS on 0.0.0.0) mode on or off."""
-    parts = (arg or "").strip().split()
-    verb = parts[0].lower() if parts else "on"
-    if verb in ("on", "enable", "start"):
-        rc, out = _run_webconsole_cli(["remote-enable"])
-    elif verb in ("direct", "open", "any", "public"):
-        rc, out = _run_webconsole_cli(["remote-enable", "--allow", "0.0.0.0/0"])
-    elif verb in ("off", "disable", "stop"):
-        rc, out = _run_webconsole_cli(["remote-disable"])
-    elif verb == "status":
-        rc, out = _run_webconsole_cli(["remote-status"])
-    elif verb in ("allow", "add") and len(parts) > 1:
-        rc, out = _run_webconsole_cli(["remote-allow-add"] + parts[1:])
-    elif verb in ("deny", "remove") and len(parts) > 1:
-        rc, out = _run_webconsole_cli(["remote-allow-remove"] + parts[1:])
-    else:
-        send_message("Usage: /panelremote [direct | on | off | status | allow <ip> | deny <ip>]\n"
-                     "direct = HTTPS by IP:port from any IPv4 address; on = restricted HTTPS.")
-        return
-    audit_record("Panel remote %s -> rc=%s" % (arg or "on", rc))
-    if rc == 0 and verb in ("on", "enable", "start", "direct", "open", "any", "public"):
-        send_message("Remote access enabled — the panel now listens on 0.0.0.0 over HTTPS.")
-        time.sleep(4)  # let the supervisor restart the WebConsole on the new bind
-        send_panel_info()
-        return
-    head = "Panel remote" if rc == 0 else "Panel remote failed"
-    send_message(f"<b>{head}</b>\n<pre>{esc(out[-1200:] or 'no output')}</pre>")
+    """Retired public access commands never change firewall or panel binding."""
+    if (arg or "").strip().lower() == "status":
+        return send_panel_status()
+    send_message("Panel access now uses Tailscale Serve + Passkey. "
+                 "Public IP:port access is disabled in the bot. "
+                 "Configure private access locally, then use /panel.")
 
 
 def queue_backup_request():
@@ -3374,8 +3339,7 @@ def _dispatch_panel(action, args):
     if action == "setup_action":
         return _panel_setup_service().submit(args)
     if action == "setup_token":
-        token = webconsole_token()
-        return bool(token), {"token": token} if token else "No stored panel token."
+        return False, "Panel token access was removed. Use Tailscale and Passkey."
     if action == "block_ip":
         return block_ip(args.get("ip", ""))
     if action == "unblock_ip":
@@ -4436,17 +4400,10 @@ COMMAND_INFO = {
              "/set", False),
     "/status": ("Current value of every setting in one message.",
                 "/status", False),
-    "/panel": ("WebConsole panel: shows the local URL and a button to reveal "
-               "the login token on demand.", "/panel", False),
-    "/panelstatus": ("Checks whether the WebConsole is reachable and whether a "
-                     "login token is stored.", "/panelstatus", False),
-    "/paneltoken": ("Reveals the current WebConsole login token in chat.",
-                    "/paneltoken", False),
-    "/panelremote": ("Turns remote access to the WebConsole panel on or off. "
-                     "On enables HTTPS on 0.0.0.0 with a self-signed certificate "
-                     "and a firewall/IP allow-list (loopback + Tailscale + this "
-                     "host). open allows any IP; allow/deny edit the list.",
-                     "/panelremote direct|on|off|status|allow <ip>|deny <ip>", False),
+    "/panel": ("Opens the private Tailscale panel. Sign in with a passkey.", "/panel", False),
+    "/panelstatus": ("Shows private panel configuration; connectivity must be checked from your device.", "/panelstatus", False),
+    "/paneltoken": ("Removed. Use /panel with Tailscale and Passkey.", "/panel", False),
+    "/panelremote": ("Private access is configured locally with Tailscale Serve and Passkey. Public access commands are disabled.", "/panelremote status", False),
     "/backup": ("Queues a manual backup on the isolated SYSTEM worker. It "
                 "reports here when it finishes.", "/backup", False),
     "/backupstatus": ("Backup worker state, last successful run, schedule, and "
@@ -4485,7 +4442,7 @@ COMMAND_INFO = {
               "/when [cpu|ram] [percent]", False),
     "/nettest": ("Tests connectivity and latency to a host.", "/nettest <host>", False),
     "/test": ("Sends a test message to confirm the bot can reach you.", "/test", False),
-    "/token": ("Reveals the WebConsole login token.", "/token", False),
+    "/token": ("Removed. Use /panel with Tailscale and Passkey.", "/panel", False),
     "/configbackup": ("Sends a copy of the configuration with secrets hidden.",
                       "/configbackup", False),
     "/cancel_restart": ("Cancels a scheduled restart/shutdown inside the cancel window.",
@@ -5075,12 +5032,9 @@ COMMAND_DOCS = {
         "related": ["/logins", "/blocklist"],
     },
     "/token": {
-        "summary": "Reveals the WebConsole login token.",
-        "steps": [("Read", "webconsole_state.json token_enc -> DPAPI unprotect")],
-        "effect": "The panel login token is sent.",
-        "output": "The token (keep it private).",
-        "troubleshoot": "Rotate with the panel rotate-token command if leaked.",
-        "related": ["/panel", "/paneltoken"],
+        "summary": "Token disclosure was removed.", "steps": [], "effect": "No token is read or sent.",
+        "output": "Use /panel with Tailscale and Passkey.", "troubleshoot": "Configure private access locally.",
+        "related": ["/panel"],
     },
     "/configbackup": {
         "summary": "Sends a copy of the configuration with secrets hidden.",
@@ -5338,40 +5292,26 @@ COMMAND_DOCS = {
         "related": ["/rdp", "/blocklist"],
     },
     "/panel": {
-        "summary": "Shows the WebConsole URL and a token button.",
-        "steps": [("Read", "webconsole_state.json port")],
-        "effect": "Read-only.",
-        "output": "The URL and a Get-token button.",
-        "troubleshoot": "Local-only unless remote mode is configured.",
-        "related": ["/paneltoken", "/panelstatus"],
+        "summary": "Opens the private panel over Tailscale.",
+        "steps": [("Validate", "Exact HTTPS Serve origin + loopback backend + Passkey mode")],
+        "effect": "Read-only; no authentication secret is sent.",
+        "output": "Private URL and a status button.", "troubleshoot": "Connect Tailscale on the client, then use your passkey.",
+        "related": ["/panelstatus"],
     },
     "/panelstatus": {
-        "summary": "Checks whether the WebConsole is reachable.",
-        "steps": [("Probe", "HTTP GET /health on 127.0.0.1:<port>")],
-        "effect": "Read-only.",
-        "output": "Reachable yes/no and token stored.",
-        "troubleshoot": "If down, check the RDPSuite task.",
-        "related": ["/panel"],
+        "summary": "Shows private access configuration.", "steps": [("Read", "Private access descriptor")],
+        "effect": "Read-only.", "output": "URL, Tailscale and Passkey configuration; no reachability claim.",
+        "troubleshoot": "Open /panel from your connected tailnet device.", "related": ["/panel"],
     },
     "/paneltoken": {
-        "summary": "Reveals the WebConsole login token.",
-        "steps": [("Read", "token_enc -> DPAPI unprotect")],
-        "effect": "The token is sent.",
-        "output": "The token.",
-        "troubleshoot": "Rotate if leaked.",
+        "summary": "Token disclosure was removed.", "steps": [], "effect": "No token is read or sent.",
+        "output": "Use /panel with Tailscale and Passkey.", "troubleshoot": "Configure private access locally.",
         "related": ["/panel"],
     },
     "/panelremote": {
-        "summary": "Turns remote access to the panel on or off.",
-        "steps": [("Generate", "self-signed TLS cert -> webconsole/tls/panel.crt.pem"),
-                  ("Set", "webconsole_state.json bind=0.0.0.0 + allowed_ips"),
-                  ("Firewall", "netsh advfirewall add rule remoteip=<allow-list>"),
-                  ("Restart", "supervisor rebinds the WebConsole on 0.0.0.0:8399")],
-        "effect": "The panel answers on https://<host-ip>:8399/ for allowed IPs only.",
-        "output": "Enabled/disabled and the reachable URLs.",
-        "troubleshoot": "on allows loopback + Tailscale 100.64.0.0/10 + this host; "
-                        "use allow <ip> for more, open for any IP, off to revert.",
-        "related": ["/panel", "/panelstatus"],
+        "summary": "Public access commands were retired.", "steps": [], "effect": "No firewall or bind changes.",
+        "output": "Private access instructions or configuration status.",
+        "troubleshoot": "Configure Tailscale Serve locally; use /panel.", "related": ["/panel", "/panelstatus"],
     },
     "/backupstatus": {
         "summary": "Worker state, last run, schedule, recent archives.",
@@ -5662,12 +5602,7 @@ def show_command_info(cmdline):
     if cmd == "/rdpallow" and not args:
         rows.append([("Review allowlist apply", "cmd:/rdpallow apply")])
     if cmd == "/panelremote" and not args:
-        rows.extend([
-            [("Enable restricted HTTPS", "cmd:/panelremote on"),
-             ("Direct IP:port access", "cmd:/panelremote direct")],
-            [("Connection status", "cmd:/panelremote status"),
-             ("Disable remote access", "cmd:/panelremote off")],
-        ])
+        rows.append([("Private panel", "run:/panel"), ("Panel status", "run:/panelstatus")])
     rows.append([("Full details", "dc:" + cmd)])
     rows.append([("Back to category", "menu:" + OWNERS[cmd]), ("Home", "menu:root")])
     send_buttons(text, rows)
@@ -11351,14 +11286,7 @@ def handle_command(text):
         send_panel_token()
 
     elif cmd == "/panelremote":
-        if args and args[0].lower() in ("direct", "open", "any", "public") and "confirm" not in [a.lower() for a in args[1:]]:
-            send_buttons("<b>Enable direct HTTPS access by IP:port?</b>\n"
-                         "The panel will accept connections from any IPv4 address on its configured port. "
-                         "Login still requires your token. Settings and the firewall rule are saved. "
-                         "A self-signed certificate may show a browser warning.",
-                         confirm_buttons("/panelremote direct"))
-        else:
-            panel_remote(" ".join(a for a in args if a.lower() != "confirm"))
+        panel_remote(" ".join(args))
 
     elif cmd == "/backup":
         ok, info = queue_backup_request()

@@ -52,3 +52,4 @@ webconsole/webconsole_audit.jsonl.*
 *.session
 *.session-*
 image_state.json
+test-runtime/

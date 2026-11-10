@@ -72,9 +72,14 @@ class SetupService:
                            "phase": st.get("phase"), "file": st.get("vhdx"),
                            "remote": st.get("remote"), "percent": st.get("upload_pct"),
                            "detail": m._panel_text(m.image_progress_line()) if st.get("phase") == "imaging" else st.get("upload_detail", "")},
-                "remote": {"bind": state.get("bind", "127.0.0.1"), "port": state.get("port", 8399),
-                           "allowed_ips": state.get("allowed_ips", []), "https": bool(state.get("tls_cert"))},
+                "remote": self.private_access(state),
                 "jobs": jobs}
+
+    @staticmethod
+    def private_access(state):
+        from private_panel import validated_url
+        url = validated_url(state)
+        return {"mode": "tailscale", "auth": "passkey", "url": url or "", "configured": bool(url)}
 
     @staticmethod
     def name(value):
@@ -305,25 +310,7 @@ class SetupService:
                 m.image_upload([path])
             return "Image operation submitted. Its progress appears below."
         if op == "remote":
-            mode = a.get("mode")
-            if mode == "local":
-                command = ["remote-disable"]
-            elif mode == "public":
-                command = ["remote-enable", "--allow", "0.0.0.0/0"]
-            elif mode == "restricted":
-                items = a.get("ips")
-                if not isinstance(items, list) or not 1 <= len(items) <= 30:
-                    raise ValueError("Enter at least one allowed IP or CIDR.")
-                networks = [str(ipaddress.ip_network(i.strip(), strict=False)) for i in items]
-                command = ["remote-enable", "--allow", ",".join(networks)]
-            else:
-                raise ValueError("Choose local, public or restricted access.")
-            # Give the queued response time to reach the browser before CLI restarts it.
-            time.sleep(2)
-            rc, out = m._run_webconsole_cli(command)
-            if rc:
-                raise ValueError("Panel access update failed: " + m.redact_log(out)[-600:])
-            return "Access settings saved. The panel restarted; reopen its address and sign in again."
+            raise ValueError("Public panel access was removed. Configure Tailscale Serve and Passkey locally.")
 
     def run_config(self, command):
         ok, _out = self.m._rclone_run(command, timeout=120)

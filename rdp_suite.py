@@ -290,6 +290,12 @@ def _webconsole_endpoint():
             state = {}
     except (OSError, ValueError):
         state = {}
+    if state.get("auth_mode") == "passkey":
+        from private_panel import validated_url
+        url = validated_url(state)
+        if not url:
+            raise ValueError("Private panel configuration is incomplete")
+        return url, ""
     try:
         port = max(1024, min(65535, int(os.environ.get(
             "RDPWC_PORT", state.get("port", 8399)))))

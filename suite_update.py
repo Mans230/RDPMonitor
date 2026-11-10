@@ -25,7 +25,9 @@ API = "https://api.github.com/repos/" + REPO
 ASSET = "rdpmonitor-update.zip"
 MAX_ZIP = 20 * 1024 * 1024
 REQUIRED = {"rdp_monitor.py", "rdp_suite.py", "suite_update.py", "requirements.lock.txt",
-            "webconsole/RDPWebConsole.py", "webconsole/webconsole_ui.html"}
+            "webconsole/RDPWebConsole.py", "webconsole/webconsole_ui.html",
+            "private_panel.py", "webconsole/private_cli.py", "webconsole/passkey_auth.py",
+            "webconsole/passkeys.js", "webconsole/proxy_security.py", "requirements-passkey.txt"}
 TASKS = ("RDPSuite", "RDPSuiteBoot", "RDPSuiteBackup")
 
 
@@ -45,7 +47,7 @@ def allowed_path(name):
     if PurePosixPath(name).as_posix() != name:
         return False
     if len(parts) == 1:
-        return name.endswith(".py") or name in {"requirements.txt", "requirements.lock.txt"}
+        return (name.endswith(".py") and name != "panel_auth_test.py") or name in {"requirements.txt", "requirements.lock.txt", "requirements-passkey.txt"}
     if len(parts) == 2 and parts[0] == "webconsole":
         return PurePosixPath(name).suffix in {".py", ".html", ".css", ".js"}
     if len(parts) == 3 and parts[:2] == ("backup", "app"):
@@ -492,6 +494,16 @@ class WindowsRuntime:
                 if time.time() - runtime["updated"] > 15 or not psutil.pid_exists(monitor_pid):raise ValueError()
                 # Test the monitor mailbox as well as the web listener.
                 state = read_json(self.root / "webconsole/webconsole_state.json")
+                if state.get("auth_mode") == "passkey":
+                    from private_panel import validated_url, monitor_health
+                    origin = validated_url(state)
+                    if not origin:raise ValueError("Invalid private panel configuration")
+                    response = requests.get(origin + "health", timeout=10)
+                    response.raise_for_status()
+                    if response.json().get("auth") != "passkey" or response.json().get("ok") is not True:
+                        raise ValueError("Private panel is not ready")
+                    monitor_health(self.root)
+                    return
                 bind = state.get("bind", "127.0.0.1");remote = bind not in ("127.0.0.1", "::1", "localhost")
                 url = ("https" if remote else "http") + "://127.0.0.1:" + str(state.get("port", 8399))
                 with requests.Session() as session:

@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from http.cookies import SimpleCookie
 from action_policy import CONFIRMED_ACTIONS, audit_action, confirmation_arguments, requires_confirmation
+from proxy_security import serve_context, ProxyRejected
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(BASE_DIR))
@@ -1500,6 +1501,27 @@ class LimitedThreadingHTTPServer(ThreadingHTTPServer):
             self._slots.release()
 
 
+def passkey_mode():
+    return STATE.get("auth_mode") == "passkey"
+
+
+_passkey_store = None
+_passkey_store_lock = threading.Lock()
+
+
+def passkey_store():
+    global _passkey_store
+    with _passkey_store_lock:
+        origin = STATE.get("passkey_origin", "")
+        path = STATE.get("passkey_db", "")
+        if not origin or not path:
+            raise ValueError("Passkey TEST configuration is incomplete")
+        if _passkey_store is None or _passkey_store.origin != origin or str(_passkey_store.path) != path:
+            from passkey_auth import Passkeys
+            _passkey_store = Passkeys(path, origin)
+        return _passkey_store
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "RDPWebConsole/2.0"
     protocol_version = "HTTP/1.1"
@@ -1510,13 +1532,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *a): pass
 
-    def _json(self, code, obj):
+    def _json(self, code, obj, headers=None):
         self._finish_usage(code, obj)
         body = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self._security_headers()
         self.end_headers()
         self.wfile.write(body)
@@ -1541,7 +1565,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        if isinstance(self.connection, ssl.SSLSocket):
+        if self._secure_request():
             self.send_header("Strict-Transport-Security", "max-age=31536000")
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; script-src 'self' 'unsafe-inline'; "
@@ -1551,6 +1575,26 @@ class Handler(BaseHTTPRequestHandler):
                          "font-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
                          "form-action 'self'")
 
+    def _proxy_context(self):
+        configured=STATE.get('trusted_proxy_origin','')
+        if not configured:
+            return None
+        try:
+            return serve_context(bind=BIND,configured_origin=configured,
+                peer=self.client_address[0],host=self.headers.get('Host',''),
+                forwarded_proto=self.headers.get('X-Forwarded-Proto',''),
+                forwarded_for=self.headers.get('X-Forwarded-For',''),
+                origin=self.headers.get('Origin'),method=self.command)
+        except ProxyRejected:
+            return None
+
+    def _secure_request(self):
+        return isinstance(self.connection,ssl.SSLSocket) or self._proxy_context() is not None
+
+    def _client_identity(self):
+        context=self._proxy_context()
+        return context.client_ip if context else self.client_address[0]
+
     def _host_ok(self):
         """Reject DNS-rebinding style requests by validating the Host header.
 
@@ -1558,6 +1602,10 @@ class Handler(BaseHTTPRequestHandler):
         literals plus any hostnames explicitly listed in state["server_name"],
         so an attacker-controlled domain cannot be used to reach the panel.
         """
+        if STATE.get("trusted_proxy_origin"):
+            return len(self.headers.get_all("Host", [])) == 1 and self._proxy_context() is not None
+        if len(self.headers.get_all('Host',[]))!=1:
+            return False
         host = self.headers.get("Host", "").lower().strip()
         if host.startswith("["):
             name = host.split("]", 1)[0] + "]"
@@ -1575,7 +1623,8 @@ class Handler(BaseHTTPRequestHandler):
         return name in allowed_names
 
     def _session(self):
-        current_token()  # A rotation in a separate CLI process revokes sessions.
+        if not passkey_mode():
+            current_token()  # Token rotation revokes legacy sessions.
         try:
             cookie = SimpleCookie(self.headers.get("Cookie", ""))
             sid = cookie.get("rdpwc_session").value
@@ -1584,11 +1633,20 @@ class Handler(BaseHTTPRequestHandler):
         with _session_lock:
             sess = _sessions.get(sid)
             if not sess or sess["expires"] < time.time() \
-                    or sess["addr"] != self.client_address[0]:
+                    or sess["addr"] != self._client_identity():
                 _sessions.pop(sid, None)
                 return None, None
             actor = sess.get("actor", "owner")
-            if actor.startswith("operator:"):
+            credential = sess.get("credential_hash", "")
+            if passkey_mode() or credential.startswith("passkey:"):
+                try:
+                    active = credential.startswith("passkey:") and passkey_store().active(credential[8:], actor)
+                except Exception:
+                    active = False  # A missing/unreadable keystore cannot authorize a session.
+                if not active:
+                    _sessions.pop(sid, None)
+                    return None, None
+            elif actor.startswith("operator:"):
                 record = operator_records().get(actor.split(":", 1)[1], {})
                 expected = record.get("token_sha256", "") if isinstance(record, dict) else ""
                 if not expected or not hmac.compare_digest(str(expected), sess.get("credential_hash", "")):
@@ -1631,11 +1689,11 @@ class Handler(BaseHTTPRequestHandler):
             qs = parse_qs(u.query)
             otp = (qs.get("otp") or [""])[0]
             exp = (qs.get("exp") or [""])[0]
-            if otp and exp and verify_otp(otp, exp):
+            if not passkey_mode() and otp and exp and verify_otp(otp, exp):
                 # One-time auto-login: set the session cookie and drop the params.
-                sid, _csrf = create_session(self.client_address[0])
+                sid, _csrf = create_session(self._client_identity())
                 self.send_response(302)
-                secure = "; Secure" if isinstance(self.connection, ssl.SSLSocket) else ""
+                secure = "; Secure" if self._secure_request() else ""
                 self.send_header("Set-Cookie",
                                  "rdpwc_session=%s; HttpOnly; SameSite=Strict; Path=/%s"
                                  % (sid, secure))
@@ -1668,9 +1726,9 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 self._json(404, {"error": "Panel stylesheet unavailable"})
             return
-        if u.path == "/assets/setup.js":
+        if u.path in ("/assets/setup.js", "/assets/passkeys.js"):
             try:
-                with open(os.path.join(BASE_DIR, "setup.js"), "rb") as stream:
+                with open(os.path.join(BASE_DIR, u.path.rsplit("/", 1)[1]), "rb") as stream:
                     body = stream.read()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/javascript; charset=utf-8")
@@ -1681,7 +1739,16 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 self._json(404, {"error": "Setup script unavailable"})
             return
-        if u.path == "/health": return self._json(200, {"ok": True, "ts": time.time()})
+        if u.path == "/health":
+            if passkey_mode():
+                try:
+                    passkey_store()
+                except Exception:
+                    return self._json(503, {"ok": False, "auth": "passkey"})
+            return self._json(200, {"ok": True, "ts": time.time(),
+                                    "auth": "passkey" if passkey_mode() else "token"})
+        if u.path == "/api/auth/config":
+            return self._json(200, {"mode": "passkey" if passkey_mode() else "token"})
         if u.path == "/api/session":
             _sid, sess = self._session()
             return self._json(200 if sess else 401,
@@ -1827,12 +1894,63 @@ class Handler(BaseHTTPRequestHandler):
             return
         return self._json(404, {"error": "not found"})
 
+    def _login_success(self, actor, credential_hash):
+        addr = self._client_identity()
+        login_clear_failures(addr)
+        sid, csrf = create_session(addr, actor, credential_hash)
+        self._usage_context["actor"] = actor
+        self._usage_context["session"] = hashlib.sha256(sid.encode()).hexdigest()[:16]
+        secure = "; Secure" if self._secure_request() else ""
+        return self._json(200, {"ok": True, "csrf": csrf, "actor": actor,
+                               "idle_timeout_seconds": SESSION_TTL},
+                          {"Set-Cookie": "rdpwc_session=%s; HttpOnly; SameSite=Strict; Path=/%s" % (sid, secure)})
+
+    def _passkey_request(self, path, body):
+        if not passkey_mode():
+            return self._json(404, {"error": "Passkey sign-in is not enabled."})
+        origin = STATE.get("passkey_origin", "")
+        local_test = (STATE.get("passkey_local_test") is True and BIND == "127.0.0.1"
+                      and origin == "http://localhost:%s" % self.server.server_address[1]
+                      and self.headers.get("Host") == "localhost:%s" % self.server.server_address[1])
+        if self.headers.get("Origin") != origin or not (self._secure_request() or local_test):
+            return self._json(403, {"error": "Passkey origin or secure transport rejected."})
+        addr = self._client_identity()
+        if login_rate_limited(addr):
+            return self._json(429, {"error": "Too many sign-in attempts. Retry later."})
+        parts = path.split("/")
+        if len(parts) != 5 or parts[3] not in ("login", "register") or parts[4] not in ("begin", "complete"):
+            return self._json(404, {"error": "Unknown passkey operation."})
+        kind, phase = parts[3:]
+        from passkey_auth import PasskeyError
+        try:
+            store = passkey_store()
+            if phase == "begin":
+                options, nonce = store.begin(kind, addr)
+                secure = "; Secure" if self._secure_request() else ""
+                return self._json(200, options, {"Set-Cookie":
+                    "rdpwc_webauthn=%s; HttpOnly; SameSite=Strict; Path=/api/auth; Max-Age=120%s" % (nonce, secure)})
+            try:
+                nonce = SimpleCookie(self.headers.get("Cookie", ""))["rdpwc_webauthn"].value
+            except Exception:
+                raise PasskeyError("Start the passkey request again.") from None
+            result = store.complete(kind, nonce, addr, body.get("credential", {}), body.get("label", "My device"))
+            if kind == "login":
+                return self._login_success(result["actor"], result["credential_hash"])
+            return self._json(200, result)
+        except PasskeyError as exc:
+            login_record_failure(addr)
+            return self._json(400, {"error": str(exc)})
+        except Exception:
+            return self._json(503, {"error": "Passkey service unavailable. Ask the local administrator to check TEST configuration."})
+
     def do_POST(self):
         u = urlparse(self.path)
         self._usage_context = {"action": "login" if u.path == "/api/login" else "request",
                                "actor": "unauthenticated", "request_id": secrets.token_hex(16),
                                "started": time.monotonic()}
-        if not self._host_ok(): return self._json(421, {"error": "invalid Host header"})
+        if not self._host_ok():
+            self.close_connection = True
+            return self._json(421, {"error": "invalid Host header"})
         if not client_allowed(self.client_address[0]):
             return self._json(403, {"error": "client IP not allowed"})
         try:
@@ -1841,8 +1959,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(413, {"error": "request body too large"})
         except Exception:
             return self._json(400, {"error": "invalid JSON"})
+        if u.path.startswith("/api/auth/"):
+            return self._passkey_request(u.path, body)
         if u.path == "/api/login":
-            addr = self.client_address[0]
+            if passkey_mode():
+                return self._json(403, {"error": "Use a passkey to sign in."})
+            addr = self._client_identity()
             if login_rate_limited(addr):
                 return self._json(429, {"error": "too many login attempts"})
             actor, credential_hash = authenticate_login(body.get("token", ""))
@@ -1850,21 +1972,7 @@ class Handler(BaseHTTPRequestHandler):
                 login_record_failure(addr)
                 time.sleep(0.25)
                 return self._json(401, {"error": "invalid token"})
-            login_clear_failures(addr)
-            sid, csrf = create_session(addr, actor, credential_hash)
-            self._usage_context["actor"] = actor
-            self._usage_context["session"] = hashlib.sha256(sid.encode()).hexdigest()[:16]
-            self._finish_usage(200, {"ok": True})
-            self.send_response(200)
-            payload = json.dumps({"ok": True, "csrf": csrf, "actor": actor,
-                                  "idle_timeout_seconds": SESSION_TTL}).encode()
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.send_header("Cache-Control", "no-store")
-            secure = "; Secure" if isinstance(self.connection, ssl.SSLSocket) else ""
-            self.send_header("Set-Cookie", "rdpwc_session=%s; HttpOnly; SameSite=Strict; Path=/%s" % (sid, secure))
-            self._security_headers(); self.end_headers(); self.wfile.write(payload)
-            return
+            return self._login_success(actor, credential_hash)
         sid, sess = self._session()
         if not sess: return self._json(401, {"error": "authentication required"})
         self._usage_context["actor"] = sess.get("actor", "owner")
@@ -1916,6 +2024,8 @@ class Handler(BaseHTTPRequestHandler):
                 ok, out = panel_request("suite_update_action", args, timeout=20)
                 return self._json(200, {"ok": ok, "out": out})
             if act in ("setup", "setup_token"):
+                if passkey_mode() and (act == "setup_token" or body.get("op") == "remote"):
+                    return self._json(403, {"error": "Use private Tailscale access and Passkey. Token disclosure and public access changes are disabled."})
                 if sess.get("actor") != "owner":
                     return self._json(403, {"error": "Setup requires the owner login."})
                 args = {k: v for k, v in body.items() if k not in ("action", "nonce")}
@@ -2065,6 +2175,21 @@ class Handler(BaseHTTPRequestHandler):
 
 # ---------------------------------------------------------------- main
 def main():
+    if sys.argv[1:2] and sys.argv[1] in ("private-enable", "passkey-pending", "passkey-approve", "passkey-revoke"):
+        try:
+            from private_cli import execute
+            return execute(sys.modules[__name__], sys.argv[1:])
+        except (ValueError, OSError, ImportError) as exc:
+            print("Private access setup failed:", str(exc))
+            return 1
+    if not passkey_mode():
+        print("Configure private access locally first: private-enable https://machine.tailnet.ts.net")
+        return 1
+    if passkey_mode() and sys.argv[1:2] and sys.argv[1] in (
+            "token", "rotate-token", "operator-add", "remote-enable", "remote-disable",
+            "remote-allow-add", "remote-allow-remove", "install-remote"):
+        print("Use Tailscale Serve and the local passkey management commands.")
+        return 1
     if sys.argv[1:2] and sys.argv[1] in ("operator-add", "operator-remove", "operator-list"):
         operation = sys.argv[1]
         records = STATE.setdefault("operators", {})
@@ -2102,6 +2227,10 @@ def main():
     if "uninstall" in sys.argv[1:2]:
         return do_uninstall()
     if "url" in sys.argv[1:2]:
+        if passkey_mode():
+            from private_panel import validated_url
+            print(validated_url(STATE) or "Private access is not configured")
+            return 0
         scheme = "http" if BIND in ("127.0.0.1", "::1", "localhost") else "https"
         host = "127.0.0.1" if scheme == "http" else (external_ip() or "<SERVER_IP>")
         print("%s://%s:%d/" % (scheme, host, PORT)); return 0
@@ -2133,6 +2262,16 @@ def main():
     if not acquire_instance_lock():
         print("RDPWebConsole is already running for this installation.")
         return 1
+    if passkey_mode():
+        from private_panel import validated_url
+        if BIND not in ("127.0.0.1", "::1", "localhost") or not validated_url(STATE):
+            print("Refusing to start: Passkey mode requires loopback binding and an exact Tailscale Serve origin.")
+            return 1
+        try:
+            passkey_store()
+        except Exception:
+            print("Refusing to start: verify private credential storage and install requirements-passkey.txt.")
+            return 1
     if not harden_private_storage():
         print("Refusing to start: could not protect the WebConsole directory ACL.")
         return 1
@@ -2169,7 +2308,7 @@ def main():
     print(" bind=%s:%d | exec=%s" % (BIND, PORT, "on" if EXEC_ENABLED else "off"))
     print(" local autostart: python RDPWebConsole.py install")
     print("=" * 60)
-    if BIND == "127.0.0.1" and IS_WIN:
+    if BIND == "127.0.0.1" and IS_WIN and not passkey_mode():
         threading.Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:%d/" % PORT)).start()
     try:
         srv.serve_forever()

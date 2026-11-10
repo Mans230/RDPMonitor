@@ -1,0 +1,2 @@
+# Isolated feature-test overlay. Production lockfile is unchanged.
+-r requirements-passkey.txt

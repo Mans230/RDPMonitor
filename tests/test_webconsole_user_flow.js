@@ -147,33 +147,27 @@ function authBrowser(fetchImpl, startFailure=false){
     fetch:fetchImpl,Error,Math,clearInterval:id=>timers.push(id),setInterval:()=>3,
     poll:()=>{},loadSec:()=>{},loadDay:()=>{},loadBackup:()=>{},toast:m=>notifications.push(m),location:{reload:()=>{}},
     document:{},notifications});
-  const begin=html.indexOf('function showLogin('),end=html.indexOf('$("loginBtn").onclick',begin);
+  const begin=html.indexOf('function showLogin('),end=html.indexOf('initAuth();',begin);
   vm.runInContext(html.slice(begin,end),context);
   if(startFailure)context.startApp=()=>{throw new Error('UI failed')};
   else context.startApp=()=>{context.started=true};
   return {context,fields,timers};
 }
 
-test('login distinguishes transport failure, invalid response, rejected token and UI startup',async()=>{
-  for(const [fetchImpl,startFailure,expected] of [
-    [async()=>{throw new Error('offline')},false,/Cannot reach/],
-    [async()=>({json:async()=>{throw new Error('HTML')}}),false,/invalid response/],
-    [async()=>({ok:false,status:401,json:async()=>({error:'invalid token'})}),false,/invalid token/],
-    [async()=>({ok:true,json:async()=>({csrf:'test'})}),true,/Sign-in succeeded/]
+test('authentication reads distinguish transport and malformed responses',async()=>{
+  for(const [fetchImpl,expected] of [
+    [async()=>{throw new Error('offline')},/Cannot reach/],
+    [async()=>({json:async()=>{throw new Error('HTML')}}),/invalid response/]
   ]){
-    const {context,fields}=authBrowser(fetchImpl,startFailure);await context.doLogin();
-    assert.match(fields.loginErr.textContent,expected);
-    assert.equal(fields.loginBtn.disabled,false);
+    const {context}=authBrowser(fetchImpl);
+    await assert.rejects(context.authRequest('/api/session'),expected);
   }
 });
 
-test('duplicate login submits once and sign-out stops polling',async()=>{
-  let complete,calls=0;
-  const {context,fields,timers}=authBrowser(()=>{calls++;return new Promise(resolve=>complete=resolve)});
-  const pending=context.doLogin();await context.doLogin();assert.equal(calls,1);
-  complete({ok:true,json:async()=>({csrf:'test',actor:'owner'})});await pending;
-  assert.equal(fields.sessionIdentity.textContent,'owner');assert.equal(fields.loginToken.value,'');
-  context.fetch=async()=>({ok:true,json:async()=>({ok:true})});
+test('passkey session identity and sign-out stop polling',async()=>{
+  const {context,fields,timers}=authBrowser(async()=>({ok:true,json:async()=>({ok:true})}));
+  context.enterSession({csrf:'test',actor:'owner'});
+  assert.equal(fields.sessionIdentity.textContent,'owner');
   await context.doLogout();assert.deepEqual(timers,[1,2]);assert.equal(context.CSRF,'');
 });
 

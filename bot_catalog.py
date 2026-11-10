@@ -12,11 +12,11 @@ CATEGORIES = {
     "control": ("Device actions", ["screenshot", "exec", "kill", "run", "msg", "download", "restart", "shutdown", "cancel_restart", "svc"]),
     "diagnostics": ("Diagnostics & logs", ["diagnose", "logstats", "botlog", "exportlogs", "dumps", "bigfiles", "sysinfo", "startup", "updates"]),
     "settings": ("Settings & alerts", ["set", "status", "mute", "clean", "test", "configbackup", "suiteupdate", "update"]),
-    "panel": ("Web panel", ["panel", "panelstatus", "paneltoken", "panelremote"]),
+    "panel": ("Web panel", ["panel", "panelstatus", "panelremote"]),
     "docs": ("Help & navigation", ["docs", "help", "menu"]),
 }
 ALIASES = {"/getlog": "/botlog", "/token": "/paneltoken", "/start": "/menu"}
-HIDDEN = {"/noop": "docs"}
+HIDDEN = {"/noop": "docs", "/paneltoken": "panel"}
 PAGE_ALIASES = {"mon": "resources", "users": "accounts", "sec": "security", "ctrl": "control", "maint": "settings"}
 LABELS = {"watch": "Per-process RAM limit", "view": "Live CPU / RAM snapshot",
           "set": "One settings guide", "logins": "Who logged in, source & UTC time",
@@ -51,7 +51,7 @@ def help_text(info):
         for command in commands:
             description = info.get("/" + command, ("Open its review card for details.",))[0]
             lines.append("/" + command + " — " + html.escape(description))
-    lines.append("\nAliases: /start → /menu; /getlog → /botlog; /token → /paneltoken.")
+    lines.append("\nAliases: /start -> /menu; /getlog -> /botlog.")
     return "\n".join(lines)
 
 

@@ -51,6 +51,10 @@ $Pythonw = Join-Path (Split-Path -Parent $Python) 'pythonw.exe'
 if (-not (Test-Path -LiteralPath $Pythonw)) { $Pythonw = $Python }
 $Account = $identity.Name
 
+# Validate private access before replacing any existing healthy tasks.
+& $Python -c "import json,sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); from private_panel import validated_url; from importlib.metadata import version; assert version('fido2')=='2.2.1'; state=json.loads((Path(sys.argv[1])/'webconsole/webconsole_state.json').read_text()); assert validated_url(state), 'Configure private-enable with the exact Tailscale Serve origin first'" $Root
+if ($LASTEXITCODE -ne 0) { throw 'Private panel setup is required. Install requirements-passkey.txt, then run webconsole/RDPWebConsole.py private-enable https://machine.tailnet.ts.net. Existing tasks were preserved.' }
+
 # Migrate user-scoped DPAPI while the owner can still decrypt it. Do this before
 # removing healthy tasks; failure must leave the previous installation running.
 & $Python (Join-Path $Root 'rdp_suite.py') prepare-service
