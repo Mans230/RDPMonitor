@@ -35,7 +35,8 @@ async function configurePasskeys({authRequest,enterSession}){
   const el=id=>document.getElementById(id);
   el('passkeyLogin').hidden=false;
   el('loginDescription').textContent='Use your fingerprint, face or device lock to sign in.';
-  let busy=false;
+  let busy=false,pendingRequest='';
+  const pendingMessage=()=>pendingRequest?'Passkey created. Request '+pendingRequest+' is waiting for approval in the Telegram bot (10 minutes). Approve the matching device request there. Do not create another passkey. After approval, select Sign in with passkey.':'';
   async function perform(register){
     if(busy)return;
     busy=true;
@@ -53,10 +54,10 @@ async function configurePasskeys({authRequest,enterSession}){
       const options=passkeyOptions(await post('begin',{}),register);
       const credential=register?await navigator.credentials.create(options):await navigator.credentials.get(options);
       const result=await post('complete',{credential:passkeyCredential(credential),label:el('passkeyLabel').value.trim()||'My device'});
-      if(register)el('passkeyStatus').textContent='Request '+result.pending_id+' — waiting for local administrator approval (10 minutes). After approval, select Sign in with passkey.';
-      else{el('passkeyStatus').textContent='';enterSession(result)}
+      if(register){pendingRequest=result.pending_id;el('passkeyStatus').textContent=pendingMessage()}
+      else{pendingRequest='';el('passkeyStatus').textContent='';enterSession(result)}
     }catch(error){
-      el('passkeyStatus').textContent='';
+      el('passkeyStatus').textContent=pendingMessage();
       el('loginErr').textContent=error.name==='NotAllowedError'?'Passkey request cancelled or timed out. You can retry.':error.message;
     }finally{busy=false;el('passkeyBtn').disabled=el('registerPasskeyBtn').disabled=false}
   }

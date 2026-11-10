@@ -116,6 +116,16 @@ class PasskeyTests(unittest.TestCase):
         result = self.store.complete('login', cookie, 'a', self.auth.response(options))
         self.assertEqual(result['actor'], 'operator:alice')
 
+    def test_pending_registration_login_requests_approval_not_another_passkey(self):
+        options, cookie = self.store.begin('register', 'a')
+        result = self.store.complete('register', cookie, 'a', self.auth.response(options, True))
+        with self.assertRaisesRegex(PasskeyError, 'waiting for approval') as error:
+            self.store.begin('login', 'a')
+        self.assertIn('Do not create another', str(error.exception))
+        self.store.approve(result['pending_id'])
+        options, cookie = self.store.begin('login', 'a')
+        self.assertEqual(self.store.complete('login', cookie, 'a', self.auth.response(options))['actor'], 'owner')
+
     def test_challenge_queue_is_bounded(self):
         for _ in range(8): self.store.begin('register', 'a')
         with self.assertRaises(PasskeyError): self.store.begin('register', 'a')

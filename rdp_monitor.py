@@ -2675,6 +2675,93 @@ def private_panel_url():
     return validated_url(private_panel_settings())
 
 
+def panel_passkeys():
+    state = private_panel_settings()
+    from private_panel import validated_url
+    if not validated_url(state):
+        raise ValueError("Private panel is not configured.")
+    from webconsole.passkey_auth import Passkeys
+    from pathlib import Path
+    path = Path(str(state.get("passkey_db", ""))).resolve()
+    allowed = (Path(BASE_DIR) / "webconsole").resolve()
+    if path.parent != allowed or path.name != "panel-passkeys.sqlite3":
+        raise ValueError("Unexpected private credential store location.")
+    return Passkeys(path, state["passkey_origin"])
+
+
+def panel_approval_owner():
+    # A group ID or a trusted operator is not the primary owner's private chat.
+    owner = str(config.get("chat_id", ""))
+    return owner if owner.isdigit() and int(owner) > 0 else None
+
+
+def notify_panel_passkeys():
+    owner = panel_approval_owner()
+    if not owner or not private_panel_url():
+        return
+    store = panel_passkeys()
+    for request in store.claim_notifications(limit=1):
+        label = ''.join(c for c in request["label"] if not 0x202a <= ord(c) <= 0x202e and not 0x2066 <= ord(c) <= 0x2069)
+        text = ("<b>Panel device approval</b>\n"
+                f"Device: <b>{esc(label)}</b>\n"
+                f"Request: <code>{request['id']}</code>\n"
+                f"Key: <code>{request['fingerprint'][:16]}</code>\n"
+                "Approve only if you just registered this device and the request ID matches your panel. "
+                "Expires 10 minutes after registration.")
+        markup = {"inline_keyboard": [[
+            {"text": "Approve device", "callback_data": "pk:a:" + request["id"]},
+            {"text": "Reject", "callback_data": "pk:r:" + request["id"]}]]}
+        response = tg_api("sendMessage", chat_id=owner, text=esc(_tag())+text,
+                          parse_mode="HTML", reply_markup=markup)
+        store.notification_result(request["id"], bool(response.get("ok")))
+
+
+def handle_panel_passkey_callback(callback):
+    owner = panel_approval_owner()
+    message = callback.get("message") or {}
+    chat = message.get("chat") or {}
+    uid = str((callback.get("from") or {}).get("id", ""))
+    data = str(callback.get("data", ""))
+    answer = "Only the primary owner can approve devices in their private bot chat."
+    if owner and uid == owner and str(chat.get("id", "")) == owner and chat.get("type") == "private":
+        matched = re.fullmatch(r"pk:([ar]):([a-f0-9]{12})", data)
+        if not matched:
+            answer = "Invalid approval request."
+        else:
+            op, request_id = matched.groups()
+            try:
+                store = panel_passkeys()
+                if op == "a":
+                    store.approve(request_id)
+                    answer = "Device approved. Return to the panel and sign in with your passkey."
+                else:
+                    if not store.reject(request_id):
+                        raise ValueError("Request expired or was already handled.")
+                    answer = "Device registration rejected."
+            except ValueError:
+                answer = "Request expired or was already handled. No approval was changed."
+            except Exception:
+                answer = "Approval service unavailable. Retry or ask the local administrator to check."
+            else:
+                try:
+                    audit_record("Panel passkey " + ("approved" if op == "a" else "rejected") + " by primary owner")
+                except Exception:
+                    pass  # A log failure cannot change an already committed approval outcome.
+                tg_api("editMessageText", chat_id=owner, message_id=message.get("message_id"),
+                       text=answer, reply_markup={"inline_keyboard": []})
+    tg_api("answerCallbackQuery", callback_query_id=callback.get("id"), text=answer)
+
+
+def panel_passkey_notification_loop():
+    while True:
+        try:
+            notify_panel_passkeys()
+        except Exception:
+            # No key material or bot credentials in logs. SQLite leases recover retries.
+            print("[passkeys] Approval notification unavailable; retrying.")
+        time.sleep(5)
+
+
 def panel_login_url(host=None):
     """Compatibility helper: plain private link, never a bearer login link."""
     return private_panel_url()
@@ -11561,7 +11648,9 @@ def telegram_loop():
                         continue
                     d = cb.get("data", "")
                     audit_record(f"{uid}: [button] {_scrub_secrets(d)[:60]}")
-                    if d.startswith("pg:"):
+                    if d.startswith("pk:"):
+                        handle_panel_passkey_callback(cb)
+                    elif d.startswith("pg:"):
                         handle_message_page(cb)
                     elif d.startswith("run:"):
                         queued = _enqueue_command(handle_run_callback, (d[4:],), uid)
@@ -11805,6 +11894,7 @@ def main():
     threading.Thread(target=backup_live_loop, daemon=True).start()
     # Execute WebConsole panel requests (RDP security actions).
     threading.Thread(target=monitor_control_loop, daemon=True).start()
+    threading.Thread(target=panel_passkey_notification_loop, daemon=True).start()
     # Generate the documentation database (docs/COMMANDS.md).
     try:
         generate_docs_file()

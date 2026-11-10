@@ -270,7 +270,10 @@ tailscale serve --bg http://127.0.0.1:8399
 
 Start/restart the suite, open the HTTPS private URL or send `/panel` in the bot,
 and select **Register this device**. Confirm with your fingerprint/device lock.
-Match the browser's request ID in a local Administrator terminal before approval:
+The primary owner receives a private Telegram message. Match its request ID to
+the browser, then select **Approve device** or **Reject**. Trusted operators and
+group chats cannot approve devices. Use the local Administrator commands below
+for recovery or group-only bot installations:
 
 ```console
 python webconsole\RDPWebConsole.py passkey-pending

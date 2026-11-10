@@ -211,6 +211,10 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 .loginbox h1{font-family:var(--font-display);font-size:var(--text-xl);font-weight:600;letter-spacing:-.01em;margin-bottom:8px}
 .loginbox p{color:var(--mut);line-height:1.7;margin-bottom:16px;font-size:var(--text-sm)}
 .loginbox input{width:100%;margin-bottom:12px}
+#passkeyLogin>details{margin-top:24px;padding-top:20px;border-top:1px solid var(--bd2)}
+#passkeyLogin>details>summary{cursor:pointer;padding:8px 0 12px}
+#registerPasskeyBtn{margin-top:8px}
+
 .loginerr{color:#FCA5A5;min-height:20px;margin-top:10px;font-size:var(--text-sm)}
 
 /* ---------- bot command center ---------- */
@@ -294,7 +298,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         <label for="passkeyLabel" class="field-label">Device name</label>
         <input id="passkeyLabel" maxlength="60" placeholder="My laptop" autocomplete="off">
         <button class="btn" id="registerPasskeyBtn" type="button">Create passkey</button>
-        <p>New devices need local administrator approval. Match the request ID before approval.</p>
+        <p>New devices need owner approval in the Telegram bot. Match the request ID in the bot message, then select Approve device.</p>
       </details>
       <p id="passkeyStatus" role="status" aria-live="polite"></p>
     </div>
@@ -439,7 +443,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         <p id="setupRemoteStatus" class="mut" role="status">Checking private access...</p>
         <p><a id="setupPrivateUrl" hidden>Open private panel</a></p>
         <p>Connect this device to Tailscale, open the private HTTPS address and sign in with your passkey using your fingerprint or device lock.</p>
-        <p>Register new devices on the sign-in screen. A local server administrator must match and approve each request. Passkeys can be revoked locally; no login token is shared through the bot.</p>
+        <p>Register new devices on the sign-in screen. The primary owner receives a Telegram approval request and must match its ID before approving. Passkeys can be revoked locally; no login token is shared through the bot.</p>
         <details><summary>Administrator setup and recovery</summary>
           <p>Configure Tailscale Serve and the exact private hostname locally on the server. The panel listens on loopback only. Keep RDP available for recovery.</p>
           <p>Use the local commands <code>private-enable</code>, <code>passkey-pending</code>, <code>passkey-approve</code> and <code>passkey-revoke</code>. Public IP access cannot be enabled here.</p>
