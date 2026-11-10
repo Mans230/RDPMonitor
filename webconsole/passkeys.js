@@ -50,6 +50,7 @@ async function configurePasskeys({authRequest,enterSession}){
   async function perform(register){
     if(busy)return;
     busy=true;
+    let focusSignIn=false;
     el('passkeyBtn').disabled=el('registerPasskeyBtn').disabled=true;
     el('loginErr').textContent='';
     try{
@@ -69,8 +70,8 @@ async function configurePasskeys({authRequest,enterSession}){
     }catch(error){
       el('passkeyStatus').textContent=pendingMessage();
       el('loginErr').textContent=passkeyErrorMessage(error,register);
-      if(register&&error.name==='InvalidStateError')el('passkeyBtn').focus?.();
-    }finally{busy=false;el('passkeyBtn').disabled=el('registerPasskeyBtn').disabled=false}
+      focusSignIn=register&&error.name==='InvalidStateError';
+    }finally{busy=false;el('passkeyBtn').disabled=el('registerPasskeyBtn').disabled=false;if(focusSignIn)el('passkeyBtn').focus?.()}
   }
   el('passkeyBtn').onclick=()=>perform(false);
   el('registerPasskeyBtn').onclick=()=>perform(true);

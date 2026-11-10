@@ -91,7 +91,7 @@ test('retrying sign-in while approval is pending preserves the request and creat
 
 test('duplicate registration guides sign-in without creating or authenticating another credential',async()=>{
   const f=fixture();await f.configure();let focused=false;
-  f.el('passkeyBtn').focus=()=>{focused=true};
+  f.el('passkeyBtn').focus=()=>{if(!f.el('passkeyBtn').disabled)focused=true};
   f.context.navigator.credentials.create=async()=>{const e=new Error('native duplicate');e.name='InvalidStateError';throw e};
   await f.el('registerPasskeyBtn').onclick();
   assert.match(f.el('loginErr').textContent,/already has a passkey/);
