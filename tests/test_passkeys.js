@@ -88,3 +88,30 @@ test('retrying sign-in while approval is pending preserves the request and creat
   assert.equal(f.calls.filter(c=>c.path==='/api/auth/register/begin').length,1);
   assert.equal(f.sessions.length,0);
 });
+
+test('duplicate registration guides sign-in without creating or authenticating another credential',async()=>{
+  const f=fixture();await f.configure();let focused=false;
+  f.el('passkeyBtn').focus=()=>{focused=true};
+  f.context.navigator.credentials.create=async()=>{const e=new Error('native duplicate');e.name='InvalidStateError';throw e};
+  await f.el('registerPasskeyBtn').onclick();
+  assert.match(f.el('loginErr').textContent,/already has a passkey/);
+  assert.match(f.el('loginErr').textContent,/another passkey provider or a security key/);
+  assert.equal(focused,true);
+  assert.deepEqual(f.calls.map(c=>c.path),['/api/auth/config','/api/auth/register/begin']);
+  assert.equal(f.sessions.length,0);
+  assert.equal(f.el('registerPasskeyBtn').disabled,false);
+});
+
+test('generic provider failures stay distinct from duplicate registration and allow a later sign-in',async()=>{
+  for(const name of ['UnknownError','NotReadableError']){
+    const f=fixture();await f.configure();
+    f.context.navigator.credentials.create=async()=>{const e=new Error('unknown transient reason');e.name=name;throw e};
+    await f.el('registerPasskeyBtn').onclick();
+    assert.match(f.el('loginErr').textContent,/could not complete registration/);
+    assert.ok(f.el('loginErr').textContent.includes('('+name+')'));
+    assert.doesNotMatch(f.el('loginErr').textContent,/already has a passkey/);
+    assert.equal(f.calls.some(c=>c.path.endsWith('/complete')),false);
+    await f.el('passkeyBtn').onclick();
+    assert.equal(f.sessions.length,1);
+  }
+});

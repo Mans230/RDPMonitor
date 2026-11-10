@@ -28,6 +28,16 @@ function passkeyCredential(credential){
   return {id:credential.id,rawId:passkeyEncode(credential.rawId),type:credential.type,
     response,clientExtensionResults:credential.getClientExtensionResults()};
 }
+function passkeyErrorMessage(error,register){
+  if(error.name==='NotAllowedError')return 'Passkey request cancelled or timed out. You can retry.';
+  if(register&&error.name==='InvalidStateError')return 'This passkey provider already has a passkey for this panel. Select Sign in with passkey. To add a separate passkey, choose another passkey provider or a security key.';
+  if(error.name==='UnknownError'||error.name==='NotReadableError'){
+    const action=register?'registration':'sign-in';
+    const next=register?'If you already saved a passkey, select Sign in with passkey. To add another, choose a different provider or security key. Otherwise unlock your device and retry.':'Unlock your device and retry, or choose another saved passkey.';
+    return 'Your browser or passkey provider could not complete '+action+' ('+error.name+'). '+next;
+  }
+  return error.message||'Passkey request failed. Retry.';
+}
 async function configurePasskeys({authRequest,enterSession}){
   const {response,data}=await authRequest('/api/auth/config');
   if(!response.ok)throw new Error('Could not check sign-in settings. Reload to retry.');
@@ -58,7 +68,8 @@ async function configurePasskeys({authRequest,enterSession}){
       else{pendingRequest='';el('passkeyStatus').textContent='';enterSession(result)}
     }catch(error){
       el('passkeyStatus').textContent=pendingMessage();
-      el('loginErr').textContent=error.name==='NotAllowedError'?'Passkey request cancelled or timed out. You can retry.':error.message;
+      el('loginErr').textContent=passkeyErrorMessage(error,register);
+      if(register&&error.name==='InvalidStateError')el('passkeyBtn').focus?.();
     }finally{busy=false;el('passkeyBtn').disabled=el('registerPasskeyBtn').disabled=false}
   }
   el('passkeyBtn').onclick=()=>perform(false);
