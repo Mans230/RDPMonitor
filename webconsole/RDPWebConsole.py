@@ -2182,6 +2182,9 @@ def main():
         except (ValueError, OSError, ImportError) as exc:
             print("Private access setup failed:", str(exc))
             return 1
+    if not passkey_mode():
+        print("Configure private access locally first: private-enable https://machine.tailnet.ts.net")
+        return 1
     if passkey_mode() and sys.argv[1:2] and sys.argv[1] in (
             "token", "rotate-token", "operator-add", "remote-enable", "remote-disable",
             "remote-allow-add", "remote-allow-remove", "install-remote"):
@@ -2224,6 +2227,10 @@ def main():
     if "uninstall" in sys.argv[1:2]:
         return do_uninstall()
     if "url" in sys.argv[1:2]:
+        if passkey_mode():
+            from private_panel import validated_url
+            print(validated_url(STATE) or "Private access is not configured")
+            return 0
         scheme = "http" if BIND in ("127.0.0.1", "::1", "localhost") else "https"
         host = "127.0.0.1" if scheme == "http" else (external_ip() or "<SERVER_IP>")
         print("%s://%s:%d/" % (scheme, host, PORT)); return 0

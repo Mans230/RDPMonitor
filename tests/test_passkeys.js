@@ -28,7 +28,6 @@ function fixture(mode='passkey'){
 
 test('registration shows local approval request and does not enter a session',async()=>{
   const f=fixture();await f.configure();
-  assert.equal(f.el('tokenLogin').hidden,true);
   assert.equal(f.el('passkeyLogin').hidden,false);
   await f.el('registerPasskeyBtn').onclick();
   assert.deepEqual(f.calls.map(x=>x.path),['/api/auth/config','/api/auth/register/begin','/api/auth/register/complete']);
@@ -65,8 +64,15 @@ test('unsupported browser and cancellation offer retry without a session',async(
   assert.equal(f.sessions.length,0);assert.equal(f.el('passkeyBtn').disabled,false);
 });
 
-test('existing token mode remains available only when configured',async()=>{
-  const f=fixture('token');await f.configure();
-  assert.equal(f.el('tokenLogin').hidden,false);
+test('unconfigured private access never exposes a token login form',async()=>{
+  const f=fixture('token');
+  await assert.rejects(f.configure(),/Private access is not configured/);
   assert.equal(f.el('passkeyBtn').onclick,undefined);
+});
+
+test('panel setup has no legacy IP access selector or token reveal controls',()=>{
+  const html=fs.readFileSync(require('node:path').join(__dirname,'../webconsole/webconsole_ui.html'),'utf8');
+  for(const obsolete of ['setupAccessMode','setupAllowedIps','setupLoginToken','setupRevealToken','id="loginToken"'])assert.equal(html.includes(obsolete),false);
+  assert.match(html,/Private panel access/);
+  assert.match(html,/setupPrivateUrl/);
 });

@@ -31,11 +31,10 @@ function passkeyCredential(credential){
 async function configurePasskeys({authRequest,enterSession}){
   const {response,data}=await authRequest('/api/auth/config');
   if(!response.ok)throw new Error('Could not check sign-in settings. Reload to retry.');
-  if(data.mode!=='passkey')return;
+  if(data.mode!=='passkey')throw new Error('Private access is not configured. Ask the server administrator to configure Tailscale Serve and Passkey.');
   const el=id=>document.getElementById(id);
-  el('tokenLogin').hidden=true;
   el('passkeyLogin').hidden=false;
-  el('loginDescription').textContent='Use your fingerprint, face or device lock to sign in. TEST environment.';
+  el('loginDescription').textContent='Use your fingerprint, face or device lock to sign in.';
   let busy=false;
   async function perform(register){
     if(busy)return;

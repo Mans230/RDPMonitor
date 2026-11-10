@@ -69,14 +69,12 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.m.config['rclone_remote'],'old:Images')
         self.assertEqual(self.cm.save_config.call_args.args[0]['cloud'],self.cfg['cloud'])
 
-    def test_remote_cli_arguments_are_validated_before_firewall_changes(self):
-        self.m._run_webconsole_cli=mock.Mock(return_value=(0,'OK'))
-        with self.assertRaises(ValueError):
-            self.s.execute({'op':'remote','mode':'restricted','ips':['bad & anything']},'x')
+    def test_old_remote_modes_never_change_firewall_or_binding(self):
+        self.m._run_webconsole_cli=mock.Mock()
+        for mode in ('local', 'restricted', 'public'):
+            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, 'Tailscale'):
+                self.s.execute({'op':'remote','mode':mode,'ips':['203.0.113.1']},'x')
         self.m._run_webconsole_cli.assert_not_called()
-        with mock.patch('panel_setup.time.sleep'):
-            self.s.execute({'op':'remote','mode':'restricted','ips':['203.0.113.1']},'x')
-        self.m._run_webconsole_cli.assert_called_once_with(['remote-enable','--allow','203.0.113.1/32'])
 
     def test_provider_questions_resume_without_publishing_secret_answers(self):
         self.s.jobs['x']={'id':'x','state':'running'}

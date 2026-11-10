@@ -287,11 +287,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
 </head>
 <body>
 <div class="loginbg" id="loginBg">
-  <div class="loginbox"><h1 id="loginTitle">RDPMonitor</h1><p id="loginDescription">Enter your personal operator token or the owner token. A secure, time-limited session is created.</p>
-    <div id="tokenLogin">
-    <label for="loginToken" class="field-label">Login token</label>
-    <input id="loginToken" type="password" autocomplete="current-password" placeholder="Enter your token" aria-describedby="loginErr">
-    <button class="btn primary" id="loginBtn">Login</button></div>
+  <div class="loginbox"><h1 id="loginTitle">RDPMonitor</h1><p id="loginDescription">Connect Tailscale, then sign in with your passkey using your fingerprint or device lock.</p>
     <div id="passkeyLogin" hidden>
       <button class="btn primary" id="passkeyBtn" type="button">Sign in with passkey</button>
       <details><summary>Register this device</summary>
@@ -439,9 +435,15 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--muted);border-radi
         <form onsubmit="event.preventDefault();setupSchedule()"><label>Automatic backups<select id="setupScheduleEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><label>Schedule mode<select id="setupScheduleMode" onchange="setupScheduleHint()"><option value="daily">Daily</option><option value="interval">Every N hours</option><option value="times">Several times per day</option></select></label><label id="setupScheduleLabel">Time · HH:MM<input id="setupScheduleValue" required placeholder="03:00"></label><button class="btn" type="submit">Save schedule</button></form>
       </section>
       <section class="card"><h3>System images</h3><p id="setupImageStatus" class="mut">Loading…</p><p class="mut">Full system capture can use substantial disk space. Keep all VHDX files together and verify a restore in a VM.</p><div class="setup-controls"><button class="btn" id="setupImageStart" onclick="setupDo('image_start',{},'Capture a full system image now? This uses disk space and may automatically upload to the saved destination.')">Capture system image</button><button class="btn" onclick="setupDo('image_stop',{},'Stop the current image capture or upload? Partial files will remain.')">Stop operation</button><button class="btn" onclick="goTab('settings')">Imaging permission</button></div><div id="setupImageFiles"></div></section>
-      <section class="card setup-wide"><h3>Panel access</h3><p id="setupRemoteStatus" class="mut">Loading…</p><p class="mut">Changing access restarts the panel and ends this session. Local mode opens inside RDP at http://127.0.0.1:8399/. Remote mode uses HTTPS and the login token. The generated certificate may show a browser warning; the provider firewall must also permit this port.</p>
-        <form onsubmit="event.preventDefault();setupRemote()"><label>Access mode<select id="setupAccessMode"><option value="local">Local server only</option><option value="restricted">HTTPS · selected IPs</option><option value="public">HTTPS · any IPv4 address</option></select></label><label>Allowed IPs or CIDRs, one per line<textarea id="setupAllowedIps" rows="2" placeholder="203.0.113.10/32"></textarea></label><button class="btn" type="submit">Apply access settings</button></form>
-        <details ontoggle="if(!this.open)$('setupLoginToken').textContent='' "><summary>Login token</summary><button class="btn" onclick="setupRevealToken()">Reveal owner token</button><code id="setupLoginToken" style="overflow-wrap:anywhere"></code><p class="mut">Anyone with this token can control the panel. It is hidden automatically after one minute.</p></details>
+      <section class="card setup-wide"><h3>Private panel access</h3>
+        <p id="setupRemoteStatus" class="mut" role="status">Checking private access...</p>
+        <p><a id="setupPrivateUrl" hidden>Open private panel</a></p>
+        <p>Connect this device to Tailscale, open the private HTTPS address and sign in with your passkey using your fingerprint or device lock.</p>
+        <p>Register new devices on the sign-in screen. A local server administrator must match and approve each request. Passkeys can be revoked locally; no login token is shared through the bot.</p>
+        <details><summary>Administrator setup and recovery</summary>
+          <p>Configure Tailscale Serve and the exact private hostname locally on the server. The panel listens on loopback only. Keep RDP available for recovery.</p>
+          <p>Use the local commands <code>private-enable</code>, <code>passkey-pending</code>, <code>passkey-approve</code> and <code>passkey-revoke</code>. Public IP access cannot be enabled here.</p>
+        </details>
       </section>
       <section class="card setup-wide" id="suiteUpdateSection"><h3>Bot &amp; web panel updates</h3>
         <p class="mut">Install validated releases from Mans230/RDPMonitor. Updates preserve configuration and restart the bot and panel. Active backups and system images postpone installation. A dependency change requires manual installation.</p>
@@ -1661,7 +1663,7 @@ async function loadSec(){
 function showLogin(msg){
   const title=$("loginTitle");if(title?.tagName==='H2')title.outerHTML='<h1 id="loginTitle">RDPMonitor</h1>';
   appTimers.forEach(clearInterval);appTimers=[];started=false;
-  if(typeof setupLoaded!=="undefined"){setupLoaded=false;suiteUpdateLoaded=false;$("setupLoginToken").textContent="";document.querySelectorAll("#tab-setup input,#tab-setup textarea").forEach(i=>i.value="")}
+  if(typeof setupLoaded!=="undefined"){setupLoaded=false;suiteUpdateLoaded=false;document.querySelectorAll("#tab-setup input,#tab-setup textarea").forEach(i=>i.value="")}
   if($("passwordDialog")?.open)$("passwordDialog").close();
   $("app").style.display="none";$("loginBg").style.display="grid";
   $("loginErr").textContent=msg||"";CSRF="";
@@ -1691,23 +1693,12 @@ async function authRequest(path,options){
 }
 function enterSession(data){
   if(typeof data.csrf!=="string"||!data.csrf)throw new Error("The server returned incomplete session data. Reload and sign in again.");
-  CSRF=data.csrf;$("loginToken").value="";
+  CSRF=data.csrf;
   const title=$("loginTitle");if(title?.tagName==='H1')title.outerHTML='<h2 id="loginTitle">RDPMonitor</h2>';
   $("sessionIdentity").textContent=data.actor||"Signed in";
   $("sessionIdentity").title="Session renews while active; idle timeout "+Math.round((data.idle_timeout_seconds||1800)/60)+" minutes";
   try{startApp()}
   catch(e){throw new Error("Sign-in succeeded, but the panel could not start. Reload the page to recover.")}
-}
-async function doLogin(){
-  if(loginBusy)return;
-  const token=$("loginToken").value.trim();if(!token){showLogin("Enter your login token first.");return}
-  loginBusy=true;$("loginBtn").disabled=true;$("loginErr").textContent="Verifying…";
-  try{
-    const {response:r,data:j}=await authRequest("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});
-    if(!r.ok){showLogin(j.error||(r.status===429?"Too many attempts. Wait before retrying.":"Sign-in rejected. Check the token and retry."));return}
-    enterSession(j);
-  }catch(e){showLogin(e.message)}
-  finally{loginBusy=false;$("loginBtn").disabled=false}
 }
 async function initAuth(){
   try{
@@ -1721,12 +1712,10 @@ async function doLogout(){
   try{
     const {response:r,data:j}=await authRequest("/api/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":CSRF},body:"{}"});
     if(!r.ok&&r.status!==401)throw new Error(j.error||"Sign out was not confirmed. Retry.");
-    showLogin("Signed out.");$("loginToken").value="";location.reload();
+    showLogin("Signed out.");location.reload();
   }catch(e){toast(e.message,true)}
   finally{$("logoutBtn").disabled=false}
 }
-$("loginBtn").onclick=doLogin;
-$("loginToken").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
 initAuth();
 window.addEventListener("resize",()=>{if(!$("tab-charts").style.display)drawAll();if(!$("tab-live").style.display)drawOverview();if(!$("tab-bandwidth").style.display){drawBandwidth();renderBandwidthUsage()}if(innerWidth>700)closeNightMenu(false)});
 window.addEventListener("keydown",e=>{if(e.key==='Escape'&&document.body.classList.contains('menu-open'))closeNightMenu()});

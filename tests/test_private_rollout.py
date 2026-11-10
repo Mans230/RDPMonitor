@@ -15,6 +15,22 @@ from suite_update import WindowsRuntime, allowed_path, REQUIRED
 
 
 class PrivateRolloutTests(unittest.TestCase):
+    def test_unconfigured_normal_startup_never_starts_legacy_token_server(self):
+        import RDPWebConsole as wc
+        with mock.patch.object(wc, 'STATE', {'bind': '0.0.0.0'}), \
+                mock.patch.object(wc, 'acquire_instance_lock') as lock, \
+                mock.patch('sys.argv', ['RDPWebConsole.py']), mock.patch('builtins.print'):
+            self.assertEqual(wc.main(), 1)
+            lock.assert_not_called()
+
+    def test_private_endpoint_is_used_by_suite_status_and_open(self):
+        import rdp_suite
+        state = {'bind': '127.0.0.1', 'auth_mode': 'passkey',
+                 'trusted_proxy_origin': 'https://server.tail.ts.net',
+                 'passkey_origin': 'https://server.tail.ts.net'}
+        with mock.patch('builtins.open', mock.mock_open(read_data=json.dumps(state))):
+            self.assertEqual(rdp_suite._webconsole_endpoint(), ('https://server.tail.ts.net/', ''))
+
     def test_private_panel_refuses_a_public_bind_at_startup(self):
         import RDPWebConsole as wc
         with mock.patch.object(wc, 'STATE', {'auth_mode': 'passkey'}), \

@@ -123,7 +123,7 @@ machine. Treat the bot token and chat like the server's root password.
 - Disabled by default; requires confirmation and a VM restore drill before you trust it
 
 ### Local WebConsole
-- Authenticated browser panel on `127.0.0.1:8399` (see [below](#the-local-webconsole))
+- Private browser panel through Tailscale Serve and Passkey (see [below](#the-private-webconsole))
 
 ## Requirements
 
@@ -247,48 +247,48 @@ The **complete, generated command reference** for every bot command lives in
 [`docs/COMMANDS.md`](docs/COMMANDS.md), and the bot itself can show it with `/help` and
 `/docs <command>`.
 
-## The local WebConsole
+## The private WebConsole
 
-Recommended local use (Administrator terminal):
+The panel uses **Tailscale Serve + Passkey**. It listens on loopback only;
+there is no public IP login page or chat login token. Install and sign in to
+Tailscale on the server and each administrator device, then enable HTTPS Serve
+for the server's MagicDNS name. Use Serve, not public Funnel.
 
-```console
-python webconsole\RDPWebConsole.py
-```
-
-Open `http://127.0.0.1:8399/` and enter the login token. To display or rotate it:
-
-```console
-python webconsole\RDPWebConsole.py token
-python webconsole\RDPWebConsole.py rotate-token
-```
-
-Install local at-logon startup **without** opening an inbound firewall port:
+Before installing/replacing suite tasks, configure the panel locally as Administrator:
 
 ```console
-python webconsole\RDPWebConsole.py install
+python -m pip install -r requirements-passkey.txt
+python webconsole\RDPWebConsole.py private-enable https://machine.tailnet.ts.net
 ```
 
-Remote access should normally go through a VPN such as **Tailscale** or **WireGuard**.
-Direct remote mode is refused unless TLS files and an explicit source-IP allow-list are
-configured:
+Use the actual server name, then configure Serve to forward to the panel's loopback
+port (normally 8399):
 
 ```console
-set RDPWC_TLS_CERT=C:\secure\cert.pem
-set RDPWC_TLS_KEY=C:\secure\key.pem
-set RDPWC_ALLOWED_IPS=203.0.113.5/32
-python webconsole\RDPWebConsole.py install-remote
+tailscale serve --bg http://127.0.0.1:8399
 ```
 
-WebConsole security defaults:
+Start/restart the suite, open the HTTPS private URL or send `/panel` in the bot,
+and select **Register this device**. Confirm with your fingerprint/device lock.
+Match the browser's request ID in a local Administrator terminal before approval:
 
-- Command and program execution are disabled (`exec_enabled=false`).
-- File downloads are disabled (`downloads_enabled=false`).
-- The login token is protected with Windows DPAPI and never appears in the URL.
-- Sessions expire after 30 minutes and modifying requests require CSRF protection.
-- Downloads, when explicitly enabled, are restricted to configured roots and 50 MB.
-- Request, connection, authentication, and worker limits are enforced.
+```console
+python webconsole\RDPWebConsole.py passkey-pending
+python webconsole\RDPWebConsole.py passkey-approve <matched_request_id>
+python webconsole\RDPWebConsole.py passkey-revoke <fingerprint>
+```
 
-See [`webconsole/README.md`](webconsole/README.md) and [`SECURITY.md`](SECURITY.md).
+New registrations cannot sign in until approved. Store a second approved passkey
+and retain RDP for recovery. Disable the old panel firewall allow rule after
+verifying the private route. The local installer preserves existing tasks if
+private access or pinned authentication dependencies are missing.
+
+Commands/program execution and downloads remain disabled by default. Sessions
+expire after 30 minutes; modifying requests require CSRF protection. Revoking a
+passkey rejects its sessions on the next request. The server stores public keys,
+never your private keys or biometric data.
+
+See [the setup and migration guide](docs/PASSKEY-TEST.md).
 
 ## Backups and restore
 

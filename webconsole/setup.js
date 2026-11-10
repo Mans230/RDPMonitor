@@ -1,5 +1,5 @@
 /* Owner setup forms. Secrets are sent only in confirmed POST bodies. */
-let setupLoaded=false,setupBusy=false,setupJobsBusy=false,setupJobSignature='',setupTokenTimer,setupImagesActive=false,setupLastRefresh=0,setupCloudReady=false;
+let setupLoaded=false,setupBusy=false,setupJobsBusy=false,setupJobSignature='',setupImagesActive=false,setupLastRefresh=0,setupCloudReady=false;
 const setupFields={drive:[['client_id','OAuth client ID (optional)'],['client_secret','OAuth client secret (optional)','password']],onedrive:[['client_id','OAuth client ID (optional)'],['client_secret','OAuth client secret (optional)','password']],dropbox:[],s3:[['provider','S3 provider (AWS / Wasabi / Minio / Other)'],['access_key_id','Access key ID'],['secret_access_key','Secret access key','password'],['endpoint','Endpoint URL (optional)'],['region','Region (optional)']],b2:[['account','Application key ID'],['key','Application key','password']],sftp:[['host','Server hostname'],['user','Username'],['pass','Password','password'],['port','Port (optional)']],ftp:[['host','Server hostname'],['user','Username'],['pass','Password','password']],webdav:[['url','WebDAV URL'],['vendor','Vendor (other / nextcloud / owncloud)'],['user','Username'],['pass','Password','password']]};
 function setupLines(id){return $(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
 function setupJump(index){document.querySelectorAll('#tab-setup section')[index].scrollIntoView({behavior:'smooth',block:'start'})}
@@ -98,7 +98,9 @@ async function loadSetup(reset=false){
     for(const f of images.files){const row=document.createElement('div');row.className='setup-image';const label=document.createElement('div');label.textContent=f.path+' · '+hb(f.size)+' · '+new Date(f.modified*1000).toLocaleString();row.append(label);for(const [text,op] of [['Upload','image_upload'],['Share link','image_link']]){const button=document.createElement('button');button.className='btn';button.textContent=text;button.disabled=active;button.onclick=()=>setupDo(op,{path:f.path},op==='image_link'?'Create a public share link for this uploaded image?':'Upload '+f.path+' to the saved image destination?');row.append(button)}$('setupImageFiles').append(row)}
     if(!images.files.length)$('setupImageFiles').textContent='No FULLSYSTEM VHDX images found on the server.';
     const remote=d.remote;
-    $('setupRemoteStatus').textContent='Current: '+remote.bind+':'+remote.port+' · '+(remote.https?'HTTPS':'HTTP')+' · '+(remote.allowed_ips.join(', ')||'local only');
+    $('setupRemoteStatus').textContent=remote.configured?'Tailscale Serve connected to this panel. Sign-in: Passkey.':'Private access is not configured. Ask the server administrator to configure Tailscale Serve and Passkey locally.';
+    $('setupPrivateUrl').hidden=!remote.url;
+    $('setupPrivateUrl').href=remote.url||'';
     $('setupTimezone').textContent='Times use the server timezone: '+d.backup.timezone+'. Existing retry settings are preserved.';
     if(!d.cloud.error)syncSetupRemoteChoices(d.cloud.remotes);
     if(!setupLoaded||reset){
@@ -108,7 +110,6 @@ async function loadSetup(reset=false){
       $('setupBackupTargets').value=d.cloud.backup_targets.join('\n');$('setupBackupFolder').value=d.cloud.folder;
       $('setupSourcePaths').value=d.backup.sources.join('\n');
       const s=d.backup.schedule;$('setupScheduleEnabled').value=String(s.enabled!==false);$('setupScheduleMode').value=s.mode||'daily';$('setupScheduleValue').value=s.mode==='interval'?s.interval_hours:s.mode==='times'?(s.times||[]).join(','):s.time||'03:00';setupScheduleHint();
-      $('setupAccessMode').value=['127.0.0.1','localhost','::1'].includes(remote.bind)?'local':remote.allowed_ips.includes('0.0.0.0/0')?'public':'restricted';$('setupAllowedIps').value=remote.allowed_ips.join('\n');
       // Initial discovery may fail even though a destination is already saved.
       // Keep it visibly unavailable rather than silently selecting no upload.
       syncSetupRemoteChoices(d.cloud.error?[]:d.cloud.remotes,savedImageRemote);
@@ -169,9 +170,3 @@ function setupTargets(){
   return setupDo('targets',{image:remote?remote+$('setupImageFolder').value.trim():'',backups:setupLines('setupBackupTargets'),folder:$('setupBackupFolder').value},'Replace cloud destinations? Empty destinations disable cloud copies; existing cloud files remain.');
 }
 function setupSchedule(){return setupDo('schedule',{enabled:$('setupScheduleEnabled').value==='true',mode:$('setupScheduleMode').value,value:$('setupScheduleValue').value},'Save this automatic backup schedule in the server timezone?')}
-function setupRemote(){return setupDo('remote',{mode:$('setupAccessMode').value,ips:setupLines('setupAllowedIps')},'Apply panel access settings? The panel will restart and sign you out. Restricted IPs can prevent this device from reconnecting. Keep RDP access available.')}
-async function setupRevealToken(){
-  if(!confirm('Reveal the owner login token on this screen for one minute?'))return;
-  const j=await act({action:'setup_token'},true);
-  if(j?.ok){$('setupLoginToken').textContent=j.out.token;clearTimeout(setupTokenTimer);setupTokenTimer=setTimeout(()=>$('setupLoginToken').textContent='',60000)}
-}

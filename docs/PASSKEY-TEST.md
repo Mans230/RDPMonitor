@@ -152,7 +152,7 @@ replay/expiry, wrong Origin, missing verification, bad signatures, counters,
 operator permissions, owner/operator revocation and simulated Serve headers.
 Node tests cover the browser codec and registration/login/error flows.
 
-Local result: 312 Python tests and 34 Node tests passed; all 31 locked runtime
+Local result: 314 Python tests and 35 Node tests passed; all 31 locked runtime
 versions matched. A real TEST-runner smoke check also served the login UI and
 Passkey configuration and denied token login and host-management actions.
 
@@ -165,3 +165,17 @@ approved authenticator, service installation and production credential migration
 Protocol references: [WebAuthn](https://www.w3.org/TR/webauthn-3/),
 [python-fido2](https://developers.yubico.com/python-fido2/),
 [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve).
+
+## Complete private-only setup
+
+The sign-in page has no token form. Setup has no Local/Public IP selector, IP
+allow-list editor or token reveal control. Old setup requests cannot invoke the
+remote-enable CLI. Normal panel startup refuses unconfigured legacy mode, and
+the installer validates private configuration/dependencies before replacing tasks.
+The suite's open/status commands resolve the exact private HTTPS URL.
+
+During the controlled host migration, automatic installation was paused and the
+prior enabled state was saved under ignored test-runtime/. Restore its prior
+setting only after the migrated bot, private route and loopback listener pass
+health checks. The public 8399 listener and its panel firewall rule must be
+verified closed as part of rollout. This source change alone does not close them.

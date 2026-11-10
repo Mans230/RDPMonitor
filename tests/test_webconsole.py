@@ -394,24 +394,18 @@ class WebConsoleSecurityTests(unittest.TestCase):
         self.assertNotIn(token, json.dumps(events))
         self.assertNotIn(sid, json.dumps(events))
 
-    def test_operator_cli_stores_only_hash_and_removes_credentials(self):
+    def test_private_cli_never_issues_legacy_login_credentials(self):
         import io
         from unittest import mock
-        state = {}
-        with mock.patch.object(wc, "STATE", state), \
-                mock.patch.object(wc, "atomic_write") as write, \
-                mock.patch.object(wc, "harden_file", return_value=True), \
-                mock.patch.object(wc.secrets, "token_urlsafe", return_value="FAKE_TOKEN"), \
-                mock.patch.object(wc.sys, "stdout", io.StringIO()), \
-                mock.patch.object(wc.sys, "argv", ["panel", "operator-add", "alice"]):
-            self.assertEqual(wc.main(), 0)
-            self.assertNotIn("FAKE_TOKEN", json.dumps(state))
-            self.assertEqual(state["operators"]["alice"]["token_sha256"],
-                             wc.hashlib.sha256(b"FAKE_TOKEN").hexdigest())
-            with mock.patch.object(wc.sys, "argv", ["panel", "operator-remove", "alice"]):
-                self.assertEqual(wc.main(), 0)
-            self.assertNotIn("alice", state["operators"])
-            self.assertEqual(write.call_count, 2)
+        for command in ('token', 'rotate-token', 'operator-add', 'remote-enable'):
+            with self.subTest(command=command), mock.patch.object(wc, "STATE", {'auth_mode':'passkey'}), \
+                    mock.patch.object(wc, "atomic_write") as write, \
+                    mock.patch.object(wc, "current_token") as token, \
+                    mock.patch.object(wc.sys, "stdout", io.StringIO()), \
+                    mock.patch.object(wc.sys, "argv", ["panel", command, "alice"]):
+                self.assertEqual(wc.main(), 1)
+                write.assert_not_called()
+                token.assert_not_called()
 
     def test_generic_confirmation_is_bound_to_arguments_and_action(self):
         from unittest import mock
