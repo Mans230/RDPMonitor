@@ -68,7 +68,7 @@ object ToolCatalog {
         Feature.Processes, Feature.History, Feature.Diagnostics -> emptyList()
         Feature.LocalUsers -> listOf("Local users" to "/api/users")
         Feature.SystemTools -> listOf("Services" to "/api/services", "System information" to "/api/sysinfo")
-        Feature.Automation -> listOf("Watch rules" to "/api/automation?list=watch", "Keep alive" to "/api/automation?list=keepalive", "Auto kill" to "/api/automation?list=autokill")
+        Feature.Automation -> listOf("Watch rules" to "/api/automation?list=watch", "Keep alive" to "/api/automation?list=keepalive", "Service watch" to "/api/automation?list=svcwatch")
         Feature.Reference -> listOf("Command reference" to "/api/docs")
         Feature.Maintenance -> listOf("Usage" to "/api/usage")
     }
@@ -122,7 +122,7 @@ object ToolCatalog {
             Tool("Clean temporary files", "Delete eligible server temporary files.", "clean_temp"),
             Tool("Export logs to Telegram", "Prepare server logs and send the archive to the configured chat.", "exportlogs", fields=listOf(choice("scope", "Logs", "all", "system", "application"))),
             Tool("Send file to Telegram", "Send this server file to the configured Telegram chat.", "send_file", fields=listOf(f("path", "Server file", "file"))),
-            Tool("Automation rule", "Add or remove a process automation rule.", "automation", fields=listOf(choice("list", "List", "watch", "keepalive", "autokill"), choice("op", "Operation", "add", "del"), f("name", "Process name"), f("ram_mb", "Memory threshold MiB", "int", optional=true), f("run", "Restart command", optional=true))),
+            Tool("Automation rule", "Add or remove an automation rule. Service watch uses a Windows service name.", "automation", fields=listOf(choice("list", "List", "watch", "keepalive", "svcwatch"), choice("op", "Operation", "add", "del"), f("name", "Process or Windows service name"), f("ram_mb", "Memory threshold MiB", "int", optional=true), f("run", "Restart command", optional=true))),
             Tool("Reboot server", "Restart Windows. All active users may be disconnected.", "reboot"),
             Tool("Shut down server", "Power off Windows. Remote access will stop.", "shutdown"),
             Tool("Cancel scheduled restart", "Cancel the server's pending restart if supported.", "cancel_restart"))

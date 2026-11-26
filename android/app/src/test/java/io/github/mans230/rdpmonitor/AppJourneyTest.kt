@@ -131,6 +131,22 @@ class AppJourneyTest {
         ui.onNodeWithText("Back up now").assertIsNotEnabled()
         ui.runOnIdle { check(!model.state.value.actionBusy); check(model.state.value.review == null) }
     }
+    @Test fun backupNumbersStayWithTheirRunArchiveAndRetentionLabels() {
+        preview(); dock("Backups"); workspace("Latest backup result")
+        ui.onNodeWithText("Files processed in the latest run").assertIsDisplayed()
+        ui.onNodeWithText("42").assertIsDisplayed()
+        ui.onNodeWithText("No job running").assertExists()
+        workspace("Stored archives")
+        ui.onNodeWithText("Archive size").assertIsDisplayed()
+        ui.onNodeWithText("500 MiB").assertIsDisplayed()
+        ui.onNodeWithText("Archive last modified").assertExists()
+        ui.onNodeWithText("Worker").assertDoesNotExist()
+        screenshot("390-backup-archives")
+        workspace("Local retention")
+        ui.onNodeWithText("Up to 3 local copies").assertIsDisplayed()
+        screenshot("390-backup-plan")
+        workspace("Back up now"); ui.onNodeWithText("Back up now").assertIsNotEnabled()
+    }
 
     @Test @Config(qualifiers = "w320dp-h740dp-mdpi") fun narrowPhoneCanReachWorkspaceAndAppearance() {
         preview(); screenshot("320-overview")
@@ -142,10 +158,14 @@ class AppJourneyTest {
         ui.onNodeWithText("Remove background").assertIsNotEnabled()
         screenshot("320-appearance")
         ui.onNodeWithText("Done").performClick()
+        dock("Backups"); workspace("Latest backup result"); screenshot("320-backup-result")
+        workspace("Stored archives"); screenshot("320-backup-archives")
     }
 
     @Test @Config(qualifiers = "w768dp-h1024dp-mdpi") fun tabletShowsResourcesAndWorkspace() {
         preview(); screenshot("768-overview")
         workspace("Remote sessions"); screenshot("768-workspace")
+        dock("Backups"); workspace("Latest backup result"); screenshot("768-backup-result")
+        workspace("Local retention"); screenshot("768-backup-plan")
     }
 }

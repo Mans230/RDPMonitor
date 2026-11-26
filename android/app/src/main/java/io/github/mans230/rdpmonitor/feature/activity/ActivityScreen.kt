@@ -35,7 +35,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                 }
             }
         }
-    } else Section("Processes", "Share of total CPU capacity · memory in MB/GB") {
+    } else Section("Processes", "Share of total CPU capacity · memory in MiB/GiB") {
         if (snapshot.processes.isEmpty()) Text("No process readings received.", color = Muted)
         OutlinedTextField(query, { query = it }, label = { Text("Search process name or PID") }, modifier = Modifier.fillMaxWidth())
         snapshot.processes.filter { it.name.contains(query, true) || it.pid.toString().contains(query) }.forEachIndexed { index, process ->
