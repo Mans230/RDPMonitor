@@ -1,0 +1,44 @@
+RDP Monitor - local development status
+
+All implementation changes are in develope. Original source fingerprints are
+recorded in .baseline/manifest.json; verify with:
+  python -B scripts/verify_isolation.py
+
+Completed batches
+- Account-management gates, strict last-admin checks, password policy, queue/rate bounds.
+- Session/payload-bound one-use server confirmations and ACL failure reporting.
+- All diagnostic response deadlines, cooperative native-operation timeouts,
+  cross-channel account serialization, longer structured usage journals,
+  personal operator tokens/revocation, credential-export redaction and direct
+  hardening-report output.
+- Helper-module extraction, exact installed dependency snapshot, PR contribution
+  policy, Windows CI and security/usage/validation/rollback documentation.
+
+Documentation: docs/SECURITY-CHANGES.md, docs/USAGE-AUDIT.md, docs/VALIDATION.md.
+The generated bot command reference is docs/COMMANDS.md.
+
+Original baseline: .baseline/ (40 source files plus SHA-256 manifest).
+State before batch 3: .checkpoints/batch2/ (source checkpoint, no credentials).
+These local artifacts, validation output and this note are excluded from the PR.
+The PR checkout is the separate sibling RDPMonitor-review worktree, based on main.
+New changes must be submitted through PRs; production has not been deployed.
+
+Verification from develope or the PR checkout:
+  python -B -m unittest discover -s tests -v
+  node --test tests/test_webconsole_user_flow.js
+  python -B scripts/lock_dependencies.py
+
+Runtime configurations, tokens, credentials and existing logs were not copied.
+A development folder is NOT an OS sandbox. Do not start/install this copy on the
+production host: it would still affect the same accounts, firewall and tasks.
+
+Limits: disposable Windows VM and full-browser validation remain required before
+production deployment; operators have full admin powers; no RBAC/MFA was added;
+thread/DNS cancellation and process-tree termination are not guaranteed; account
+locking coordinates suite threads, not external administration tools. See docs.
+
+Rollback only in develope with development processes stopped: restore matching
+source files from .baseline/ for the original version, or from .checkpoints/batch2/
+for the pre-batch-3 state. Retain new tests as regression evidence. For production,
+restore a complete reviewed application revision plus its saved configuration
+and task definitions; rollback cannot undo destructive actions already performed.
