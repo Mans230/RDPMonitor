@@ -92,7 +92,11 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                         Destination.Overview -> OverviewScreen(snapshot)
                         Destination.Bandwidth -> BandwidthScreen(if (state.demo) DemoData.traffic else null)
                         Destination.Activity -> ActivityScreen(snapshot, if (state.demo) DemoData.incidents else emptyList())
-                        Destination.More -> MoreScreen({ detail = it.name }, { detail = null; model.connectScreen() })
+                        Destination.More -> {
+                            MoreScreen({ detail = it.name }, { detail = null; model.connectScreen() })
+                            if (!state.demo) OutlinedButton(onClick = model::disconnect, enabled = !state.busy,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Disconnect and sign out") }
+                        }
                     }
                 }
             }

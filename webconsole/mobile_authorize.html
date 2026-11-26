@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark"><title>Connect Android · RDPMonitor</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101113;color:#eff0f2;font:16px/1.5 system-ui,sans-serif}
+main{width:min(100% - 40px,560px);margin:32px auto}header{display:flex;align-items:center;gap:12px;margin-bottom:28px}
+header svg{width:28px;height:28px;color:#91cefa}h1{font-size:24px;margin:0 0 8px}h2{font-size:18px;margin:0 0 12px}
+p{margin:12px 0;color:#b1b6bf}.panel{padding:20px;border:1px solid #303238;border-radius:12px;margin:20px 0}
+button,input{font:inherit}button{min-height:48px;padding:10px 18px;border:1px solid #44474e;border-radius:8px;background:#23262b;color:inherit;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #91cefa;outline-offset:3px}
+.primary{background:#eff0f2;color:#101113}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}a{color:#91cefa}
+details{margin-top:24px}summary{cursor:pointer;padding:8px 0}input[type=text]{width:100%;min-height:48px;margin:8px 0 16px;padding:10px;background:#101113;color:inherit;border:1px solid #44474e;border-radius:8px}
+input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin-right:8px}.code{font:28px/1.5 ui-monospace,monospace;letter-spacing:2px;color:#91cefa}.error{color:#ffaaaa;overflow-wrap:anywhere}
+#host{overflow-wrap:anywhere}.session{display:flex;gap:12px;align-items:center;justify-content:space-between;border-top:1px solid #303238;padding:12px 0}.session span{overflow-wrap:anywhere}
+[hidden]{display:none!important}
+</style></head><body><main>
+<header><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M1 17h7l5-13 7 25 5-14h6" stroke="currentColor" stroke-width="2"/></svg><strong>RDPMonitor</strong></header>
+<h1>Connect the Android app</h1><p id="host"></p>
+<p id="testMode" class="panel" hidden>TEST only. Separate credentials are used here. Device keys need local TEST administrator approval; this runner does not start a Telegram bot.</p>
+<p>Only continue if you started this request in your RDPMonitor app. Keep Tailscale connected.</p>
+<section id="login" class="panel"><h2>Verify your identity</h2><p id="loginDescription">Checking your sign-in session…</p>
+<div id="passkeyLogin" hidden><button id="passkeyBtn" class="primary">Sign in with passkey</button>
+<details><summary>Register this device</summary><label for="passkeyLabel">Device name</label><input id="passkeyLabel" type="text" maxlength="60" autocomplete="off" value="My Android device">
+<button id="registerPasskeyBtn">Create passkey</button><p id="approvalHelp">New keys need owner approval in Telegram. Match the request ID before approval.</p></details>
+<p id="passkeyStatus" role="status"></p><p id="loginErr" class="error" role="alert"></p></div></section>
+<section id="consent" class="panel" hidden><h2>Allow monitoring access?</h2>
+<p>The app can read CPU, memory, storage, processes, sessions, resource history and bandwidth. It cannot run commands, change accounts, reboot, or manage this server.</p>
+<p>Match this pairing code with the code shown in the Android app:</p><p id="code" class="code"></p>
+<label><input id="matches" type="checkbox">I started this request and the codes match.</label>
+<div class="actions"><button id="approve" class="primary" disabled>Approve app connection</button><button id="deny">Deny</button></div></section>
+<p id="status" role="status"></p><p id="error" class="error" role="alert"></p>
+<section id="management" class="panel" hidden><h2>App sessions for this passkey</h2><p>Revoke an app session here, or disconnect in the app. Sessions expire after 30 minutes without use.</p><div id="sessions"></div></section>
+<p><a href="/">Open web panel</a></p>
+</main><script src="/assets/passkeys.js"></script><script>
+const el=id=>document.getElementById(id), requests=new URLSearchParams(location.search).getAll('request');
+const requestId=requests.length===1?requests[0]:null;let csrf='',busy=false;
+el('host').textContent=location.origin;
+async function authRequest(path,options){const response=await fetch(path,{credentials:'same-origin',cache:'no-store',...options});const data=await response.json();return {response,data}}
+async function checked(path,body){const {response,data}=await authRequest(path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(body)});if(!response.ok)throw Error(data.error||'Request failed. Retry.');return data}
+function failure(error){el('error').textContent=error.message||'Connection failed. Retry.'}
+async function sessions(){const data=await checked('/api/mobile/v1/sessions');el('sessions').replaceChildren();if(!data.items.length){el('sessions').textContent='No active app sessions.';return}
+for(const item of data.items){const row=document.createElement('div');row.className='session';const label=document.createElement('span');label.textContent='Android · '+new Date(item.created*1000).toLocaleString();const button=document.createElement('button');button.textContent='Revoke';button.onclick=async()=>{button.disabled=true;try{await checked('/api/mobile/v1/revoke',{id:item.id});await sessions()}catch(e){failure(e);button.disabled=false}};row.append(label,button);el('sessions').append(row)}}
+async function enterSession(data){csrf=data.csrf;el('login').hidden=true;el('management').hidden=false;try{await sessions();if(requestId){const pending=await checked('/api/mobile/v1/request?request='+encodeURIComponent(requestId));el('code').textContent=pending.confirmation_code;el('consent').hidden=false}else el('status').textContent='Start a new connection from the Android app.'}catch(e){failure(e)}}
+el('matches').onchange=()=>el('approve').disabled=busy||!el('matches').checked;
+async function decide(approve){if(busy)return;busy=true;el('approve').disabled=el('deny').disabled=true;el('error').textContent='';try{const result=await checked('/api/mobile/v1/consent',{request:requestId,approve});el('consent').hidden=true;if(result.denied){el('status').textContent='Connection denied. Return to the app.';return}if(!result.redirect_uri.startsWith('io.github.mans230.rdpmonitor://auth/callback?'))throw Error('Invalid app return address.');el('status').textContent='Approved. Returning to RDPMonitor…';location.assign(result.redirect_uri)}catch(e){failure(e);busy=false;el('deny').disabled=false;el('approve').disabled=!el('matches').checked}}
+el('approve').onclick=()=>decide(true);el('deny').onclick=()=>decide(false);
+(async()=>{try{const config=await checked('/api/auth/config');const localTest=config.test_mode===true;if(localTest){el('testMode').hidden=false;el('approvalHelp').textContent='Match the request ID with the local TEST administrator before approval. No Telegram bot runs in this isolated test.'}const {response,data}=await authRequest('/api/session');if(response.ok&&data.ok)await enterSession(data);else{el('loginDescription').textContent='Sign in before reviewing this app request.';await configurePasskeys({authRequest,enterSession,localTest})}}catch(e){failure(e)}})();
+</script></body></html>

@@ -50,7 +50,12 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
                         } else if (!health.value.pairingAvailable) {
                             _state.update { it.copy(message = "Server reachable. Native app pairing is not enabled on this server yet. You can open the secure web panel below.") }
                         } else when (val launch = api.beginPairing(profile)) {
-                            is DataResult.Ready -> { store.pending(launch.value.pending); openBrowser(launch.value.url) }
+                            is DataResult.Ready -> {
+                                store.pending(launch.value.pending)
+                                val code = BrowserPairing.matchCode(BrowserPairing.challenge(launch.value.pending.verifier))
+                                _state.update { it.copy(message = "Pairing code: $code. Match this code in the browser before approving monitoring access.") }
+                                openBrowser(launch.value.url)
+                            }
                             else -> _state.update { it.copy(message = "This server cannot pair the native app yet. Open the secure web panel to continue.") }
                         }
                     }
@@ -70,7 +75,7 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
         val profile = store.profiles().firstOrNull { it.id == parsed.pending.profileId && it.origin == parsed.pending.origin }
             ?: run { _state.update { it.copy(message = "The server profile changed. Start sign-in again.") }; return }
         viewModelScope.launch {
-            _state.update { it.copy(busy = true, selected = profile, demo = false) }
+            _state.update { it.copy(busy = true, selected = profile, demo = false, snapshot = null, connected = false) }
             try {
                 when (val result = api.exchange(parsed)) {
                     is DataResult.Ready -> { store.session(result.value); refresh(profile) }
@@ -89,6 +94,7 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
         }
         when (val result = api.snapshot(profile, session)) {
             is DataResult.Ready -> {
+                if (_state.value.demo || _state.value.selected?.id != profile.id || store.session(profile.id)?.cookie != session.cookie) return
                 store.session(session.copy(expiresAt = System.currentTimeMillis() + session.idleSeconds * 1000L))
                 _state.update { it.copy(snapshot = result.value, demo = false, connected = true, message = null) }
             }
@@ -98,6 +104,26 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
         }
     }
     fun refresh() { if (_state.value.demo) return; _state.value.selected?.let { viewModelScope.launch { refresh(it) } } }
+    fun disconnect() {
+        val profile = _state.value.selected ?: return
+        if (_state.value.busy) return
+        refreshJob?.cancel()
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            var message = "Disconnected. Your saved server address is kept."
+            try {
+                store.session(profile.id)?.let { session ->
+                    if (session.expiresAt > System.currentTimeMillis()) {
+                        val result = api.logout(profile, session)
+                        if (result is DataResult.Failed) message = result.message
+                    }
+                }
+            } finally {
+                store.clearSession(profile.id); store.pending(null)
+                _state.update { it.copy(snapshot = null, connected = false, busy = false, message = message) }
+            }
+        }
+    }
     fun foreground(active: Boolean) {
         foreground = active; refreshJob?.cancel()
         if (active && _state.value.connected && !_state.value.demo) refreshJob = viewModelScope.launch {

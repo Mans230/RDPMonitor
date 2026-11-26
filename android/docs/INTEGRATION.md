@@ -8,11 +8,12 @@ Telegram tokens into a chat link, app package, QR fixture or committed config.
 The native app cannot read a browser's HTTPOnly cookies. Browser authorization
 must explicitly grant a separate, revocable native session.
 
-This milestone changes Android files only. The protocol below is proposed and
-must be implemented and integration-tested in an isolated Windows TEST instance
-before enabling its advertised capability or updating production.
+The foundation milestone changed Android files only. The TEST pairing milestone
+also implements the protocol below in the panel, disabled by default. It has
+isolated integration coverage; production deployment and a physical Android
+Passkey/browser return test are still outstanding. See TEST_PAIRING.md.
 
-## Proposed browser-to-app pairing contract
+## Implemented TEST browser-to-app pairing contract
 
 1. `GET /health` continues to return `ok` and `auth: passkey`. Advertise
    `mobile_pairing: true` only when the complete flow is implemented.
@@ -37,7 +38,9 @@ before enabling its advertised capability or updating production.
    to the exact profile origin, and rejects unexpected callback destinations,
    duplicate parameters, mismatched states and expired pending requests.
 
-The client currently supports this contract but the server does not. A custom
+The client and opt-in TEST server support this contract. App sessions are limited
+server-side to stats, history, bandwidth usage, session introspection and logout;
+they cannot approve other apps or run any administration endpoint. A custom
 scheme can be intercepted by another app; PKCE prevents an interceptor from
 redeeming the code without the verifier. Consider verified App Links for a
 future distributable app if a controlled HTTPS association domain is available.
@@ -52,9 +55,9 @@ consent. Do not enable CORS globally to accommodate the native client.
 
 1. **Foundation (this change):** buildable native app, explicit demo, profiles,
    health checks, read-only screens, API decoding and authentication boundaries.
-2. **TEST authentication:** implement the server pairing contract; verify on an
-   actual Android phone with Tailscale and Passkeys. Add session listing and
-   local/native logout with server revocation before release.
+2. **TEST authentication:** server contract, session listing/revocation and app
+   logout are implemented with automated coverage. Verify on an actual Android
+   phone with Tailscale and Passkeys before release.
 3. **Live read-only monitoring:** wire history, reliable bandwidth ledger and
    incidents. Display ledger coverage, counter resets, adapter selection,
    missing samples and billing period; never claim billing-grade accounting.

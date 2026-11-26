@@ -78,7 +78,7 @@ fun rate(value: Double?) = value?.let { String.format(Locale.US, "%.1f Mbps", it
                 contentDescription = "CPU and memory history, zero to one hundred percent. Missing samples are gaps."
             }) {
                 repeat(3) { i -> drawLine(Rule, Offset(0f, size.height * i / 2), Offset(size.width, size.height * i / 2), 1.dp.toPx()) }
-                val timeRange = points.maxOfOrNull { it.secondsAgo }?.coerceAtLeast(1) ?: 1
+                val timeRange = 1800 // Match the labelled 30-minute window, even with only a few samples.
                 fun line(color: Color, get: (ResourcePoint) -> Double?) {
                     val path = Path(); var started = false
                     points.forEach { point ->

@@ -39,11 +39,13 @@ Passkey / Telegram owner approval flow.
 
 ## Current limits
 
-The current Windows server has **no native pairing API**. Native live sign-in,
-live bandwidth/history/incidents and native administration are not connected yet.
-The app detects missing pairing support and says so; it does not reuse browser
-cookies or pretend demo values are live. The monitoring decoder and session
-client are ready for integration once the server contract is implemented.
+This branch implements **opt-in TEST native pairing** with browser Passkey
+sign-in, explicit owner consent, a matching code, PKCE and a separate read-only
+app session. Live resource readings and history are wired once pairing succeeds.
+The running production server does not yet advertise this capability. Until it
+is deployed and enabled there, the app reports that pairing is unavailable.
+Live bandwidth totals/incidents and native administration remain future work.
+See [TEST setup and evidence](docs/TEST_PAIRING.md).
 
 Tailscale remains a separate prerequisite. This app does not install it, expose
 the server publicly, or replace it with a shared token. No production source,

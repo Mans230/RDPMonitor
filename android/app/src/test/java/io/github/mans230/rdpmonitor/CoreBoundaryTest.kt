@@ -23,6 +23,7 @@ class CoreBoundaryTest {
         }
     }
     @Test fun pkceMatchesRfc7636S256VectorAndGeneratesIndependentState() {
+        assertEquals("0D29-9B1E", BrowserPairing.matchCode("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"))
         assertEquals("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
             BrowserPairing.challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"))
         val a = BrowserPairing.create("profile", "https://server.tail.ts.net", 1000)
@@ -57,5 +58,16 @@ class CoreBoundaryTest {
         assertEquals(1000L, sample.capturedAt)
         assertTrue(sample.history.any { it.ram == null })
         assertTrue(sample.processes.none { it.pid == 0 || it.name.contains("Idle") })
+    }
+    @Test fun realHistoryFiltersFutureAndOldSamplesWithoutInventingReadings() {
+        val snapshot = DemoData.snapshot(100_000)
+        val updated = SnapshotDecoder.withHistory(snapshot, """{"points":[{"t":100,"c":0,"r":null},{"t":90,"c":null,"r":50},{"t":200,"c":99},{"t":-2000,"c":99}]}""")
+        assertEquals(2, updated.history.size)
+        assertEquals(10, updated.history.first().secondsAgo)
+        assertNull(updated.history.first().cpu)
+        assertEquals(0.0, updated.history.last().cpu!!, 0.0)
+        assertNull(updated.history.last().ram)
+        val gap = SnapshotDecoder.withHistory(snapshot, """{"points":[{"t":-100,"c":5},{"t":100,"c":5}]}""")
+        assertTrue(gap.history.any { it.cpu == null && it.ram == null })
     }
 }

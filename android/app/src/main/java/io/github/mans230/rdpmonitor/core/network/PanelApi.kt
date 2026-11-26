@@ -63,7 +63,7 @@ class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
             DataResult.Failed("This address did not return a healthy Passkey-enabled RDPMonitor panel.")
         else DataResult.Ready(ServerHealth(json["mobile_pairing"]?.jsonPrimitive?.booleanOrNull == true))
     }
-    /** Proposed server bridge. A v76/v78 server returns PairingUnavailable, never fake success. */
+    /** Opt-in server bridge. Older servers return PairingUnavailable, never fake success. */
     suspend fun beginPairing(profile: ServerProfile): DataResult<PairingLaunch> = safe {
         val pending = BrowserPairing.create(profile.id, profile.origin, System.currentTimeMillis())
         val reply = request(profile.origin, "/api/mobile/v1/pairings", buildJsonObject {
@@ -72,7 +72,9 @@ class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
         })
         if (reply.status == 404 || reply.status == 501) DataResult.PairingUnavailable
         else if (reply.status == 200 || reply.status == 201) {
-            val url = Json.parseToJsonElement(reply.body).jsonObject.getValue("authorization_url").jsonPrimitive.content
+            val data = Json.parseToJsonElement(reply.body).jsonObject
+            val url = data.getValue("authorization_url").jsonPrimitive.content
+            require(data["confirmation_code"]?.jsonPrimitive?.content == BrowserPairing.matchCode(BrowserPairing.challenge(pending.verifier)))
             DataResult.Ready(PairingLaunch(pending, PrivateOrigin.sameServerUrl(profile.origin, url)))
         } else DataResult.Failed("The server could not start app sign-in. Retry later.")
     }
@@ -84,6 +86,7 @@ class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
         if (reply.status != 200) DataResult.Failed("App sign-in was rejected or expired. Start again.")
         else {
             val data = Json.parseToJsonElement(reply.body).jsonObject
+            require(data["scope"]?.jsonPrimitive?.content == "monitoring:read") { "Monitoring session required" }
             val cookie = reply.cookies.firstOrNull {
                 it.startsWith("rdpwc_session=") && it.contains("; Secure", true) && it.contains("; HttpOnly", true)
             }?.substringBefore(';') ?: error("Secure session cookie missing")
@@ -97,8 +100,18 @@ class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
         val reply = request(profile.origin, "/api/stats", session = session)
         when (reply.status) {
             401, 403 -> DataResult.SignInRequired
-            200 -> DataResult.Ready(SnapshotDecoder.decode(reply.body))
+            200 -> {
+                val snapshot = SnapshotDecoder.decode(reply.body)
+                val history = runCatching { request(profile.origin, "/api/history", session = session) }.getOrNull()
+                DataResult.Ready(if (history?.status == 200)
+                    runCatching { SnapshotDecoder.withHistory(snapshot, history.body) }.getOrDefault(snapshot) else snapshot)
+            }
             else -> DataResult.Failed("Monitoring could not be refreshed. Previous readings have been retained.")
         }
+    }
+    suspend fun logout(profile: ServerProfile, session: AppSession): DataResult<Unit> = safe {
+        val reply = request(profile.origin, "/api/logout", buildJsonObject {}, session)
+        if (reply.status in listOf(200, 401)) DataResult.Ready(Unit)
+        else DataResult.Failed("Server sign-out failed. You can revoke this app session in the web panel.")
     }
 }

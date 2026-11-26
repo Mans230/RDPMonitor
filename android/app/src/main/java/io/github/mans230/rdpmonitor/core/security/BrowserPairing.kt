@@ -23,6 +23,11 @@ object BrowserPairing {
         PendingPairing(profileId, PrivateOrigin.parse(origin), random(), random(), now)
     fun challenge(verifier: String): String = Base64.getUrlEncoder().withoutPadding()
         .encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(StandardCharsets.US_ASCII)))
+    fun matchCode(challenge: String): String {
+        val hex = MessageDigest.getInstance("SHA-256").digest(challenge.toByteArray(StandardCharsets.US_ASCII))
+            .take(4).joinToString("") { "%02X".format(it.toInt() and 255) }
+        return hex.take(4) + "-" + hex.drop(4)
+    }
 
     fun callback(input: String, pending: PendingPairing?, now: Long): PairingCallback {
         requireNotNull(pending) { "No app sign-in is in progress. Start from Connect server." }
