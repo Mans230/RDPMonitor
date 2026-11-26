@@ -157,7 +157,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                         4 -> selected !in listOf(Feature.Protection, Feature.Backups, Feature.Processes) && !(selected == null && destination == Destination.Overview)
                         else -> selected == features[index]
                     }
-                    val icon = when (index) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.VerifiedUser; 2 -> Icons.Outlined.Inventory2; 3 -> Icons.Outlined.BarChart; else -> Icons.Outlined.MoreHoriz }
+                    val icon = when (index) { 0 -> CossIcons.Activity; 1 -> Icons.Outlined.VerifiedUser; 2 -> CossIcons.Archive; 3 -> CossIcons.ListFilter; else -> Icons.Outlined.MoreHoriz }
                     Column(Modifier.weight(1f).graphicsLayer { scaleX = scale; scaleY = scale }.background(if (active) Signal.copy(alpha = .12f) else Color.Transparent, RoundedCornerShape(26.dp))
                         .selectable(active, interactionSource = interaction, indication = LocalIndication.current, role = Role.Tab, onClick = { when (index) { 0 -> overview(); 4 -> more(); else -> open(features[index]!!) } })
                         .padding(horizontal = 2.dp, vertical = 8.dp).heightIn(min = 44.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {

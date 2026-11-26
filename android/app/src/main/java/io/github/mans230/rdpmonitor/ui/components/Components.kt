@@ -56,15 +56,7 @@ fun rate(value: Double?) = value?.let { String.format(Locale.US, "%.1f Mbps", it
     }
 }
 @Composable fun PulseMark() {
-    val ink = Signal
-    Canvas(Modifier.size(28.dp).semantics { contentDescription = "RDPMonitor pulse" }) {
-        val p = Path().apply {
-            moveTo(0f, size.height * .55f); lineTo(size.width * .23f, size.height * .55f)
-            lineTo(size.width * .37f, size.height * .14f); lineTo(size.width * .55f, size.height * .88f)
-            lineTo(size.width * .7f, size.height * .44f); lineTo(size.width, size.height * .44f)
-        }
-        drawPath(p, ink, style = Stroke(2.dp.toPx()))
-    }
+    Icon(CossIcons.Server, "RDPMonitor server", Modifier.size(20.dp), tint = Signal)
 }
 
 @Composable fun ResourceChart(points: List<ResourcePoint>, cpuOnly: Boolean = false, seriesName: String = "CPU") {

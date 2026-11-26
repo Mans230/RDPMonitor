@@ -49,17 +49,21 @@ class CossInteractionTest {
         ui.setContent { RdpTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
             BackupWorkspace(DemoDocuments.at("/api/backup"), DemoDocuments.at("/api/setup"), true, { _, body -> payload = body }, {})
         } } }
-        ui.onNodeWithText("Review schedule changes").performScrollTo().performClick()
+        ui.onNodeWithText("Review changes").performScrollTo().performClick()
         ui.runOnIdle {
             assertEquals("setup", payload!!["action"]!!.jsonPrimitive.content)
             assertEquals("schedule", payload!!["op"]!!.jsonPrimitive.content)
             assertEquals("03:00", payload!!["value"]!!.jsonPrimitive.content)
-            assertNull(payload!!["keep_local_copies"])
+            assertEquals(3, payload!!["keep_local_copies"]!!.jsonPrimitive.int)
         }
-        ui.onNodeWithText("Up to 3 local copies").performScrollTo().assertIsDisplayed()
-        ui.onNodeWithText("Back up now").performScrollTo().assertIsEnabled()
+        ui.onNodeWithTag("retention-control").performScrollTo().performClick()
+        ui.onNodeWithText("7 copies maximum").performClick()
+        ui.onNodeWithText("Review changes").performScrollTo().performClick()
+        ui.runOnIdle { assertEquals(7, payload!!["keep_local_copies"]!!.jsonPrimitive.int) }
+        ui.onNodeWithText("7 copies maximum").performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("Back up selected folders").performScrollTo().assertIsEnabled()
         ui.onNodeWithTag("backup-source-0").performScrollTo().performClick()
-        ui.onNodeWithText("Back up now").performScrollTo().assertIsNotEnabled()
+        ui.onNodeWithText("Back up selected folders").performScrollTo().assertIsNotEnabled()
         ui.onNodeWithText("Review source changes").performScrollTo().performClick()
         ui.runOnIdle { assertEquals("sources", payload!!["op"]!!.jsonPrimitive.content); assertEquals(1, payload!!["paths"]!!.jsonArray.size) }
     }
@@ -69,5 +73,29 @@ class CossInteractionTest {
         assertFalse(validBackupSchedule("daily", "03:00,04:00")); assertTrue(validBackupSchedule("times", "03:00,04:00"))
         assertFalse(validBackupSchedule("interval", "1.5")); assertFalse(validBackupSchedule("unknown", "03:00"))
         assertFalse(validBackupSchedule("times", List(25) { "03:00" }.joinToString(",")))
+    }
+
+    @Test fun olderServerCannotSilentlyAcceptAnUnsupportedRetentionEdit() {
+        val original = DemoDocuments.at("/api/setup").jsonObject
+        val backup = original.getValue("backup").jsonObject
+        val old = JsonObject(original + ("backup" to JsonObject(backup - "retention_editable")))
+        var sent: JsonObject? = null
+        ui.setContent { RdpTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
+            BackupWorkspace(DemoDocuments.at("/api/backup"), old, true, { _, body -> sent = body }, {})
+        } } }
+        ui.onNodeWithTag("retention-control").performScrollTo().assertIsNotEnabled()
+        ui.onNodeWithText("Review changes").performScrollTo().performClick()
+        ui.runOnIdle { assertNotNull(sent); assertNull(sent!!["keep_local_copies"]) }
+    }
+
+    @Test fun cancellingTheTimePickerDoesNotChangeThePolicyOrSendAnAction() {
+        var sent: JsonObject? = null
+        ui.setContent { RdpTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
+            BackupWorkspace(DemoDocuments.at("/api/backup"), DemoDocuments.at("/api/setup"), true, { _, body -> sent = body }, {})
+        } } }
+        ui.onNodeWithText("3:00 AM").performScrollTo().performClick()
+        ui.onNode(hasText("Cancel") and hasClickAction()).performClick()
+        ui.runOnIdle { assertNull(sent) }
+        ui.onNodeWithText("3:00 AM").assertExists()
     }
 }

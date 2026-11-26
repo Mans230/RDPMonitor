@@ -53,7 +53,9 @@ fun providerOptions(provider: String): Set<String> = when (provider) {
 }
 private fun f(key: String, label: String, kind: String = "text", options: List<String> = emptyList(), optional: Boolean = false) = ToolField(key, label, kind, options, optional)
 private fun choice(key: String, label: String, vararg options: String) = f(key, label, options = options.toList())
-private fun setup(title: String, op: String, vararg fields: ToolField) = Tool(title, "Change server setup: $title. Existing server checks and job status apply.", "setup", mapOf("op" to op), fields.toList())
+private fun setup(title: String, op: String, vararg fields: ToolField) = Tool(title,
+    if (op == "schedule") "Save the schedule and local retention policy. A lower retention maximum can remove older local archives during future backups."
+    else "Change server setup: $title. Existing server checks and job status apply.", "setup", mapOf("op" to op), fields.toList())
 
 object ToolCatalog {
     fun documents(feature: Feature): List<Pair<String, String>> = when (feature) {
@@ -85,7 +87,7 @@ object ToolCatalog {
             Tool("Restore verification drill", "Run the configured restore verification drill.", "drill"),
             Tool("Restore archive", "Restore the selected archive on the server. Review the archive name carefully.", "restore", fields=listOf(f("name", "Archive name"))),
             setup("Save backup sources", "sources", f("paths", "Server folders · one per line", "paths")),
-            setup("Save backup schedule", "schedule", choice("mode", "Mode", "daily", "interval", "times"), f("value", "HH:MM, hours, or comma-separated times"), f("enabled", "Enabled", "bool", listOf("true", "false"))),
+            setup("Save backup policy", "schedule", choice("mode", "Mode", "daily", "interval", "times"), f("value", "HH:MM, hours, or comma-separated times"), f("enabled", "Enabled", "bool", listOf("true", "false")), f("keep_local_copies", "Local copies maximum", "int", optional=true)),
             setup("Save cloud destinations", "targets", f("image", "Image destination · remote:folder", optional=true), f("backups", "Backup remotes · one remote: per line", "lines"), f("folder", "Backup cloud folder")))
         Feature.Cloud -> listOf(
             setup("Install verified rclone", "install"),
