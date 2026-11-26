@@ -13,11 +13,13 @@ data class AppSession(val profileId: String, val origin: String, val cookie: Str
 
 data class ResourcePoint(val secondsAgo: Int, val cpu: Double?, val ram: Double?)
 data class ProcessRow(val pid: Int, val name: String, val cpu: Double?, val memoryBytes: Long?)
-data class DiskRow(val name: String, val usedPercent: Double?, val freeBytes: Long?)
+data class DiskRow(val name: String, val usedPercent: Double?, val freeBytes: Long?, val totalBytes: Long? = null)
+data class RemoteSession(val user: String, val name: String, val id: String, val state: String)
 data class Incident(val title: String, val detail: String, val age: String, val needsAttention: Boolean = false)
 data class Snapshot(val host: String, val cpu: Double?, val ram: Double?, val ramUsed: Long?, val ramTotal: Long?,
                     val downloadBps: Double?, val uploadBps: Double?, val sessions: Int?, val disks: List<DiskRow>,
-                    val processes: List<ProcessRow>, val history: List<ResourcePoint>, val capturedAt: Long)
+                    val processes: List<ProcessRow>, val history: List<ResourcePoint>, val capturedAt: Long,
+                    val cores: Int? = null, val remoteSessions: List<RemoteSession> = emptyList())
 data class TrafficDay(val label: String, val downloadBytes: Long, val uploadBytes: Long) {
     val totalBytes get() = downloadBytes + uploadBytes
 }

@@ -34,9 +34,9 @@ import kotlinx.serialization.json.*
     state.documents["/api/bandwidth/connections"]?.let { Section("Connections and adapters") { NativeDocument(it, openBrowser) } }
 }
 
-@Composable fun LiveActivity(state: AppState, model: RdpViewModel) {
-    LaunchedEffect(state.selected?.id, state.demo) { model.loadDocuments(listOf("/api/audit")) }
-    OutlinedButton(onClick = { model.loadDocuments(listOf("/api/audit")) }, enabled = !state.documentLoading) { Text("Refresh activity") }
+@Composable fun LiveActivity(state: AppState, model: RdpViewModel, processesOnly: Boolean = false) {
+    LaunchedEffect(state.selected?.id, state.demo, processesOnly) { if (!processesOnly) model.loadDocuments(listOf("/api/audit")) }
+    if (!processesOnly) OutlinedButton(onClick = { model.loadDocuments(listOf("/api/audit")) }, enabled = !state.documentLoading) { Text("Refresh activity") }
     state.documentErrors["/api/audit"]?.let { Notice(it, true) }
     val items = ((state.documents["/api/audit"] as? JsonObject)?.get("items") as? JsonArray).orEmpty()
     val events = items.mapNotNull { it as? JsonObject }.asReversed().groupBy { it["action"]?.jsonPrimitive?.content ?: "Event" }.map { (name, rows) ->
@@ -50,6 +50,6 @@ import kotlinx.serialization.json.*
     state.snapshot?.let { ActivityScreen(it, events, if (state.administration) { process ->
         val tool = Tool("Stop ${process.name}", "Terminate process ${process.pid} on ${state.selected?.name}. Unsaved data may be lost.", "kill")
         model.review(tool, buildJsonObject { put("action", "kill"); put("pids", JsonArray(listOf(JsonPrimitive(process.pid)))) })
-    } else null) }
+    } else null, processesOnly = processesOnly) }
     state.actionResult?.let { Section("Operation result") { NativeDocument(it, {}) } }
 }

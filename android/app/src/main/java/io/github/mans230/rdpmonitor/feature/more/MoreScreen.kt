@@ -19,11 +19,19 @@ enum class Feature(val title: String, val summary: String, val capabilities: Lis
     Commands("Command center", "Commands grouped by their purpose", listOf("CPU & RAM", "Network & bandwidth", "Protection & accounts", "Programs & services", "Backups & recovery", "Settings & maintenance")),
     Updates("Updates", "Validated bot and panel releases", listOf("Current release and health", "Checksummed suite updates", "Installation status and rollback", "Preserve approved passkeys")),
     Access("Private access", "Tailscale, passkeys and owner approval", listOf("HTTPS over the private tailnet", "Passkey sign-in in the system browser", "Owner approval in Telegram", "No chat login tokens or public IP fallback")),
-    Settings("Settings & alerts", "Monitoring thresholds, notifications and permissions", emptyList())
+    Settings("Settings & alerts", "Monitoring thresholds, notifications and permissions", emptyList()),
+    Processes("Processes", "Current CPU, memory and process controls", emptyList()),
+    LocalUsers("Local users", "Local accounts and reviewed account changes", emptyList()),
+    History("Resource history", "Recorded CPU, memory, network and storage", emptyList()),
+    SystemTools("System tools", "Services and programs", emptyList()),
+    Automation("Automation", "Watch, keep alive and process rules", emptyList()),
+    Diagnostics("Diagnostics", "Read-only server reports", emptyList()),
+    Reference("Command reference", "Server command documentation", emptyList()),
+    Maintenance("Maintenance", "Cleanup, logs and power controls", emptyList())
 }
 
 @Composable fun MoreScreen(onFeature: (Feature) -> Unit, onConnections: () -> Unit) {
-    PageTitle("Manage & maintain", "The same feature groups as your bot and web panel.")
+    PageTitle("All sections", "Monitor, protect and maintain your server.")
     Section("Server tools") {
         Feature.entries.forEachIndexed { i, feature ->
             if (i > 0) HorizontalDivider(color = Rule)

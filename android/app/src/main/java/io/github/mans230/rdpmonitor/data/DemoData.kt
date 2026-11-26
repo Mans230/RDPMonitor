@@ -22,6 +22,7 @@ object DemoData {
             ProcessRow(560, "svchost.exe", 1.1, 123L * 1_048_576), ProcessRow(3180, "explorer.exe", .6, 67L * 1_048_576)),
         history = List(31) { i -> ResourcePoint((30 - i) * 60,
             listOf(5.0, 7.0, 4.0, 12.0, 9.0, 6.0, 15.0, 8.5)[i % 8],
-            if (i == 12 || i == 13) null else 46.0 + (i % 6)) }, capturedAt = now
+            if (i == 12 || i == 13) null else 46.0 + (i % 6)) }, capturedAt = now,
+        cores = 8, remoteSessions = listOf(RemoteSession("demo-user", "rdp-tcp#1", "2", "active"))
     )
 }
