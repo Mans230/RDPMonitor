@@ -2,6 +2,7 @@ package io.github.mans230.rdpmonitor.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -16,6 +17,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalConfiguration
 import io.github.mans230.rdpmonitor.core.model.ResourcePoint
 import io.github.mans230.rdpmonitor.ui.theme.*
 import java.util.Locale
@@ -28,8 +30,9 @@ fun bytes(value: Long?): String {
 }
 fun rate(value: Double?) = value?.let { String.format(Locale.US, "%.1f Mbps", it * 8 / 1_000_000) } ?: "—"
 
-@Composable fun Section(title: String, subtitle: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().border(1.dp, Rule, RoundedCornerShape(14.dp)).padding(18.dp),
+@Composable fun Section(title: String, subtitle: String? = null, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val inset = if (LocalConfiguration.current.screenWidthDp < 351) 16.dp else 20.dp
+    Column(modifier.fillMaxWidth().border(1.dp, Rule, RoundedCornerShape(14.dp)).padding(inset),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         subtitle?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodyMedium) }
@@ -68,14 +71,14 @@ fun rate(value: Double?) = value?.let { String.format(Locale.US, "%.1f Mbps", it
     }
 }
 
-@Composable fun ResourceChart(points: List<ResourcePoint>) {
+@Composable fun ResourceChart(points: List<ResourcePoint>, cpuOnly: Boolean = false) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(Modifier.height(160.dp).width(32.dp), verticalArrangement = Arrangement.SpaceBetween) {
+        Column(Modifier.height(if (cpuOnly) 90.dp else 160.dp).width(32.dp), verticalArrangement = Arrangement.SpaceBetween) {
             listOf("100%", "50%", "0%").forEach { Text(it, color = Muted, fontSize = 11.sp) }
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Canvas(Modifier.fillMaxWidth().height(160.dp).semantics {
-                contentDescription = "CPU and memory history, zero to one hundred percent. Missing samples are gaps."
+            Canvas(Modifier.fillMaxWidth().height(if (cpuOnly) 90.dp else 160.dp).semantics {
+                contentDescription = if (cpuOnly) "CPU history, zero to one hundred percent. Missing samples are gaps." else "CPU and memory history, zero to one hundred percent. Missing samples are gaps."
             }) {
                 repeat(3) { i -> drawLine(Rule, Offset(0f, size.height * i / 2), Offset(size.width, size.height * i / 2), 1.dp.toPx()) }
                 val timeRange = 1800 // Match the labelled 30-minute window, even with only a few samples.
@@ -92,7 +95,7 @@ fun rate(value: Double?) = value?.let { String.format(Locale.US, "%.1f Mbps", it
                     }
                     drawPath(path, color, style = Stroke(2.dp.toPx()))
                 }
-                line(Signal) { it.cpu }; line(Muted) { it.ram }
+                line(Signal) { it.cpu }; if (!cpuOnly) line(Muted) { it.ram }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 listOf("30 min ago", "15 min", "Now").forEach { Text(it, color = Muted, fontSize = 11.sp) }

@@ -122,7 +122,7 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
 
 @Composable fun ManagementScreen(feature: Feature, state: AppState, model: RdpViewModel, onBack: () -> Unit, openBrowser: (String) -> Unit) {
     val documents = ToolCatalog.documents(feature)
-    LaunchedEffect(feature, state.selected?.id, state.demo) { model.loadDocuments(documents.map { it.second }) }
+    LaunchedEffect(feature, state.selected?.id, state.demo) { if (documents.isNotEmpty()) model.loadDocuments(documents.map { it.second }) }
     val edit: (Tool, Map<String, String>) -> Unit = model::editTool
     TextButton(onClick = onBack) { Text("Back to tools") }
     PageTitle(feature.title, feature.summary)
@@ -132,16 +132,15 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
         Notice("This session has monitoring access only. Reconnect and approve administration access to use server tools.")
         OutlinedButton(onClick = { model.reconnect(management = true) }) { Text("Approve administration for this server") }
     }
-    OutlinedButton(onClick = { model.loadDocuments(documents.map { it.second }) }, enabled = !state.demo && !state.documentLoading) { Text(if (state.documentLoading) "Refreshing…" else "Refresh section") }
+    if (documents.isNotEmpty()) OutlinedButton(onClick = { model.loadDocuments(documents.map { it.second }) }, enabled = !state.demo && !state.documentLoading) { Text(if (state.documentLoading) "Refreshing…" else "Refresh section") }
     if (state.documentLoading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Signal)
     documents.forEach { (title, path) -> Section(title) {
         state.documentErrors[path]?.let { Notice(it, warning = true) }
         (if (state.demo) DemoDocuments.at(path) else state.documents[path])?.let { data -> NativeDocument(sectionDocument(feature, path, data), openBrowser, if (state.administration && !state.demo) edit else null) }
             ?: Text(if (state.documentLoading) "Loading server data…" else if (state.demo) "Connect a server to load this section." else "No server data received. Select Refresh to retry.", color = Muted)
     } }
-    if (feature == Feature.Commands) Diagnostics(state, model, openBrowser)
-    Section("Actions", "Every change is reviewed before it runs on ${state.selected?.name ?: "the server"}.") {
-        if (ToolCatalog.tools(feature).isEmpty()) Text("Use the app session list above to revoke access. Disconnect is available under More.", color = Muted)
+    if (feature == Feature.Commands || feature == Feature.Diagnostics) Diagnostics(state, model, openBrowser)
+    if (ToolCatalog.tools(feature).isNotEmpty()) Section("Actions", "Every change is reviewed before it runs on ${state.selected?.name ?: "the server"}.") {
         ToolCatalog.tools(feature).forEach { tool ->
             OutlinedButton(onClick = { edit(tool, existingValues(tool, state)) }, enabled = state.administration && !state.demo && !state.actionBusy,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = if (tool.dangerous) Warning else Signal),

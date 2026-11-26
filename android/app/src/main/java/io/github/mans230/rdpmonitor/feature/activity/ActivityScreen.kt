@@ -10,11 +10,11 @@ import io.github.mans230.rdpmonitor.core.model.*
 import io.github.mans230.rdpmonitor.ui.components.*
 import io.github.mans230.rdpmonitor.ui.theme.*
 
-@Composable fun ActivityScreen(snapshot: Snapshot, incidents: List<Incident>, onStop: ((ProcessRow) -> Unit)? = null) {
-    var section by rememberSaveable { mutableStateOf("Events") }
+@Composable fun ActivityScreen(snapshot: Snapshot, incidents: List<Incident>, onStop: ((ProcessRow) -> Unit)? = null, processesOnly: Boolean = false) {
+    var section by rememberSaveable(processesOnly) { mutableStateOf(if (processesOnly) "Processes" else "Events") }
     var query by rememberSaveable { mutableStateOf("") }
-    PageTitle("Activity", "Recorded server events and current process readings.")
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    PageTitle(if (processesOnly) "Processes" else "Activity", "Recorded server events and current process readings.")
+    if (!processesOnly) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         listOf("Events", "Processes").forEach { name ->
             TextButton(onClick = { section = name }) {
                 Text(if (section == name) "$name ·" else name, color = if (section == name) Signal else Muted)

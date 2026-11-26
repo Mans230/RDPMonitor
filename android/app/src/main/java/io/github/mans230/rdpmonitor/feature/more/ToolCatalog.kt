@@ -65,6 +65,12 @@ object ToolCatalog {
         Feature.Updates -> listOf("Suite updater" to "/api/suite-update")
         Feature.Access -> listOf("Private access" to "/api/setup", "App sessions" to "/api/mobile/v1/sessions")
         Feature.Settings -> listOf("Settings" to "/api/settings", "Usage" to "/api/usage")
+        Feature.Processes, Feature.History, Feature.Diagnostics -> emptyList()
+        Feature.LocalUsers -> listOf("Local users" to "/api/users")
+        Feature.SystemTools -> listOf("Services" to "/api/services", "System information" to "/api/sysinfo")
+        Feature.Automation -> listOf("Watch rules" to "/api/automation?list=watch", "Keep alive" to "/api/automation?list=keepalive", "Auto kill" to "/api/automation?list=autokill")
+        Feature.Reference -> listOf("Command reference" to "/api/docs")
+        Feature.Maintenance -> listOf("Usage" to "/api/usage")
     }
     fun tools(feature: Feature): List<Tool> = when (feature) {
         Feature.Protection -> listOf(
@@ -124,7 +130,11 @@ object ToolCatalog {
             Tool("Check for suite updates", "Check the validated release channel.", "suite_update", mapOf("op" to "check")),
             Tool("Install suite update", "Install the validated bot/panel release. Services restart during installation.", "suite_update", mapOf("op" to "apply")),
             Tool("Configure automatic updates", "Save the automatic update policy.", "suite_update", mapOf("op" to "configure"), listOf(f("enabled", "Enabled", "bool", listOf("true", "false")), f("hours", "Check interval hours", "int"))))
-        Feature.Access -> emptyList()
+        Feature.Access, Feature.Processes, Feature.History, Feature.Diagnostics, Feature.Reference -> emptyList()
+        Feature.LocalUsers -> tools(Feature.RdpAccess).filter { it.action == "user" }
+        Feature.SystemTools -> tools(Feature.Commands).filter { it.action in setOf("service", "start_program") }
+        Feature.Automation -> tools(Feature.Commands).filter { it.action == "automation" }
+        Feature.Maintenance -> tools(Feature.Commands).filter { it.action in setOf("clean_temp", "exportlogs", "send_file", "reboot", "shutdown", "cancel_restart") }
         Feature.Settings -> listOf(
             Tool("Change setting", "Save this server setting using its documented key and value.", "settings_set", fields=listOf(f("key", "Setting key"), f("value", "Value"))),
             Tool("Mute alerts", "Mute Telegram alerts for this many minutes.", "mute", fields=listOf(f("minutes", "Minutes", "int"))),

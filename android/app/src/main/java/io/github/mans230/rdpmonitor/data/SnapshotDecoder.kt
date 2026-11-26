@@ -48,11 +48,15 @@ object SnapshotDecoder {
             root.objectAt("ram").number("used")?.toLong(), root.objectAt("ram").number("total")?.toLong(),
             root.number("down_bps"), root.number("up_bps"), (root["sessions"] as? JsonArray)?.size,
             root.arrayAt("disks").mapNotNull { it as? JsonObject }.map {
-                DiskRow((it["mount"] ?: it["dev"])?.jsonPrimitive?.content ?: "Disk", it.number("pct"), it.number("free")?.toLong())
+                DiskRow((it["mount"] ?: it["dev"])?.jsonPrimitive?.content ?: "Disk", it.number("pct"), it.number("free")?.toLong(), it.number("total")?.toLong())
             }, root.arrayAt("procs").mapNotNull { it as? JsonObject }.filter { (it.number("pid") ?: 0.0) > 0 }.map {
                 ProcessRow(it.number("pid")?.toInt() ?: -1, it["name"]?.jsonPrimitive?.content ?: "Unavailable",
                     it.number("cpu")?.div(root.objectAt("cpu").number("cores")?.coerceAtLeast(1.0) ?: 1.0), it.number("rss")?.toLong())
-            }, emptyList(), root.number("ts")?.times(1000)?.toLong() ?: error("Server sample time is missing.")
+            }, emptyList(), root.number("ts")?.times(1000)?.toLong() ?: error("Server sample time is missing."),
+            root.objectAt("cpu").number("cores")?.toInt(), root.arrayAt("sessions").mapNotNull { it as? JsonObject }.map { row ->
+                fun text(key: String) = (row[key] as? JsonPrimitive)?.contentOrNull ?: "Unavailable"
+                RemoteSession(text("user"), text("session"), text("id"), text("state"))
+            }
         )
     }
 }

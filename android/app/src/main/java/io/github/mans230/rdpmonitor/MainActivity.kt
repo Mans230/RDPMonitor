@@ -10,12 +10,13 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.net.toUri
 import io.github.mans230.rdpmonitor.ui.RdpApp
 import io.github.mans230.rdpmonitor.ui.theme.RdpTheme
+import io.github.mans230.rdpmonitor.ui.components.AppearanceShell
 
 class MainActivity: ComponentActivity() {
     private val model: RdpViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); enableEdgeToEdge()
-        setContent { RdpTheme { RdpApp(model, ::openBrowser) } }
+        setContent { RdpTheme { AppearanceShell { RdpApp(model, ::openBrowser) } } }
         if (savedInstanceState == null || model.hasPendingPairing()) intent?.dataString?.let(model::callback)
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); intent.dataString?.let(model::callback) }

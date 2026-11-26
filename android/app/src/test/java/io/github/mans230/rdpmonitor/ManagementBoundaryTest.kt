@@ -28,7 +28,10 @@ class ManagementBoundaryTest {
         assertTrue(runCatching { SnapshotDecoder.traffic(Json.parseToJsonElement("""{"days":[{"date":"2026-11-10","down":-1,"up":0}]}""")) }.isFailure)
     }
     @Test fun allSectionsHaveDataSourcesAndUpdateUsesSupportedApplyOperation() {
-        Feature.entries.forEach { assertTrue(ToolCatalog.documents(it).isNotEmpty()) }
+        Feature.entries.forEach { feature ->
+            // These views consume the live Snapshot or the diagnostic request selected by the user.
+            assertTrue(ToolCatalog.documents(feature).isNotEmpty() || feature in setOf(Feature.Processes, Feature.History, Feature.Diagnostics))
+        }
         val install = ToolCatalog.tools(Feature.Updates).first { it.title == "Install suite update" }
         assertEquals("apply", install.payload(emptyMap())["op"]!!.jsonPrimitive.content)
         val user = ToolCatalog.tools(Feature.RdpAccess).first { it.action == "user" }
