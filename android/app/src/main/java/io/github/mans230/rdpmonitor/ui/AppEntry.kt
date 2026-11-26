@@ -22,7 +22,8 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-@Composable fun AppEntry(model: RdpViewModel, openBrowser: (String) -> Unit) {
+@Composable fun AppEntry(model: RdpViewModel, openBrowser: (String) -> Unit,
+    signIn: suspend (Context, String) -> GoogleProfile = GoogleIdentity::signIn) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("app_identity", Context.MODE_PRIVATE) }
     var profile by remember { mutableStateOf(preferences.getString("subject", null)?.let { GoogleProfile(it, preferences.getString("email", "").orEmpty(), preferences.getString("name", "").orEmpty()) }) }
@@ -55,7 +56,7 @@ import kotlinx.coroutines.launch
                     signingIn = true; message = null
                     scope.launch {
                         try {
-                            val identity = GoogleIdentity.signIn(context, BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                            val identity = signIn(context, BuildConfig.GOOGLE_WEB_CLIENT_ID)
                             if (!model.signOutApp()) { message = "Finish the running server operation before switching accounts."; return@launch }
                             preferences.edit().putString("connector_owner", identity.subject).putString("subject", identity.subject).putString("email", identity.email).putString("name", identity.name).commit()
                             profile = identity; model.appIdentityChanged(); inside = true
