@@ -40,7 +40,7 @@ class AppJourneyTest {
         ui.waitForIdle()
     }
     private fun dock(label: String) {
-        ui.onNodeWithTag("app-content").performScrollToNode(hasText(label) and hasClickAction())
+        ui.onNodeWithTag("section-navigation").assertIsDisplayed()
         ui.onNode(hasText(label) and hasClickAction()).performClick()
     }
     private fun screenshot(name: String) {
@@ -112,14 +112,40 @@ class AppJourneyTest {
             dock("More")
             ui.onNodeWithTag("app-content").performScrollToNode(hasTestTag("feature-${feature.name}"))
             ui.onNodeWithTag("feature-${feature.name}").performClick()
-            ui.onNodeWithTag("app-content").performScrollToNode(hasTestTag("page-title-${feature.title}"))
+            ui.onNodeWithTag("page-title-Server overview").assertDoesNotExist()
+            ui.onNodeWithTag("page-title-${feature.title}").assertIsDisplayed()
             ui.onNodeWithTag("page-title-${feature.title}").assertIsDisplayed()
             alignWorkspace(ui.onNodeWithTag("page-title-${feature.title}"))
             screenshot("390-section-${feature.name}")
             ui.runOnIdle { check(model.state.value.snapshot != null); check(!model.state.value.connectionScreen) }
             ui.runOnIdle { ui.activity.onBackPressedDispatcher.onBackPressed() }
-            workspace("All sections")
+            ui.onNodeWithText("All sections").assertIsDisplayed()
         }
+    }
+
+    @Test fun navigationStaysVisibleAndEachDestinationStartsWithoutOverview() {
+        preview()
+        ui.onNodeWithText("Server uptime").assertIsDisplayed()
+        ui.onNodeWithText("1d 0h 0m").assertIsDisplayed()
+        ui.onNodeWithText("Latest backup result").assertIsDisplayed()
+        ui.onNodeWithText("Server functions").assertDoesNotExist()
+        dock("Backups")
+        ui.onNodeWithTag("page-title-Backups").assertIsDisplayed()
+        ui.onNodeWithTag("page-title-Server overview").assertDoesNotExist()
+        workspace("Back up now")
+        dock("Protect")
+        ui.onNodeWithTag("page-title-Protection").assertIsDisplayed()
+        ui.onNodeWithTag("page-title-Backups").assertDoesNotExist()
+        dock("More")
+        ui.onNodeWithText("All sections").assertIsDisplayed()
+        workspace("Bandwidth \u00b7 recorded usage & billing window")
+        ui.onNodeWithText("Bandwidth \u00b7 recorded usage & billing window").performClick()
+        ui.onNodeWithTag("page-title-Bandwidth").assertIsDisplayed()
+        ui.onNodeWithTag("page-title-Server overview").assertDoesNotExist()
+        screenshot("390-bandwidth-page")
+        dock("Overview")
+        ui.onNodeWithTag("page-title-Server overview").assertIsDisplayed()
+        ui.onNodeWithTag("section-navigation").assertIsDisplayed()
     }
 
     @Test fun demoCannotRunDiagnosticsOrServerActions() {
@@ -150,7 +176,7 @@ class AppJourneyTest {
 
     @Test @Config(qualifiers = "w320dp-h740dp-mdpi") fun narrowPhoneCanReachWorkspaceAndAppearance() {
         preview(); screenshot("320-overview")
-        workspace("Remote sessions"); screenshot("320-workspace")
+        workspace("Memory"); screenshot("320-workspace")
         dock("Overview")
         ui.onNodeWithTag("app-content").performScrollToIndex(0)
         ui.onNodeWithContentDescription("Appearance").performClick()
@@ -164,7 +190,7 @@ class AppJourneyTest {
 
     @Test @Config(qualifiers = "w768dp-h1024dp-mdpi") fun tabletShowsResourcesAndWorkspace() {
         preview(); screenshot("768-overview")
-        workspace("Remote sessions"); screenshot("768-workspace")
+        workspace("Memory"); screenshot("768-workspace")
         dock("Backups"); workspace("Latest backup result"); screenshot("768-backup-result")
         workspace("Local retention"); screenshot("768-backup-plan")
     }

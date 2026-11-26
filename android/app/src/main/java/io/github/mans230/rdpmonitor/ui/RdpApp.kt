@@ -62,8 +62,18 @@ import io.github.mans230.rdpmonitor.ui.theme.*
         text = { Text("This ends this app session. Your saved server and approved Passkey are kept; you can sign in again without registering a new key.") },
         confirmButton = { TextButton(onClick = { signOut = false; model.disconnect() }) { Text("Disconnect and sign out") } },
         dismissButton = { TextButton(onClick = { signOut = false }) { Text("Keep connected") } })
-    Scaffold(containerColor = Color.Transparent, contentColor = Signal) { padding ->
-        BoxWithConstraints(Modifier.fillMaxSize().padding(padding).navigationBarsPadding()) {
+    val isOverview = selected == null && state.destination == Destination.Overview
+    LaunchedEffect(state.selected?.id, state.demo, state.administration, state.connected, isOverview) {
+        if (isOverview && !state.demo && state.administration && state.connected)
+            model.loadDocuments(listOf("/api/backup", "/api/sysinfo"))
+    }
+    Scaffold(containerColor = Color.Transparent, contentColor = Signal, bottomBar = {
+        Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp).testTag("section-navigation"), contentAlignment = Alignment.Center) {
+            FunctionDock(selected, state.destination, { detail = null; model.closeForm(); model.destination(Destination.Overview) }, open,
+                { detail = null; model.closeForm(); model.destination(Destination.More) })
+        }
+    }) { padding ->
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
             val edge = if (maxWidth < 351.dp) 16.dp else 20.dp
             LazyColumn(Modifier.align(Alignment.TopCenter).widthIn(max = 1104.dp).fillMaxHeight().testTag("app-content"), state = scroll,
                 contentPadding = PaddingValues(horizontal = edge, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -76,7 +86,10 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                         }
                         IconButton(onClick = appearance) { Icon(Icons.Outlined.Tune, "Appearance") }
                         IconButton(onClick = { detail = null; model.connectScreen() }) { Icon(Icons.Outlined.Dns, "Server connections") }
-                        if (!state.demo) IconButton(onClick = model::refresh, enabled = state.connected) { Icon(Icons.Outlined.Refresh, "Refresh readings") }
+                        if (!state.demo) IconButton(onClick = {
+                            model.refresh()
+                            if (isOverview && state.administration) model.loadDocuments(listOf("/api/backup", "/api/sysinfo"))
+                        }, enabled = state.connected) { Icon(Icons.Outlined.Refresh, "Refresh readings") }
                     }
                 }
                 if (state.demo) item { Notice("Demo mode · Sample data · Server changes are unavailable") }
@@ -90,20 +103,13 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                     TextButton(onClick = model::showOperation) { Text("${state.operationTitle} · ${if (state.actionBusy) "Running — view progress" else "Result ready"}") }
                 }
                 if (state.diagnostics.isNotEmpty()) item { TextButton(onClick = { open(Feature.Diagnostics) }) { Text("Diagnostic running · view status") } }
-                item { Column(verticalArrangement = Arrangement.spacedBy(16.dp)) { OverviewScreen(snapshot) } }
-                item {
-                    Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-                        FunctionDock(selected, state.destination, { detail = null; model.closeForm(); model.destination(Destination.Overview) }, open,
-                            { detail = null; model.closeForm(); model.destination(Destination.More) })
-                    }
-                }
                 item {
                     Column(pageMotion(route), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         when (selected) {
                             Feature.Processes -> if (state.demo) ActivityScreen(snapshot, emptyList(), processesOnly = true) else LiveActivity(state, model, processesOnly = true)
                             Feature.History -> ResourceHistory(snapshot)
                             null -> when (state.destination) {
-                                Destination.Overview -> FunctionBoard(state, model, open)
+                                Destination.Overview -> OverviewScreen(snapshot, state)
                                 Destination.Bandwidth -> if (state.demo) BandwidthScreen(DemoData.traffic) else LiveBandwidth(state, model, openBrowser)
                                 Destination.Activity -> if (state.demo) ActivityScreen(snapshot, DemoData.incidents) else LiveActivity(state, model)
                                 Destination.More -> {
@@ -124,26 +130,29 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 }
 
 @Composable private fun FunctionDock(selected: Feature?, destination: Destination, overview: () -> Unit, open: (Feature) -> Unit, more: () -> Unit) {
-    // In the scroll flow: it reserves its own height and never covers a control or chart.
-    GlassSurface(radius = 32.dp, blur = 24.dp) {
-        Row(Modifier.widthIn(max = 380.dp).padding(5.dp), horizontalArrangement = Arrangement.Center) {
-            val labels = listOf("Overview", "Protect", "Backups", "Processes", "More")
-            val features = listOf(null, Feature.Protection, Feature.Backups, Feature.Processes, null)
-            labels.forEachIndexed { index, label ->
-                val interaction = remember { MutableInteractionSource() }
-                val pressed by interaction.collectIsPressedAsState()
-                val scale by animateFloatAsState(if (pressed) .96f else 1f, tween(100), label = "Navigation press")
-                val active = when (index) {
-                    0 -> selected == null && destination == Destination.Overview
-                    4 -> selected !in listOf(Feature.Protection, Feature.Backups, Feature.Processes) && !(selected == null && destination == Destination.Overview)
-                    else -> selected == features[index]
-                }
-                val icon = when (index) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.VerifiedUser; 2 -> Icons.Outlined.Inventory2; 3 -> Icons.Outlined.BarChart; else -> Icons.Outlined.MoreHoriz }
-                Column(Modifier.weight(1f).graphicsLayer { scaleX = scale; scaleY = scale }.background(if (active) Color.White.copy(alpha = .10f) else Color.Transparent, RoundedCornerShape(26.dp))
-                    .selectable(active, interactionSource = interaction, indication = LocalIndication.current, role = Role.Tab, onClick = { when (index) { 0 -> overview(); 4 -> more(); else -> open(features[index]!!) } })
-                    .padding(horizontal = 2.dp, vertical = 8.dp).heightIn(min = 44.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(icon, null, Modifier.size(18.dp), tint = if (active) Signal else Muted)
-                    Text(label, fontSize = 11.sp, color = if (active) Signal else Muted)
+    BoxWithConstraints {
+        val compact = maxWidth < 340.dp
+        // Scaffold reserves the dock height; every route scrolls independently above it.
+        GlassSurface(radius = 32.dp, blur = 24.dp) {
+            Row(Modifier.widthIn(max = 380.dp).padding(5.dp), horizontalArrangement = Arrangement.Center) {
+                val labels = listOf("Overview", "Protect", "Backups", "Processes", "More")
+                val features = listOf(null, Feature.Protection, Feature.Backups, Feature.Processes, null)
+                labels.forEachIndexed { index, label ->
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    val scale by animateFloatAsState(if (pressed) .96f else 1f, tween(100), label = "Navigation press")
+                    val active = when (index) {
+                        0 -> selected == null && destination == Destination.Overview
+                        4 -> selected !in listOf(Feature.Protection, Feature.Backups, Feature.Processes) && !(selected == null && destination == Destination.Overview)
+                        else -> selected == features[index]
+                    }
+                    val icon = when (index) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.VerifiedUser; 2 -> Icons.Outlined.Inventory2; 3 -> Icons.Outlined.BarChart; else -> Icons.Outlined.MoreHoriz }
+                    Column(Modifier.weight(1f).graphicsLayer { scaleX = scale; scaleY = scale }.background(if (active) Color.White.copy(alpha = .10f) else Color.Transparent, RoundedCornerShape(26.dp))
+                        .selectable(active, interactionSource = interaction, indication = LocalIndication.current, role = Role.Tab, onClick = { when (index) { 0 -> overview(); 4 -> more(); else -> open(features[index]!!) } })
+                        .padding(horizontal = 2.dp, vertical = 8.dp).heightIn(min = 44.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(icon, null, Modifier.size(18.dp), tint = if (active) Signal else Muted)
+                        Text(if (compact && index == 3) "Tasks" else label, maxLines = 1, fontSize = 11.sp, color = if (active) Signal else Muted)
+                    }
                 }
             }
         }

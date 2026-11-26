@@ -2,6 +2,7 @@ package io.github.mans230.rdpmonitor
 
 import io.github.mans230.rdpmonitor.data.SnapshotDecoder
 import io.github.mans230.rdpmonitor.feature.overview.backupLead
+import io.github.mans230.rdpmonitor.feature.overview.uptimeText
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
@@ -27,6 +28,11 @@ class DashboardDataTest {
         assertFalse(backupLead(null, json("""{"last":{"status":"ok"}}""")).lastRun.contains("verified"))
         assertEquals("Last archive not verified", backupLead(null, json("""{"last":{"status":"ok","verified":false}}""")).lastRun)
         assertEquals("Last archive verified · sample.zip", backupLead(null, json("""{"last":{"verified":true,"archive":"sample.zip"}}""")).lastRun)
+    }
+    @Test fun uptimeUsesOnlyValidServerSeconds() {
+        assertEquals("1d 2h 3m", uptimeText(93780.5))
+        assertEquals("0d 0h 0m", uptimeText(0.0))
+        listOf(null, -1.0, Double.NaN, Double.POSITIVE_INFINITY).forEach { assertEquals("Unavailable", uptimeText(it)) }
     }
     @Test fun resourceAndSessionCardsUseRecordedDataWithoutMockFallback() {
         val snapshot = SnapshotDecoder.decode("""{"hostname":"actual-host","ts":100,"cpu":{"pct":0,"cores":8},"ram":{"pct":0},"disks":[{"mount":"D:\\","total":1000,"free":1000,"pct":0}],"sessions":[{"user":"operator","session":"rdp-tcp#3","id":"7","state":"Disc"}],"procs":[]}""")
