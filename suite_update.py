@@ -27,7 +27,8 @@ MAX_ZIP = 20 * 1024 * 1024
 REQUIRED = {"rdp_monitor.py", "rdp_suite.py", "suite_update.py", "requirements.lock.txt",
             "webconsole/RDPWebConsole.py", "webconsole/webconsole_ui.html",
             "private_panel.py", "webconsole/private_cli.py", "webconsole/passkey_auth.py",
-            "webconsole/passkeys.js", "webconsole/proxy_security.py", "requirements-passkey.txt"}
+            "webconsole/passkeys.js", "webconsole/proxy_security.py", "requirements-passkey.txt",
+            "webconsole/mobile_pairing.py", "webconsole/mobile_authorize.html"}
 TASKS = ("RDPSuite", "RDPSuiteBoot", "RDPSuiteBackup")
 
 

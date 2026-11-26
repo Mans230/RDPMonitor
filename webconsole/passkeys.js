@@ -38,7 +38,7 @@ function passkeyErrorMessage(error,register){
   }
   return error.message||'Passkey request failed. Retry.';
 }
-async function configurePasskeys({authRequest,enterSession}){
+async function configurePasskeys({authRequest,enterSession,localTest=false}){
   const {response,data}=await authRequest('/api/auth/config');
   if(!response.ok)throw new Error('Could not check sign-in settings. Reload to retry.');
   if(data.mode!=='passkey')throw new Error('Private access is not configured. Ask the server administrator to configure Tailscale Serve and Passkey.');
@@ -46,7 +46,7 @@ async function configurePasskeys({authRequest,enterSession}){
   el('passkeyLogin').hidden=false;
   el('loginDescription').textContent='Use your fingerprint, face or device lock to sign in.';
   let busy=false,pendingRequest='';
-  const pendingMessage=()=>pendingRequest?'Passkey created. Request '+pendingRequest+' is waiting for approval in the Telegram bot (10 minutes). Approve the matching device request there. Do not create another passkey. After approval, select Sign in with passkey.':'';
+  const pendingMessage=()=>pendingRequest?'Passkey created. Request '+pendingRequest+(localTest?' is waiting for local TEST administrator approval (10 minutes). No Telegram bot is running in this isolated runner.':' is waiting for approval in the Telegram bot (10 minutes). Approve the matching device request there.')+' Do not create another passkey. After approval, select Sign in with passkey.':'';
   async function perform(register){
     if(busy)return;
     busy=true;

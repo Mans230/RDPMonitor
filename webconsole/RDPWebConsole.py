@@ -19,6 +19,7 @@ from urllib.parse import urlparse, parse_qs
 from http.cookies import SimpleCookie
 from action_policy import CONFIRMED_ACTIONS, audit_action, confirmation_arguments, requires_confirmation
 from proxy_security import serve_context, ProxyRejected
+from mobile_pairing import Pairings, PairingError, READ_PATHS
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(BASE_DIR))
@@ -60,6 +61,7 @@ _token_lock = threading.Lock()
 _otp_lock = threading.Lock()
 _used_otps = {}
 _panel_request_lock = threading.Lock()
+_mobile_pairings = Pairings()
 
 
 # ---------------------------------------------------------------- deps
@@ -1418,7 +1420,7 @@ def authenticate_login(token):
     return None, ""
 
 
-def create_session(addr, actor="owner", credential_hash=""):
+def create_session(addr, actor="owner", credential_hash="", mobile=False):
     sid, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
     with _session_lock:
         now = time.time()
@@ -1430,7 +1432,7 @@ def create_session(addr, actor="owner", credential_hash=""):
         _sessions[sid] = {"csrf": csrf, "created": now,
                           "expires": now + SESSION_TTL,
                           "addr": addr, "confirm": {}, "actor": actor,
-                          "credential_hash": credential_hash}
+                          "credential_hash": credential_hash, "mobile": mobile}
     return sid, csrf
 
 
@@ -1658,6 +1660,94 @@ class Handler(BaseHTTPRequestHandler):
     def _authed(self):
         return self._session()[1] is not None
 
+    def _mobile_enabled(self):
+        local_test = (STATE.get('passkey_local_test') is True and BIND == '127.0.0.1'
+                      and STATE.get('passkey_origin') == 'http://localhost:%s' % self.server.server_address[1]
+                      and self.headers.get('Host') == 'localhost:%s' % self.server.server_address[1])
+        return (passkey_mode() and STATE.get('mobile_pairing_enabled') is True
+                and (self._secure_request() or local_test))
+
+    def _mobile_get(self, path, query):
+        if not self._mobile_enabled():
+            return self._json(404, {'error': 'Native app pairing is not enabled.'})
+        if path == '/mobile/authorize':
+            with open(os.path.join(BASE_DIR, 'mobile_authorize.html'), 'rb') as stream:
+                body = stream.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
+            self._security_headers(); self.end_headers(); self.wfile.write(body)
+            return
+        sid, sess = self._session()
+        if not sess:
+            return self._json(401, {'error': 'Sign in with your approved passkey.'})
+        if sess.get('mobile') or sess.get('actor') != 'owner':
+            return self._json(403, {'error': 'Owner browser session required.'})
+        if path == '/api/mobile/v1/request':
+            values = parse_qs(query).get('request', [])
+            if len(values) != 1:
+                return self._json(400, {'error': 'Start pairing from the Android app.'})
+            try:
+                data = _mobile_pairings.describe(values[0], self._client_identity(), STATE['passkey_origin'])
+                return self._json(200, data)
+            except PairingError as exc:
+                return self._json(exc.status, {'error': str(exc)})
+        if path == '/api/mobile/v1/sessions':
+            with _session_lock:
+                now = time.time()
+                items = [{'id': hashlib.sha256(key.encode()).hexdigest()[:24],
+                          'created': row['created'], 'expires': row['expires'], 'scope': 'monitoring:read'}
+                         for key, row in _sessions.items() if row.get('mobile') and row['expires'] > now
+                         and row.get('credential_hash') == sess.get('credential_hash')]
+            return self._json(200, {'items': items})
+        return self._json(404, {'error': 'Unknown mobile operation.'})
+
+    def _mobile_post(self, path, body):
+        if not self._mobile_enabled():
+            return self._json(404, {'error': 'Native app pairing is not enabled.'})
+        origin, addr = STATE['passkey_origin'], self._client_identity()
+        if self.headers.get('Origin') != origin:
+            return self._json(403, {'error': 'App request origin rejected.'})
+        try:
+            if path == '/api/mobile/v1/pairings':
+                return self._json(201, _mobile_pairings.begin(body, addr, origin))
+            if path == '/api/mobile/v1/exchange':
+                actor, credential = _mobile_pairings.exchange(body, addr, origin)
+                if not credential.startswith('passkey:') or not passkey_store().active(credential[8:], actor):
+                    return self._json(403, {'error': 'The approving passkey is no longer active.'})
+                sid, csrf = create_session(addr, actor, credential, mobile=True)
+                self._usage_context.update(actor=actor, action='mobile_pair', session=hashlib.sha256(sid.encode()).hexdigest()[:16])
+                return self._json(200, {'ok': True, 'csrf': csrf, 'actor': actor,
+                                       'scope': 'monitoring:read', 'idle_timeout_seconds': SESSION_TTL},
+                    {'Set-Cookie': 'rdpwc_session=%s; HttpOnly; SameSite=Strict; Path=/; Secure' % sid})
+            sid, sess = self._session()
+            if not sess:
+                return self._json(401, {'error': 'Sign in with your approved passkey.'})
+            if sess.get('mobile') or sess.get('actor') != 'owner':
+                return self._json(403, {'error': 'Owner browser session required.'})
+            if not hmac.compare_digest(self.headers.get('X-CSRF-Token', '').encode(), sess['csrf'].encode()):
+                return self._json(403, {'error': 'CSRF check failed.'})
+            self._usage_context.update(actor=sess['actor'], action='mobile_consent')
+            if path == '/api/mobile/v1/consent':
+                if type(body.get('approve')) is not bool:
+                    return self._json(400, {'error': 'Choose Approve or Deny.'})
+                return self._json(200, _mobile_pairings.consent(str(body.get('request', '')), addr, origin,
+                    sess['actor'], sess['credential_hash'], body['approve']))
+            if path == '/api/mobile/v1/revoke':
+                with _session_lock:
+                    for key, row in list(_sessions.items()):
+                        if (row.get('mobile') and row.get('credential_hash') == sess.get('credential_hash')
+                                and hmac.compare_digest(hashlib.sha256(key.encode()).hexdigest()[:24], str(body.get('id', '')))):
+                            del _sessions[key]
+                            return self._json(200, {'ok': True})
+                return self._json(404, {'error': 'App session not found.'})
+            return self._json(404, {'error': 'Unknown mobile operation.'})
+        except PairingError as exc:
+            return self._json(exc.status, {'error': str(exc)})
+        except Exception:
+            return self._json(503, {'error': 'App sign-in service unavailable. Retry later.'})
+
     def _body(self):
         if self.headers.get("Transfer-Encoding"):
             self.close_connection = True
@@ -1685,6 +1775,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok(): return self._json(421, {"error": "invalid Host header"})
         if not client_allowed(self.client_address[0]):
             return self._json(403, {"error": "client IP not allowed"})
+        if u.path == '/mobile/authorize' or u.path.startswith('/api/mobile/v1/'):
+            return self._mobile_get(u.path, u.query)
         if u.path in ("/", "/index.html"):
             qs = parse_qs(u.query)
             otp = (qs.get("otp") or [""])[0]
@@ -1746,16 +1838,21 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     return self._json(503, {"ok": False, "auth": "passkey"})
             return self._json(200, {"ok": True, "ts": time.time(),
-                                    "auth": "passkey" if passkey_mode() else "token"})
+                                    "auth": "passkey" if passkey_mode() else "token",
+                                    "mobile_pairing": self._mobile_enabled()})
         if u.path == "/api/auth/config":
-            return self._json(200, {"mode": "passkey" if passkey_mode() else "token"})
+            return self._json(200, {"mode": "passkey" if passkey_mode() else "token",
+                                    "test_mode": STATE.get('mobile_test_runner') is True})
         if u.path == "/api/session":
             _sid, sess = self._session()
             return self._json(200 if sess else 401,
                               {"ok": bool(sess), "csrf": sess.get("csrf") if sess else "",
                                "actor": sess.get("actor", "") if sess else "",
                                "idle_timeout_seconds": SESSION_TTL})
-        if not self._authed(): return self._json(401, {"error": "authentication required"})
+        _sid, active_session = self._session()
+        if not active_session: return self._json(401, {"error": "authentication required"})
+        if active_session.get('mobile') and u.path not in READ_PATHS:
+            return self._json(403, {'error': 'This app session has monitoring access only.'})
         if u.path == "/api/stats":
             with _lock: s = dict(LIVE)
             s["err"] = LAST_ERR
@@ -1959,6 +2056,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(413, {"error": "request body too large"})
         except Exception:
             return self._json(400, {"error": "invalid JSON"})
+        if u.path.startswith('/api/mobile/v1/'):
+            return self._mobile_post(u.path, body)
         if u.path.startswith("/api/auth/"):
             return self._passkey_request(u.path, body)
         if u.path == "/api/login":
@@ -1975,6 +2074,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._login_success(actor, credential_hash)
         sid, sess = self._session()
         if not sess: return self._json(401, {"error": "authentication required"})
+        if sess.get('mobile') and u.path != '/api/logout':
+            return self._json(403, {'error': 'This app session has monitoring access only.'})
         self._usage_context["actor"] = sess.get("actor", "owner")
         self._usage_context["session"] = hashlib.sha256(sid.encode()).hexdigest()[:16]
         if not hmac.compare_digest(self.headers.get("X-CSRF-Token", "").encode("utf-8"),

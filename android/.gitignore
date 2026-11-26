@@ -1,0 +1,8 @@
+.gradle/
+.kotlin/
+**/build/
+local.properties
+artifacts/
+.taste-skill/
+*.jks
+*.keystore
