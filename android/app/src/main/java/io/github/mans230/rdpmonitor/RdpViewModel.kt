@@ -52,6 +52,19 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
         diagnosticJobs.values.forEach { it.cancel() }; diagnosticJobs.clear()
         _state.value = AppState(profiles = store.profiles(), demo = true, snapshot = DemoData.snapshot())
     }
+    fun appIdentityChanged() {
+        refreshJob?.cancel(); documentJob?.cancel(); documentGeneration++
+        diagnosticJobs.values.forEach { it.cancel() }; diagnosticJobs.clear()
+        _state.value = AppState(profiles = store.profiles())
+    }
+    fun signOutApp(): Boolean {
+        if (_state.value.actionBusy || _state.value.busy) return false
+        val sessions = store.profiles().mapNotNull { profile -> store.session(profile.id)?.let { profile to it } }
+        store.clearSessions()
+        appIdentityChanged()
+        viewModelScope.launch { sessions.forEach { (profile, session) -> api.logout(profile, session) } }
+        return true
+    }
     fun connectScreen() { refreshJob?.cancel(); documentJob?.cancel(); documentGeneration++; _state.update { it.copy(connectionScreen = true, message = null, documents = emptyMap(), documentErrors = emptyMap(), review = null, actionResult = null, operationVisible = false, editingTool = null, formValues = emptyMap(), documentLoading = false) } }
     fun closeConnections() { _state.update { it.copy(connectionScreen = false) }; foreground(foreground) }
     fun destination(value: Destination) { _state.update { it.copy(destination = value, editingTool = null, formValues = emptyMap()) } }

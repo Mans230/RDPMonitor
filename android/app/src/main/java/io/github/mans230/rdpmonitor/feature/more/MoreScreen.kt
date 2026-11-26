@@ -7,6 +7,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.github.mans230.rdpmonitor.ui.components.*
 import io.github.mans230.rdpmonitor.ui.theme.*
@@ -35,7 +36,7 @@ enum class Feature(val title: String, val summary: String, val capabilities: Lis
     Section("Server tools") {
         Feature.entries.forEachIndexed { i, feature ->
             if (i > 0) HorizontalDivider(color = Rule)
-            Row(Modifier.fillMaxWidth().clickable { onFeature(feature) }.padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().testTag("feature-${feature.name}").clickable { onFeature(feature) }.padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(feature.title, style = MaterialTheme.typography.bodyLarge)
                     Text(feature.summary, color = Muted, style = MaterialTheme.typography.bodyMedium)

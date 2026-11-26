@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
 import io.github.mans230.rdpmonitor.core.model.ResourcePoint
 import io.github.mans230.rdpmonitor.ui.theme.*
 import java.util.Locale
@@ -50,7 +51,7 @@ fun rate(value: Double?) = value?.let { String.format(Locale.US, "%.1f Mbps", it
 }
 @Composable fun PageTitle(title: String, detail: String) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
+        Text(title, Modifier.testTag("page-title-$title"), style = MaterialTheme.typography.titleLarge)
         Text(detail, style = MaterialTheme.typography.bodyMedium, color = Muted)
     }
 }
