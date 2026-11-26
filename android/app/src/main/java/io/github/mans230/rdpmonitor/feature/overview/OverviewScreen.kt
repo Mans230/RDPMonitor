@@ -1,76 +1,62 @@
-﻿package io.github.mans230.rdpmonitor.feature.overview
+package io.github.mans230.rdpmonitor.feature.overview
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.layout.onSizeChanged
-import io.github.mans230.rdpmonitor.core.model.Snapshot
 import io.github.mans230.rdpmonitor.AppState
+import io.github.mans230.rdpmonitor.core.model.Snapshot
 import io.github.mans230.rdpmonitor.data.DemoDocuments
 import io.github.mans230.rdpmonitor.feature.more.backupDetails
-import kotlinx.serialization.json.*
 import io.github.mans230.rdpmonitor.ui.components.*
 import io.github.mans230.rdpmonitor.ui.theme.*
+import kotlinx.serialization.json.*
 
-/** Resource summary belongs only to the Overview route. */
+/** Only recorded resource data and the two requested health facts live on Overview. */
 @Composable fun OverviewScreen(snapshot: Snapshot, state: AppState) {
+    var metric by rememberSaveable { mutableIntStateOf(0) }
     PageTitle("Server overview", snapshot.host)
+    CossFrame("Server resources", "Recorded on this Windows host") {
+        CossPanel {
+            ResourceMeter("CPU", snapshot.cpu, snapshot.cores?.let { "$it logical processors" } ?: "Core count unavailable")
+            ResourceMeter("Memory", snapshot.ram, "${bytes(snapshot.ramUsed)} of ${bytes(snapshot.ramTotal)}")
+            val disk = snapshot.disks.firstOrNull()
+            ResourceMeter(disk?.let { "Storage ${it.name}" } ?: "Storage", disk?.usedPercent,
+                disk?.let { "${bytes(it.freeBytes)} free${it.totalBytes?.let { total -> " of ${bytes(total)}" }.orEmpty()}" } ?: "Disk reading unavailable")
+        }
+        CossPanel {
+            Text("Resource history", style = MaterialTheme.typography.titleMedium)
+            CossSegments(listOf("CPU", "RAM"), metric, { metric = it }, Modifier.widthIn(max = 260.dp))
+            if (snapshot.history.isEmpty()) Text("No recorded ${if (metric == 0) "CPU" else "memory"} history received.", color = Muted)
+            else ResourceChart(if (metric == 0) snapshot.history else snapshot.history.map { it.copy(cpu = it.ram) },
+                cpuOnly = true, seriesName = if (metric == 0) "CPU" else "Memory")
+            Text("Last 30 minutes. Missing samples remain gaps.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        }
+    }
     fun document(path: String) = if (state.demo) DemoDocuments.at(path) else state.documents[path]
     val backup = backupDetails(document("/api/backup"), document("/api/setup"))
     val uptime = ((document("/api/sysinfo") as? JsonObject)?.get("uptime_s") as? JsonPrimitive)?.doubleOrNull
-    Section("Server status") {
-        MetricRow("Server uptime", uptimeText(uptime))
-        MetricRow("Latest backup result", backup.result)
-        if (!state.demo && !state.administration) Text("Uptime and backup details require administration approval.", color = Muted, style = MaterialTheme.typography.bodySmall)
-        listOf("/api/sysinfo", "/api/backup").forEach { path -> state.documentErrors[path]?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodySmall) } }
-    }
-    BoxWithConstraints {
-        val narrow = maxWidth < 280.dp
-        val density = LocalDensity.current
-        var processorHeight by remember { mutableIntStateOf(0) }
-        val resourceHeight = with(density) { processorHeight.toDp() }
-        if (maxWidth >= 760.dp) Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Column(Modifier.weight(2f).onSizeChanged { processorHeight = it.height }) { ProcessorCard(snapshot) }
-            CapacityCard("Memory", snapshot.ram, "${bytes(snapshot.ramUsed)} / ${bytes(snapshot.ramTotal)}", Modifier.weight(1f).heightIn(min = resourceHeight))
-            Box(Modifier.weight(1f)) { StorageCard(snapshot, Modifier.heightIn(min = resourceHeight)) }
-        } else Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            ProcessorCard(snapshot)
-            if (narrow) {
-                CapacityCard("Memory", snapshot.ram, "${bytes(snapshot.ramUsed)} / ${bytes(snapshot.ramTotal)}")
-                StorageCard(snapshot)
-            } else Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                CapacityCard("Memory", snapshot.ram, "${bytes(snapshot.ramUsed)} / ${bytes(snapshot.ramTotal)}", Modifier.weight(1f))
-                Box(Modifier.weight(1f)) { StorageCard(snapshot) }
-            }
+    CossFrame("Server status", "Server-reported values. Refresh to update.") {
+        CossPanel {
+            MetricRow("Server uptime", uptimeText(uptime))
+            HorizontalDivider(color = Rule)
+            MetricRow("Latest backup result", backup.result)
+            if (!state.demo && !state.administration) Text("Uptime and backup details require administration approval.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            listOf("/api/sysinfo", "/api/backup").forEach { path -> state.documentErrors[path]?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodySmall) } }
         }
     }
 }
-@Composable private fun ProcessorCard(snapshot: Snapshot) {
-    Section("Processor", "Last 30 minutes · ${snapshot.cores?.let { "$it logical cores" } ?: "Core count unavailable"}") {
-        Text(percent(snapshot.cpu), style = ReadingStyle.copy(fontSize = 32.sp))
-        if (snapshot.history.isEmpty()) Text("No recorded CPU history received.", color = Muted)
-        else ResourceChart(snapshot.history, cpuOnly = true)
-    }
-}
-@Composable private fun StorageCard(snapshot: Snapshot, modifier: Modifier = Modifier) {
-    val disk = snapshot.disks.firstOrNull()
-    CapacityCard("Storage", disk?.usedPercent, disk?.let { "${it.name} · ${bytes(it.freeBytes)} free" } ?: "No disk readings", modifier)
-}
-@Composable private fun CapacityCard(title: String, value: Double?, detail: String, modifier: Modifier = Modifier) {
-    BoxWithConstraints(modifier.fillMaxWidth(), propagateMinConstraints = true) {
-        Column(Modifier.fillMaxWidth().border(1.dp, Rule, RoundedCornerShape(14.dp)).padding(if (maxWidth < 150.dp) 16.dp else 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(percent(value), style = ReadingStyle.copy(fontSize = 28.sp))
-            LinearProgressIndicator(progress = { ((value ?: 0.0) / 100).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(3.dp), color = Signal, trackColor = Rule, strokeCap = StrokeCap.Butt)
-            Text(detail, color = Muted, style = MaterialTheme.typography.bodySmall)
-        }
+
+@Composable private fun ResourceMeter(label: String, value: Double?, note: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MetricRow(label, percent(value))
+        if (value != null) LinearProgressIndicator(progress = { (value / 100).toFloat().coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth().height(6.dp), color = Signal, trackColor = Tray,
+            strokeCap = StrokeCap.Butt, drawStopIndicator = {})
+        Text(note, color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 @Composable fun ResourceHistory(snapshot: Snapshot) {

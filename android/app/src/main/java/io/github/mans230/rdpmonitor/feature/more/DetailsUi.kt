@@ -23,12 +23,12 @@ private val detailsJson = Json { prettyPrint = true }
 @Composable internal fun RawDetails(data: JsonElement, title: String = "Additional server details") {
     var expanded by remember { mutableStateOf(false) }
     var limit by remember { mutableIntStateOf(12000) }
-    TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide $title" else "Show $title") }
+    CossTextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide $title" else "Show $title") }
     if (expanded) {
         Text("Raw field names and values as reported by the server. Sensitive keys are hidden.", color = Muted, style = MaterialTheme.typography.bodySmall)
         val text = remember(data) { detailsJson.encodeToString(JsonElement.serializer(), redactedDetails(data)) }
         Text(text.take(limit), style = MaterialTheme.typography.bodySmall)
-        if (limit < text.length) TextButton(onClick = { limit += 12000 }) { Text("Show more raw details") }
+        if (limit < text.length) CossTextButton(onClick = { limit += 12000 }) { Text("Show more raw details") }
     }
 }
 
@@ -36,10 +36,10 @@ private val detailsJson = Json { prettyPrint = true }
     // Keep the existing reviewed controls. Merely expanding details never mutates server state.
     if (record["id"] != null && record["scope"] != null && record["created"] != null && onTool != null) {
         val id = record.text("id") ?: return
-        OutlinedButton(onClick = { onTool(Tool("Revoke app session", "Immediately end this app session. It must sign in again.", "mobile_revoke", mapOf("id" to id)), emptyMap()) }) { Text("Revoke app session") }
+        CossOutlinedButton(onClick = { onTool(Tool("Revoke app session", "Immediately end this app session. It must sign in again.", "mobile_revoke", mapOf("id" to id)), emptyMap()) }) { Text("Revoke app session") }
     }
     if (record["id"] != null && record["state"] != null && record["op"] != null) {
-        listOf("url", "auth_url").forEach { key -> record.text(key)?.takeIf { it.startsWith("https://") }?.let { url -> TextButton(onClick = { openBrowser(url) }) { Text("Open cloud sign-in link") } } }
+        listOf("url", "auth_url").forEach { key -> record.text(key)?.takeIf { it.startsWith("https://") }?.let { url -> CossTextButton(onClick = { openBrowser(url) }) { Text("Open cloud sign-in link") } } }
         val id = record.text("id") ?: return
         record.text("prompt")?.let { Text(it) }
         val question = record["question"].obj()
@@ -48,9 +48,9 @@ private val detailsJson = Json { prettyPrint = true }
             question.text("name")?.let { Text(it) }; question.text("help")?.let { Text(it, color = Muted) }
             question?.get("choices").rows().orEmpty().forEach { choice -> Text("${shown(choice.text("value"))} · ${shown(choice.text("label"))}", style = MaterialTheme.typography.bodySmall) }
             val kind = if (question.flag("secret") == false) "text" else "secret"
-            OutlinedButton(onClick = { onTool(Tool("Answer cloud sign-in", "Send your answer to this pending server operation.", "setup", mapOf("op" to "answer", "job" to id, "question" to questionId, "value" to ""), listOf(ToolField("value", "Answer", kind, optional = question.flag("required") == false))), mapOf("value" to if (kind == "secret") "" else question.text("default").orEmpty())) }) { Text("Answer sign-in question") }
+            CossOutlinedButton(onClick = { onTool(Tool("Answer cloud sign-in", "Send your answer to this pending server operation.", "setup", mapOf("op" to "answer", "job" to id, "question" to questionId, "value" to ""), listOf(ToolField("value", "Answer", kind, optional = question.flag("required") == false))), mapOf("value" to if (kind == "secret") "" else question.text("default").orEmpty())) }) { Text("Answer sign-in question") }
         }
-        if (onTool != null && record.text("state") == "running") OutlinedButton(onClick = {
+        if (onTool != null && record.text("state") == "running") CossOutlinedButton(onClick = {
             onTool(Tool("Cancel cloud sign-in", "Cancel this pending setup operation.", "setup", mapOf("op" to "cancel", "job" to id)), emptyMap())
         }) { Text("Cancel operation") }
     }
@@ -77,7 +77,7 @@ private val detailsJson = Json { prettyPrint = true }
             card.record?.let { RecordControls(it, openBrowser, onTool) }
         }
     }
-    if (cards.size > visible) TextButton(onClick = { visible += 20 }) { Text("Show more · ${cards.size - visible} records remaining") }
+    if (cards.size > visible) CossTextButton(onClick = { visible += 20 }) { Text("Show more · ${cards.size - visible} records remaining") }
     RawDetails(data)
 }
 

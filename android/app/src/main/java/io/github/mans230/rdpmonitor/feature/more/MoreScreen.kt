@@ -45,16 +45,16 @@ enum class Feature(val title: String, val summary: String, val capabilities: Lis
             }
         }
     }
-    OutlinedButton(onClick = onConnections, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Server connections") }
+    CossOutlinedButton(onClick = onConnections, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Server connections") }
 }
 
 @Composable fun FeatureScreen(feature: Feature, demo: Boolean, onBack: () -> Unit, openPanel: (() -> Unit)?) {
-    TextButton(onClick = onBack) { Text("Back to tools") }
+    CossTextButton(onClick = onBack) { Text("Back to tools") }
     PageTitle(feature.title, feature.summary)
     Section("${feature.title} workflow") {
         feature.capabilities.forEach { Text(it, style = MaterialTheme.typography.bodyLarge) }
     }
     Notice(if (demo) "Preview only. These workflows cannot change a server. Connect to your server to use its web panel."
         else "Use the authenticated web panel for these operations. Server changes require review and confirmation.")
-    openPanel?.let { Button(onClick = it, modifier = Modifier.fillMaxWidth()) { Text("Open authenticated web panel") } }
+    openPanel?.let { CossButton(onClick = it, modifier = Modifier.fillMaxWidth()) { Text("Open authenticated web panel") } }
 }
