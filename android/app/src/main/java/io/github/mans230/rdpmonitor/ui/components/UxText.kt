@@ -9,13 +9,18 @@ fun diagnosticTitle(op: String) = mapOf("diagnose" to "Server health report", "l
     "firewall" to "Firewall status", "netstat" to "Network connections", "when" to "Session timeline", "ps" to "Process report", "bigfiles" to "Find large files",
     "temp" to "Temporary file usage", "startup" to "Startup programs", "updates" to "Windows updates", "sysinfo" to "System information", "harden" to "Security posture",
     "report" to "Monitoring report", "logins" to "Login history", "botlog" to "Bot log", "dumps" to "Recent crash reports", "speedtest" to "Network speed test", "nettest" to "Test a network host")[op] ?: op
+fun diagnosticRequiresArgument(op: String) = op == "ps" || op == "nettest"
 fun diagnosticHint(op: String) = when (op) {
-    "nettest" -> "Enter a host name or IP address, for example 1.1.1.1."
-    "logs" -> "Optional: days and severity, for example 7 error."
-    "diagnose", "logstats", "logins" -> "Optional: number of days (1–30). Leave empty for the server default."
-    "bigfiles" -> "Optional: server folder to inspect. Results can take time on large disks."
+    "nettest" -> "Required: a host name or IP address, for example 1.1.1.1."
+    "ps" -> "Required: a process name, for example chrome. An empty value is rejected by the server."
+    "logs" -> "Optional: days and severity, for example 7 error. Leave empty for 1 day at error level."
+    "diagnose" -> "Optional: number of days (1–30). Leave empty for 1 day."
+    "logstats" -> "Optional: number of days (1–30). Leave empty for 7 days."
+    "logins" -> "Optional: how many recent sign-ins to list (1–30). Leave empty for 10. The lookup always covers the last 3 days."
+    "when" -> "Optional: cpu or ram, and a percent, for example ram 90. Leave empty for CPU at 80% over the last 24 hours."
+    "bigfiles" -> "Scans the system drive for the 20 largest files. Extra text is ignored, and this can take several minutes."
     "speedtest" -> "Measures server network speed. It can take a few minutes and uses network traffic. No parameters are needed."
-    else -> "Leave parameters empty to use the server's default report."
+    else -> "Leave parameters empty. This report does not use extra parameters."
 }
 fun readableValue(key: String, value: JsonPrimitive): String {
     if (value is JsonNull) return "Unavailable"
