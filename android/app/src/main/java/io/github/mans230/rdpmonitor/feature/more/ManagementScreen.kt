@@ -61,7 +61,7 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
         is JsonNull -> Text("Unavailable", color = Muted)
         is JsonPrimitive -> {
             val text = display(value)
-            if (text.startsWith("https://") && !text.contains('\n')) TextButton(onClick = { openBrowser(text) }) { Text("Open sign-in link") }
+            if (text.startsWith("https://") && !text.contains('\n')) CossTextButton(onClick = { openBrowser(text) }) { Text("Open sign-in link") }
             else Text(text, style = MaterialTheme.typography.bodyMedium)
         }
         is JsonArray -> {
@@ -71,14 +71,14 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
                 if (index > 0) HorizontalDivider(color = Rule)
                 NativeDocument(item, openBrowser, onTool, depth + 1)
             }
-            if (visible < value.size) TextButton(onClick = { visible += 20 }) { Text("Show more · ${value.size - visible} remaining") }
+            if (visible < value.size) CossTextButton(onClick = { visible += 20 }) { Text("Show more · ${value.size - visible} remaining") }
         }
         is JsonObject -> {
             val settingKey = value["key"]?.jsonPrimitive?.contentOrNull
             if (settingKey != null && value.containsKey("type") && value.containsKey("value")) {
                 Text(value["label"]?.jsonPrimitive?.content ?: label(settingKey), style = MaterialTheme.typography.bodyLarge)
                 Text((value["value"] as? JsonPrimitive)?.let(::display) ?: "Unavailable", color = Muted)
-                if (onTool != null) OutlinedButton(onClick = {
+                if (onTool != null) CossOutlinedButton(onClick = {
                     val bool = value["type"]?.jsonPrimitive?.content == "bool"
                     val tool = Tool("Change ${value["label"]?.jsonPrimitive?.content ?: settingKey}", "Save the selected monitoring setting on the server.", "settings_set", mapOf("key" to settingKey),
                         listOf(ToolField("value", "Value", options = if (bool) listOf("on", "off") else emptyList())))
@@ -96,22 +96,22 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
                             else NativeDocument(item, openBrowser, onTool, depth + 1)
                         } else {
                             var expand by remember { mutableStateOf(false) }
-                            TextButton(onClick = { expand = !expand }) { Text(if (expand) "Collapse details" else "Expand details") }
+                            CossTextButton(onClick = { expand = !expand }) { Text(if (expand) "Collapse details" else "Expand details") }
                             if (expand) NativeDocument(item, openBrowser, onTool, 0)
                         }
                     }
                 }
                 if (onTool != null && value["id"] != null && value["scope"] != null && value["created"] != null) {
                     val id = value.getValue("id").jsonPrimitive.content
-                    OutlinedButton(onClick = { onTool(Tool("Revoke app session", "Immediately end this app session. It must sign in again.", "mobile_revoke", mapOf("id" to id)), emptyMap()) }) { Text("Revoke app session") }
+                    CossOutlinedButton(onClick = { onTool(Tool("Revoke app session", "Immediately end this app session. It must sign in again.", "mobile_revoke", mapOf("id" to id)), emptyMap()) }) { Text("Revoke app session") }
                 }
                 if (onTool != null && value["id"] != null && value["state"] != null && value["op"] != null) {
                     val id = value.getValue("id").jsonPrimitive.content
                     if (value["question"] is JsonPrimitive) {
                         val question = value.getValue("question").jsonPrimitive.content
-                        OutlinedButton(onClick = { onTool(Tool("Answer cloud sign-in", "Send your answer to this pending server operation.", "setup", mapOf("op" to "answer", "job" to id, "question" to question), listOf(ToolField("value", "Answer", "secret"))), emptyMap()) }) { Text("Answer sign-in question") }
+                        CossOutlinedButton(onClick = { onTool(Tool("Answer cloud sign-in", "Send your answer to this pending server operation.", "setup", mapOf("op" to "answer", "job" to id, "question" to question), listOf(ToolField("value", "Answer", "secret"))), emptyMap()) }) { Text("Answer sign-in question") }
                     }
-                    if (value["state"]?.jsonPrimitive?.content == "running") OutlinedButton(onClick = {
+                    if (value["state"]?.jsonPrimitive?.content == "running") CossOutlinedButton(onClick = {
                         onTool(Tool("Cancel cloud sign-in", "Cancel this pending setup operation.", "setup", mapOf("op" to "cancel", "job" to id)), emptyMap())
                     }) { Text("Cancel operation") }
                 }
@@ -124,21 +124,23 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
     val documents = ToolCatalog.documents(feature)
     LaunchedEffect(feature, state.selected?.id, state.demo) { if (documents.isNotEmpty()) model.loadDocuments(documents.map { it.second }) }
     val edit: (Tool, Map<String, String>) -> Unit = model::editTool
-    TextButton(onClick = onBack) { Text("Back to tools") }
+    CossTextButton(onClick = onBack) { Text("Back to tools") }
     PageTitle(feature.title, feature.summary)
     if (state.demo) Notice("Demo mode. Server reads and changes are disabled.")
     else if (!state.connected) Notice("Session ended. Use Sign in again above to resume server tools.")
     else if (!state.administration) {
         Notice("This session has monitoring access only. Reconnect and approve administration access to use server tools.")
-        OutlinedButton(onClick = { model.reconnect(management = true) }) { Text("Approve administration for this server") }
+        CossOutlinedButton(onClick = { model.reconnect(management = true) }) { Text("Approve administration for this server") }
     }
-    if (documents.isNotEmpty()) OutlinedButton(onClick = { model.loadDocuments(documents.map { it.second }) }, enabled = !state.demo && !state.documentLoading) { Text(if (state.documentLoading) "Refreshing…" else "Refresh section") }
+    if (documents.isNotEmpty()) CossOutlinedButton(onClick = { model.loadDocuments(documents.map { it.second }) }, enabled = !state.demo && !state.documentLoading) { Text(if (state.documentLoading) "Refreshing…" else "Refresh section") }
     if (state.documentLoading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Signal)
     val controls = if (state.administration && !state.demo) edit else null
     fun document(path: String) = if (state.demo) DemoDocuments.at(path) else state.documents[path]
     if (feature == Feature.Backups) {
         documents.forEach { (_, path) -> state.documentErrors[path]?.let { Notice(it, warning = true) } }
-        BackupDetailsScreen(document("/api/backup"), document("/api/setup"))
+        BackupWorkspace(document("/api/backup"), document("/api/setup"), state.administration && state.connected && !state.demo && !state.actionBusy,
+            model::review, { edit(ToolCatalog.tools(Feature.Backups).first { it.fixed["op"] == "sources" },
+                existingValues(ToolCatalog.tools(Feature.Backups).first { it.fixed["op"] == "sources" }, state)) })
     } else documents.forEach { (title, path) ->
         state.documentErrors[path]?.let { Notice(it, warning = true) }
         document(path)?.let { data -> ContextualDocument(feature, path, if (path == "/api/setup") sectionDocument(feature, path, data) else data, openBrowser, controls) }
@@ -146,8 +148,8 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
     }
     if (feature == Feature.Commands || feature == Feature.Diagnostics) Diagnostics(state, model, openBrowser)
     if (ToolCatalog.tools(feature).isNotEmpty()) Section("Actions", "Every change is reviewed before it runs on ${state.selected?.name ?: "the server"}.") {
-        ToolCatalog.tools(feature).forEach { tool ->
-            OutlinedButton(onClick = { edit(tool, existingValues(tool, state)) }, enabled = state.administration && !state.demo && !state.actionBusy,
+        ToolCatalog.tools(feature).filterNot { feature == Feature.Backups && (it.action == "backup_now" || it.fixed["op"] in setOf("schedule", "sources")) }.forEach { tool ->
+            CossOutlinedButton(onClick = { edit(tool, existingValues(tool, state)) }, enabled = state.administration && !state.demo && !state.actionBusy,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = if (tool.dangerous) Warning else Signal),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text((if (tool.dangerous) "Caution · " else "") + tool.title) }
         }
@@ -163,18 +165,18 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
 
 @Composable fun OperationFeedback(state: AppState, model: RdpViewModel, openBrowser: (String) -> Unit) {
     if (!state.operationVisible) return
-    AlertDialog(onDismissRequest = model::hideOperation, title = { Text(state.operationTitle) }, text = {
+    CossDialog(onDismissRequest = model::hideOperation, title = { Text(state.operationTitle) }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Server: ${state.operationServer}", color = Muted)
             if (state.actionBusy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Waiting for the server. This operation will not be automatically repeated.") }
             state.actionResult?.let { NativeDocument(it, openBrowser) }
         }
-    }, confirmButton = { TextButton(onClick = { if (state.actionBusy) model.hideOperation() else model.dismissOperation() }) { Text(if (state.actionBusy) "Continue in background" else "Done") } })
+    }, confirmButton = { CossTextButton(onClick = { if (state.actionBusy) model.hideOperation() else model.dismissOperation() }) { Text(if (state.actionBusy) "Continue in background" else "Done") } })
 }
 
 @Composable fun ActionReviewDialog(state: AppState, model: RdpViewModel) {
     state.review?.let { review ->
-        AlertDialog(onDismissRequest = model::cancelReview, title = { Text(review.tool.title) }, text = {
+        CossDialog(onDismissRequest = model::cancelReview, title = { Text(review.tool.title) }, text = {
             Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Server: ${state.selected?.name}")
                 Text(review.tool.effect)
@@ -182,7 +184,7 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
                     Text("${label(key)}: ${(value as? JsonPrimitive)?.content ?: value.toString()}", style = MaterialTheme.typography.bodyMedium)
                 }
             }
-        }, confirmButton = { TextButton(onClick = model::confirmAction) { Text("Confirm and run") } }, dismissButton = { TextButton(onClick = model::cancelReview) { Text("Cancel") } })
+        }, confirmButton = { CossTextButton(onClick = model::confirmAction) { Text("Confirm and run") } }, dismissButton = { CossTextButton(onClick = model::cancelReview) { Text("Cancel") } })
     }
 }
 
@@ -194,24 +196,24 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
     var browsePath by rememberSaveable { mutableStateOf("") }
     var browseOffset by rememberSaveable { mutableIntStateOf(0) }
     val browseUrl = "/api/setup/browse?path=" + URLEncoder.encode(browsePath, "UTF-8") + "&offset=$browseOffset"
-    AlertDialog(onDismissRequest = dismiss, title = { Text(tool.title) }, text = {
+    CossDialog(onDismissRequest = dismiss, title = { Text(tool.title) }, text = {
         Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(tool.effect, color = Muted)
             tool.visibleFields(values).forEach { field ->
                 if (field.options.isNotEmpty()) {
                     var expanded by remember(field.key) { mutableStateOf(false) }
                     Box {
-                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("${field.label}: ${values[field.key].orEmpty().ifEmpty { "Choose…" }}") }
+                        CossOutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("${field.label}: ${values[field.key].orEmpty().ifEmpty { "Choose…" }}") }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                             field.options.forEach { value -> DropdownMenuItem(text = { Text(value) }, onClick = { model.updateForm(field.key, value); expanded = false }) }
                         }
                     }
-                } else OutlinedTextField(value = values[field.key].orEmpty(), onValueChange = { model.updateForm(field.key, it) },
-                    label = { Text(field.label + if (field.optional) " (optional)" else "") }, modifier = Modifier.fillMaxWidth(),
+                } else CossField(value = values[field.key].orEmpty(), onValueChange = { model.updateForm(field.key, it) },
+                    label = field.label + if (field.optional) " (optional)" else "", modifier = Modifier.fillMaxWidth(),
                     singleLine = field.kind !in listOf("lines", "paths", "options"),
                     visualTransformation = if (field.kind == "secret") PasswordVisualTransformation() else VisualTransformation.None,
                     keyboardOptions = KeyboardOptions(keyboardType = if (field.kind == "int") KeyboardType.Number else if (field.kind == "secret") KeyboardType.Password else KeyboardType.Text))
-                if (field.kind in listOf("path", "paths", "file")) TextButton(onClick = { browseKey = field.key; browsePath = ""; browseOffset = 0; model.loadDocuments(listOf("/api/setup/browse?path=&offset=0")) }) { Text(if (field.kind == "file") "Browse server files" else "Browse server folders") }
+                if (field.kind in listOf("path", "paths", "file")) CossTextButton(onClick = { browseKey = field.key; browsePath = ""; browseOffset = 0; model.loadDocuments(listOf("/api/setup/browse?path=&offset=0")) }) { Text(if (field.kind == "file") "Browse server files" else "Browse server folders") }
                 val setup = state.documents["/api/setup"] as? JsonObject
                 val cloud = setup?.get("cloud") as? JsonObject
                 val remotes = (cloud?.get("remotes") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
@@ -225,7 +227,7 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
                 if (suggestions.isNotEmpty()) {
                     var choose by remember(field.key) { mutableStateOf(false) }
                     Box {
-                        TextButton(onClick = { choose = true }) { Text("Choose existing ${field.label.lowercase()}") }
+                        CossTextButton(onClick = { choose = true }) { Text("Choose existing ${field.label.lowercase()}") }
                         DropdownMenu(choose, { choose = false }) { suggestions.forEach { suggestion ->
                             DropdownMenuItem(text = { Text(suggestion) }, onClick = {
                                 model.updateForm(field.key, if (field.kind == "lines") (values[field.key].orEmpty() + "\n" + suggestion).trim() else suggestion); choose = false
@@ -236,15 +238,15 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
             }
             error?.let { Notice(it, warning = true) }
         }
-    }, confirmButton = { TextButton(enabled = !state.actionBusy, onClick = {
+    }, confirmButton = { CossTextButton(enabled = !state.actionBusy, onClick = {
         try { val payload = tool.payload(values); model.review(tool, payload); dismiss() } catch (e: Exception) { error = e.message ?: "Check the form values." }
-    }) { Text("Review change") } }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
-    browseField?.let { field -> AlertDialog(onDismissRequest = { browseKey = null }, title = { Text(if (field.kind == "file") "Select server file" else "Select server folder") }, text = {
+    }) { Text("Review change") } }, dismissButton = { CossTextButton(onClick = dismiss) { Text("Cancel") } })
+    browseField?.let { field -> CossDialog(onDismissRequest = { browseKey = null }, title = { Text(if (field.kind == "file") "Select server file" else "Select server folder") }, text = {
         val data = state.documents[browseUrl] as? JsonObject
         Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
             Text(browsePath.ifEmpty { "Drives" }, color = Muted)
             val parent = data?.get("parent")?.jsonPrimitive?.content.orEmpty()
-            if (browsePath.isNotEmpty()) TextButton(onClick = {
+            if (browsePath.isNotEmpty()) CossTextButton(onClick = {
                 browsePath = parent; browseOffset = 0
                 model.loadDocuments(listOf("/api/setup/browse?path=" + URLEncoder.encode(parent, "UTF-8") + "&offset=0"))
             }) { Text("Up one level") }
@@ -253,7 +255,7 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
             (data?.get("items") as? JsonArray)?.forEach { item ->
                 val row = item.jsonObject
                 val directory = row["directory"]?.jsonPrimitive?.booleanOrNull == true
-                if (directory || field.kind == "file") TextButton(onClick = {
+                if (directory || field.kind == "file") CossTextButton(onClick = {
                     val selected = row.getValue("path").jsonPrimitive.content
                     if (directory) {
                         browsePath = selected; browseOffset = 0
@@ -261,14 +263,14 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
                     } else { model.updateForm(field.key, selected); browseKey = null }
                 }) { Text((if (directory) "Folder · " else "File · ") + (row["name"]?.jsonPrimitive?.content ?: "Entry")) }
             }
-            if (browseOffset > 0) TextButton(onClick = { browseOffset = (browseOffset - 100).coerceAtLeast(0); model.loadDocuments(listOf("/api/setup/browse?path=" + URLEncoder.encode(browsePath, "UTF-8") + "&offset=$browseOffset")) }) { Text("Previous entries") }
+            if (browseOffset > 0) CossTextButton(onClick = { browseOffset = (browseOffset - 100).coerceAtLeast(0); model.loadDocuments(listOf("/api/setup/browse?path=" + URLEncoder.encode(browsePath, "UTF-8") + "&offset=$browseOffset")) }) { Text("Previous entries") }
             val next = data?.get("next")?.jsonPrimitive?.intOrNull
-            if (next != null) TextButton(onClick = { browseOffset = next; model.loadDocuments(listOf("/api/setup/browse?path=" + URLEncoder.encode(browsePath, "UTF-8") + "&offset=$browseOffset")) }) { Text("Next entries") }
+            if (next != null) CossTextButton(onClick = { browseOffset = next; model.loadDocuments(listOf("/api/setup/browse?path=" + URLEncoder.encode(browsePath, "UTF-8") + "&offset=$browseOffset")) }) { Text("Next entries") }
         }
-    }, confirmButton = { TextButton(enabled = browsePath.isNotEmpty() && field.kind != "file", onClick = {
+    }, confirmButton = { CossTextButton(enabled = browsePath.isNotEmpty() && field.kind != "file", onClick = {
         model.updateForm(field.key, if (field.kind == "paths") (values[field.key].orEmpty().trim() + "\n" + browsePath).trim() else browsePath)
         browseKey = null
-    }) { Text(if (field.kind == "file") "Choose a file from the list" else "Select folder") } }, dismissButton = { TextButton(onClick = { browseKey = null }) { Text("Close") } }) }
+    }) { Text(if (field.kind == "file") "Choose a file from the list" else "Select folder") } }, dismissButton = { CossTextButton(onClick = { browseKey = null }) { Text("Close") } }) }
 }
 
 @Composable private fun Diagnostics(state: AppState, model: RdpViewModel, openBrowser: (String) -> Unit) {
@@ -277,7 +279,7 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
     var expanded by remember { mutableStateOf(false) }
     Section("Diagnostics") {
         Box {
-            OutlinedButton(onClick = { expanded = true }) { Text(diagnosticTitle(selected)) }
+            CossOutlinedButton(onClick = { expanded = true }) { Text(diagnosticTitle(selected)) }
             DropdownMenu(expanded, { expanded = false }) {
                 listOf("diagnose", "logstats", "logs", "firewall", "netstat", "when", "ps", "bigfiles", "temp", "startup", "updates", "sysinfo", "harden", "report", "logins", "botlog", "dumps", "speedtest", "nettest").forEach { op ->
                     DropdownMenuItem(text = { Text(diagnosticTitle(op)) }, onClick = { model.diagnosticInput(op, ""); expanded = false })
@@ -286,10 +288,10 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
         }
         val argumentRequired = diagnosticRequiresArgument(selected)
         Text(diagnosticHint(selected), color = Muted)
-        OutlinedTextField(argument, { model.diagnosticInput(selected, it) }, label = { Text(if (argumentRequired) "Required parameter · see hint above" else "Optional parameters · see hint above") }, modifier = Modifier.fillMaxWidth())
+        CossField(if (argumentRequired) "Required parameter · see hint above" else "Optional parameters · see hint above", argument, { model.diagnosticInput(selected, it) }, modifier = Modifier.fillMaxWidth())
         val path = "/api/diag?op=$selected&arg=" + URLEncoder.encode(argument, "UTF-8")
         val running = path in state.diagnostics
-        Button(onClick = { model.loadDocuments(listOf(path)) }, enabled = !state.demo && state.administration && !running && (!argumentRequired || argument.isNotBlank())) { Text(if (running) "Diagnostic running…" else "Run diagnostic") }
+        CossButton(onClick = { model.loadDocuments(listOf(path)) }, enabled = !state.demo && state.administration && !running && (!argumentRequired || argument.isNotBlank())) { Text(if (running) "Diagnostic running…" else "Run diagnostic") }
         if (running) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("You can switch pages. This diagnostic keeps running.", color = Muted) }
         state.documentErrors[path]?.let { Notice(it, true) }
         state.documents[path]?.let { NativeDocument(it, openBrowser) }

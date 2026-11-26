@@ -83,7 +83,7 @@ import kotlinx.serialization.json.*
             snapshot.remoteSessions.forEach { session ->
                 MetricRow(session.user, session.state, "${session.name} · Session ${session.id.ifBlank { "unavailable" }}")
             }
-            TextButton(onClick = { open(Feature.RdpAccess) }) { Text("Manage RDP & users") }
+            CossTextButton(onClick = { open(Feature.RdpAccess) }) { Text("Manage RDP & users") }
         }
     }
 }

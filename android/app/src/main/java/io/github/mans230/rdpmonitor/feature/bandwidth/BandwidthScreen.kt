@@ -13,6 +13,7 @@ import io.github.mans230.rdpmonitor.ui.components.*
 import io.github.mans230.rdpmonitor.ui.theme.*
 
 @Composable fun BandwidthScreen(traffic: Traffic?) {
+    val ink = Signal; val rule = Rule
     PageTitle("Bandwidth", "Machine-wide traffic, with an explicit accounting window.")
     if (traffic == null) { Notice("No bandwidth accounting has been received for this server. No usage totals are estimated."); return }
     if (traffic.days.isEmpty()) { Notice("No accounting records have been collected yet. Usage is unknown."); return }
@@ -30,11 +31,11 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     Section("Daily transfer", "Total download + upload · GiB") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(bytes(chartMaximum), color = Muted); Text("${chartDays.size} recorded days", color = Muted) }
         Canvas(Modifier.fillMaxWidth().height(160.dp)) {
-            repeat(3) { i -> drawLine(Rule, Offset(0f, size.height * i / 2), Offset(size.width, size.height * i / 2), 1.dp.toPx()) }
+            repeat(3) { i -> drawLine(rule, Offset(0f, size.height * i / 2), Offset(size.width, size.height * i / 2), 1.dp.toPx()) }
             val step = size.width / chartDays.size.coerceAtLeast(1)
             chartDays.forEachIndexed { i, day ->
                 val height = size.height * (day.totalBytes / chartMaximum.toDouble()).toFloat().coerceIn(0f, 1f)
-                drawRect(Signal, Offset(i * step + step * .2f, size.height - height), androidx.compose.ui.geometry.Size(step * .6f, height))
+                drawRect(ink, Offset(i * step + step * .2f, size.height - height), androidx.compose.ui.geometry.Size(step * .6f, height))
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { listOf(chartDays.first().label, chartDays.last().label).forEach { Text(it, color = Muted) } }

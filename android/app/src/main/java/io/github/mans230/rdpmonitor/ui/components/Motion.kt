@@ -25,7 +25,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) .975f else 1f, tween(100), label = "Button press")
-    Button(onClick, modifier.graphicsLayer { scaleX = scale; scaleY = scale }, enabled = enabled, colors = colors, interactionSource = interaction, content = content)
+    CossButton(onClick, modifier.graphicsLayer { scaleX = scale; scaleY = scale }, enabled = enabled, colors = colors, interactionSource = interaction, content = content)
 }
 
 @Composable fun LoadingPage(title: String, detail: String) {

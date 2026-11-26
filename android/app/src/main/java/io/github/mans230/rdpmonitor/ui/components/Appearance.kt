@@ -85,23 +85,23 @@ private val LocalBackdrop = staticCompositionLocalOf { Backdrop() }
             bitmap?.let { image ->
                 // Blur the image layer only. Older Android uses a stronger opaque fallback.
                 Image(image.asImageBitmap(), null, Modifier.matchParentSize().then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(blur.dp) else Modifier), contentScale = ContentScale.Crop)
-                Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = if (Build.VERSION.SDK_INT >= 31) shade else maxOf(.92f, shade))))
+                Box(Modifier.matchParentSize().background(Ground.copy(alpha = if (Build.VERSION.SDK_INT >= 31) shade else maxOf(.92f, shade))))
             }
             content()
         }
-        if (dialog) AlertDialog(onDismissRequest = { dialog = false }, title = { Text("Appearance") }, text = {
+        if (dialog) CossDialog(onDismissRequest = { dialog = false }, title = { Text("Appearance") }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Optional local background. It stays on this device for this session and is never uploaded.")
-                OutlinedButton(onClick = { picker.launch("image/*") }, enabled = !loading) { Text(if (loading) "Opening image…" else "Choose background image") }
+                CossOutlinedButton(onClick = { picker.launch("image/*") }, enabled = !loading) { Text(if (loading) "Opening image…" else "Choose background image") }
                 Text("Background blur · ${blur.toInt()}")
                 Slider(blur, { blur = it }, valueRange = 0f..40f, enabled = bitmap != null && Build.VERSION.SDK_INT >= 31)
-                Text("Black overlay · ${(shade * 100).toInt()}%")
+                Text("Background overlay · ${(shade * 100).toInt()}%")
                 Slider(shade, { shade = it }, valueRange = .70f.. .95f, enabled = bitmap != null)
                 if (Build.VERSION.SDK_INT < 31) Text("This Android version uses a stronger dark overlay instead of blur.", color = Muted)
                 error?.let { Notice(it, true) }
-                TextButton(onClick = { bitmap = null; error = null }, enabled = bitmap != null) { Text("Remove background") }
+                CossTextButton(onClick = { bitmap = null; error = null }, enabled = bitmap != null) { Text("Remove background") }
             }
-        }, confirmButton = { TextButton(onClick = { dialog = false }) { Text("Done") } })
+        }, confirmButton = { CossTextButton(onClick = { dialog = false }) { Text("Done") } })
     }
 }
 
@@ -110,7 +110,9 @@ private val LocalBackdrop = staticCompositionLocalOf { Backdrop() }
     val backdrop = LocalBackdrop.current
     val shape = RoundedCornerShape(radius)
     var position by remember { mutableStateOf(Offset.Zero) }
-    Box(modifier.onGloballyPositioned { position = it.positionInRoot() }.clip(shape).background(Panel).border(1.dp, Rule, shape)) {
+    Box(modifier.onGloballyPositioned { position = it.positionInRoot() }.clip(shape)
+        .background(Panel.copy(alpha = if (Build.VERSION.SDK_INT >= 31) .82f else .94f))
+        .border(1.dp, Signal.copy(alpha = .14f), shape)) {
         val bitmap = backdrop.bitmap
         if (bitmap != null && Build.VERSION.SDK_INT >= 31 && backdrop.rootSize.width > 0) {
             val image = remember(bitmap) { bitmap.asImageBitmap() }
@@ -119,7 +121,7 @@ private val LocalBackdrop = staticCompositionLocalOf { Backdrop() }
                 val width = (image.width * scale).toInt(); val height = (image.height * scale).toInt()
                 drawImage(image, dstOffset = IntOffset(((backdrop.rootSize.width - width) / 2f - position.x).toInt(), ((backdrop.rootSize.height - height) / 2f - position.y).toInt()), dstSize = IntSize(width, height))
             }
-            Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = backdrop.shade)))
+            Box(Modifier.matchParentSize().background(Ground.copy(alpha = .76f)))
         }
         Box(Modifier.matchParentSize().background(Color.White.copy(alpha = .025f)))
         content()

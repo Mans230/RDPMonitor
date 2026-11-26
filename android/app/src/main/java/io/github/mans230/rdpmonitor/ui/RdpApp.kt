@@ -58,10 +58,10 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     val open: (Feature) -> Unit = { model.closeForm(); model.destination(Destination.More); detail = it.name }
     ActionReviewDialog(state, model)
     OperationFeedback(state, model, openBrowser)
-    if (signOut) AlertDialog(onDismissRequest = { signOut = false }, title = { Text("Disconnect from ${state.selected?.name}?") },
+    if (signOut) CossDialog(onDismissRequest = { signOut = false }, title = { Text("Disconnect from ${state.selected?.name}?") },
         text = { Text("This ends this app session. Your saved server and approved Passkey are kept; you can sign in again without registering a new key.") },
-        confirmButton = { TextButton(onClick = { signOut = false; model.disconnect() }) { Text("Disconnect and sign out") } },
-        dismissButton = { TextButton(onClick = { signOut = false }) { Text("Keep connected") } })
+        confirmButton = { CossTextButton(onClick = { signOut = false; model.disconnect() }) { Text("Disconnect and sign out") } },
+        dismissButton = { CossTextButton(onClick = { signOut = false }) { Text("Keep connected") } })
     val isOverview = selected == null && state.destination == Destination.Overview
     LaunchedEffect(state.selected?.id, state.demo, state.administration, state.connected, isOverview) {
         if (isOverview && !state.demo && state.administration && state.connected)
@@ -78,31 +78,42 @@ import io.github.mans230.rdpmonitor.ui.theme.*
             LazyColumn(Modifier.align(Alignment.TopCenter).widthIn(max = 1104.dp).fillMaxHeight().testTag("app-content"), state = scroll,
                 contentPadding = PaddingValues(horizontal = edge, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item {
+                    Column {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         PulseMark()
                         Column(Modifier.weight(1f)) {
                             Text("RDPMonitor", style = MaterialTheme.typography.titleMedium)
-                            Text(if (state.demo) "Sample data" else state.selected?.name ?: snapshot.host, color = Muted, fontSize = 12.sp)
                         }
-                        IconButton(onClick = appearance) { Icon(Icons.Outlined.Tune, "Appearance") }
+                        val toggleTheme = LocalToggleAppearance.current
+                        val darkAppearance = LocalDarkAppearance.current
+                        Surface(shape = RoundedCornerShape(6.dp), color = Tray, border = BorderStroke(1.dp, Rule)) {
+                            IconButton(onClick = toggleTheme) { Icon(if (darkAppearance) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, "Toggle theme") }
+                        }
+                        Surface(shape = RoundedCornerShape(6.dp), color = Tray, border = BorderStroke(1.dp, Rule)) {
+                            IconButton(onClick = appearance) { Icon(Icons.Outlined.Tune, "Appearance") }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(if (state.demo) "Sample data" else state.selected?.name ?: snapshot.host, Modifier.weight(1f), color = Muted, fontSize = 12.sp)
                         IconButton(onClick = { detail = null; model.connectScreen() }) { Icon(Icons.Outlined.Dns, "Server connections") }
                         if (!state.demo) IconButton(onClick = {
                             model.refresh()
                             if (isOverview && state.administration) model.loadDocuments(listOf("/api/backup", "/api/sysinfo"))
                         }, enabled = state.connected) { Icon(Icons.Outlined.Refresh, "Refresh readings") }
                     }
+                    }
                 }
                 if (state.demo) item { Notice("Demo mode · Sample data · Server changes are unavailable") }
                 else item { Text("Last reading ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(snapshot.capturedAt))}", color = Muted, fontSize = 12.sp) }
                 if (!state.demo && (!state.connected || state.readingsStale)) item {
                     Notice(if (!state.connected) "Session ended · readings are stale" else "Connection interrupted · readings are stale", true)
-                    TextButton(onClick = { if (state.connected) model.refresh() else model.reconnect() }) { Text(if (state.connected) "Retry" else "Sign in again") }
+                    CossTextButton(onClick = { if (state.connected) model.refresh() else model.reconnect() }) { Text(if (state.connected) "Retry" else "Sign in again") }
                 }
                 state.message?.let { message -> item { Notice(message, true) } }
                 if (state.actionBusy || state.actionResult != null) item {
-                    TextButton(onClick = model::showOperation) { Text("${state.operationTitle} · ${if (state.actionBusy) "Running — view progress" else "Result ready"}") }
+                    CossTextButton(onClick = model::showOperation) { Text("${state.operationTitle} · ${if (state.actionBusy) "Running — view progress" else "Result ready"}") }
                 }
-                if (state.diagnostics.isNotEmpty()) item { TextButton(onClick = { open(Feature.Diagnostics) }) { Text("Diagnostic running · view status") } }
+                if (state.diagnostics.isNotEmpty()) item { CossTextButton(onClick = { open(Feature.Diagnostics) }) { Text("Diagnostic running · view status") } }
                 item {
                     Column(pageMotion(route), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         when (selected) {
@@ -114,9 +125,9 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                                 Destination.Activity -> if (state.demo) ActivityScreen(snapshot, DemoData.incidents) else LiveActivity(state, model)
                                 Destination.More -> {
                                     MoreScreen(open, { detail = null; model.connectScreen() })
-                                    OutlinedButton(onClick = { model.destination(Destination.Bandwidth) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Bandwidth · recorded usage & billing window") }
-                                    OutlinedButton(onClick = { model.destination(Destination.Activity) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Activity · recorded events") }
-                                    if (!state.demo) OutlinedButton(onClick = { signOut = true }, enabled = !state.busy && !state.actionBusy,
+                                    CossOutlinedButton(onClick = { model.destination(Destination.Bandwidth) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Bandwidth · recorded usage & billing window") }
+                                    CossOutlinedButton(onClick = { model.destination(Destination.Activity) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Activity · recorded events") }
+                                    if (!state.demo) CossOutlinedButton(onClick = { signOut = true }, enabled = !state.busy && !state.actionBusy,
                                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Disconnect and sign out") }
                                 }
                             }
@@ -147,7 +158,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                         else -> selected == features[index]
                     }
                     val icon = when (index) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.VerifiedUser; 2 -> Icons.Outlined.Inventory2; 3 -> Icons.Outlined.BarChart; else -> Icons.Outlined.MoreHoriz }
-                    Column(Modifier.weight(1f).graphicsLayer { scaleX = scale; scaleY = scale }.background(if (active) Color.White.copy(alpha = .10f) else Color.Transparent, RoundedCornerShape(26.dp))
+                    Column(Modifier.weight(1f).graphicsLayer { scaleX = scale; scaleY = scale }.background(if (active) Signal.copy(alpha = .12f) else Color.Transparent, RoundedCornerShape(26.dp))
                         .selectable(active, interactionSource = interaction, indication = LocalIndication.current, role = Role.Tab, onClick = { when (index) { 0 -> overview(); 4 -> more(); else -> open(features[index]!!) } })
                         .padding(horizontal = 2.dp, vertical = 8.dp).heightIn(min = 44.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Icon(icon, null, Modifier.size(18.dp), tint = if (active) Signal else Muted)

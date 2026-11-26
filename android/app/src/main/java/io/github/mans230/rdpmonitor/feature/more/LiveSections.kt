@@ -17,7 +17,7 @@ import kotlinx.serialization.json.*
 @Composable fun LiveBandwidth(state: AppState, model: RdpViewModel, openBrowser: (String) -> Unit) {
     val paths = if (state.administration) listOf("/api/bandwidth/usage", "/api/bandwidth/connections") else listOf("/api/bandwidth/usage")
     LaunchedEffect(state.selected?.id, state.demo) { model.loadDocuments(paths) }
-    OutlinedButton(onClick = { model.loadDocuments(paths) }, enabled = !state.documentLoading) { Text(if (state.documentLoading) "Refreshing…" else "Refresh bandwidth") }
+    CossOutlinedButton(onClick = { model.loadDocuments(paths) }, enabled = !state.documentLoading) { Text(if (state.documentLoading) "Refreshing…" else "Refresh bandwidth") }
     val result = state.documents["/api/bandwidth/usage"]
     val traffic = result?.let { runCatching { SnapshotDecoder.traffic(it) } }
     state.documentErrors["/api/bandwidth/usage"]?.let { Notice(it, true) }
@@ -36,7 +36,7 @@ import kotlinx.serialization.json.*
 
 @Composable fun LiveActivity(state: AppState, model: RdpViewModel, processesOnly: Boolean = false) {
     LaunchedEffect(state.selected?.id, state.demo, processesOnly) { if (!processesOnly) model.loadDocuments(listOf("/api/audit")) }
-    if (!processesOnly) OutlinedButton(onClick = { model.loadDocuments(listOf("/api/audit")) }, enabled = !state.documentLoading) { Text("Refresh activity") }
+    if (!processesOnly) CossOutlinedButton(onClick = { model.loadDocuments(listOf("/api/audit")) }, enabled = !state.documentLoading) { Text("Refresh activity") }
     state.documentErrors["/api/audit"]?.let { Notice(it, true) }
     val items = ((state.documents["/api/audit"] as? JsonObject)?.get("items") as? JsonArray).orEmpty()
     val events = items.mapNotNull { it as? JsonObject }.asReversed().groupBy { it["action"]?.jsonPrimitive?.content ?: "Event" }.map { (name, rows) ->
@@ -47,9 +47,12 @@ import kotlinx.serialization.json.*
             at?.let { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date((it * 1000).toLong())) } ?: "",
             detail.contains("failed", true) || detail.contains("blocked", true))
     }
-    state.snapshot?.let { ActivityScreen(it, events, if (state.administration) { process ->
+    state.snapshot?.let { ActivityScreen(it, events, if (state.administration && state.connected && !state.actionBusy) { process ->
         val tool = Tool("Stop ${process.name}", "Terminate process ${process.pid} on ${state.selected?.name}. Unsaved data may be lost.", "kill")
         model.review(tool, buildJsonObject { put("action", "kill"); put("pids", JsonArray(listOf(JsonPrimitive(process.pid)))) })
-    } else null, processesOnly = processesOnly) }
+    } else null, processesOnly = processesOnly, onStopMany = if (state.administration && state.connected && !state.actionBusy) { processes ->
+        val tool = Tool("End selected processes", "Terminate only the reviewed PIDs on ${state.selected?.name}. Unsaved work may be lost. Server protection rules still apply.", "kill")
+        model.review(tool, buildJsonObject { put("action", "kill"); put("pids", JsonArray(processes.map { JsonPrimitive(it.pid) })) })
+    } else null) }
     state.actionResult?.let { Section("Operation result") { NativeDocument(it, {}) } }
 }

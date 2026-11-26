@@ -108,23 +108,32 @@ class AppJourneyTest {
 
     @Test fun everySectionOpensAndReturnsWithoutLosingTheServer() {
         preview()
-        Feature.entries.forEach { feature ->
-            dock("More")
-            ui.onNodeWithTag("app-content").performScrollToNode(hasTestTag("feature-${feature.name}"))
-            ui.onNodeWithTag("feature-${feature.name}").performClick()
-            ui.onNodeWithTag("page-title-Server overview").assertDoesNotExist()
-            ui.onNodeWithTag("page-title-${feature.title}").assertIsDisplayed()
-            ui.onNodeWithTag("page-title-${feature.title}").assertIsDisplayed()
-            alignWorkspace(ui.onNodeWithTag("page-title-${feature.title}"))
-            screenshot("390-section-${feature.name}")
-            ui.runOnIdle { check(model.state.value.snapshot != null); check(!model.state.value.connectionScreen) }
-            ui.runOnIdle { ui.activity.onBackPressedDispatcher.onBackPressed() }
-            ui.onNodeWithText("All sections").assertIsDisplayed()
+        listOf("dark", "light").forEachIndexed { index, theme ->
+            if (index == 1) {
+                dock("Overview"); ui.onNodeWithTag("app-content").performScrollToIndex(0)
+                ui.onNodeWithContentDescription("Toggle theme").performClick()
+            }
+            Feature.entries.forEach { feature ->
+                dock("More")
+                ui.onNodeWithTag("app-content").performScrollToNode(hasTestTag("feature-${feature.name}"))
+                ui.onNodeWithTag("feature-${feature.name}").performClick()
+                ui.onNodeWithTag("page-title-Server overview").assertDoesNotExist()
+                ui.onNodeWithTag("page-title-${feature.title}").assertIsDisplayed()
+                ui.onNodeWithTag("page-title-${feature.title}").assertIsDisplayed()
+                alignWorkspace(ui.onNodeWithTag("page-title-${feature.title}"))
+                screenshot(if (theme == "dark") "390-section-${feature.name}" else "390-light-section-${feature.name}")
+                ui.runOnIdle { check(model.state.value.snapshot != null); check(!model.state.value.connectionScreen) }
+                ui.runOnIdle { ui.activity.onBackPressedDispatcher.onBackPressed() }
+                ui.onNodeWithText("All sections").assertIsDisplayed()
+            }
         }
+        dock("Overview"); ui.onNodeWithTag("app-content").performScrollToIndex(0)
+        ui.onNodeWithContentDescription("Toggle theme").performClick()
     }
 
     @Test fun navigationStaysVisibleAndEachDestinationStartsWithoutOverview() {
         preview()
+        workspace("Server status")
         ui.onNodeWithText("Server uptime").assertIsDisplayed()
         ui.onNodeWithText("1d 0h 0m").assertIsDisplayed()
         ui.onNodeWithText("Latest backup result").assertIsDisplayed()
@@ -184,14 +193,46 @@ class AppJourneyTest {
         ui.onNodeWithText("Remove background").assertIsNotEnabled()
         screenshot("320-appearance")
         ui.onNodeWithText("Done").performClick()
-        dock("Backups"); workspace("Latest backup result"); screenshot("320-backup-result")
+        dock("Backups"); workspace("Backup policy"); screenshot("320-backup-policy")
         workspace("Stored archives"); screenshot("320-backup-archives")
     }
 
     @Test @Config(qualifiers = "w768dp-h1024dp-mdpi") fun tabletShowsResourcesAndWorkspace() {
         preview(); screenshot("768-overview")
         workspace("Memory"); screenshot("768-workspace")
-        dock("Backups"); workspace("Latest backup result"); screenshot("768-backup-result")
+        dock("Backups"); workspace("Backup policy"); screenshot("768-backup-policy")
         workspace("Local retention"); screenshot("768-backup-plan")
     }
+
+    private fun cossThemes(width: Int) {
+        preview()
+        listOf("dark", "light").forEachIndexed { index, theme ->
+            dock("Overview")
+            ui.onNodeWithTag("app-content").performScrollToIndex(0)
+            if (index == 1) ui.onNodeWithContentDescription("Toggle theme").performClick()
+            screenshot("$width-coss-overview-$theme")
+            dock("Backups"); workspace("Backup policy"); screenshot("$width-coss-backups-$theme")
+            dock(if (width == 320) "Tasks" else "Processes")
+            ui.onNodeWithTag("page-title-Processes").assertIsDisplayed()
+            screenshot("$width-coss-processes-$theme")
+            val contentBounds = ui.onNodeWithTag("app-content").fetchSemanticsNode().boundsInRoot
+            val navigationBounds = ui.onNodeWithTag("section-navigation").fetchSemanticsNode().boundsInRoot
+            check(contentBounds.bottom <= navigationBounds.top + 1f) { "Navigation overlapped the scrolling viewport." }
+            ui.onNodeWithTag("section-navigation").assertIsDisplayed()
+            workspace("Search process name or PID")
+            ui.onNode(hasSetTextAction()).performTextInput("missing-process")
+            workspace("No matching processes.")
+            ui.onNodeWithText("Clear filters").performClick()
+            ui.onNodeWithTag("process-3320").assertExists()
+            workspace("Review end action")
+            ui.onNodeWithText("Review end action").assertIsNotEnabled()
+            val lastActionBounds = ui.onNodeWithText("Review end action").fetchSemanticsNode().boundsInRoot
+            check(lastActionBounds.bottom <= navigationBounds.top + 1f) { "Navigation covered the final process action." }
+        }
+        dock("Overview"); ui.onNodeWithTag("app-content").performScrollToIndex(0)
+        ui.onNodeWithContentDescription("Toggle theme").performClick()
+    }
+    @Test fun cossPagesAt390InBothThemes() = cossThemes(390)
+    @Test @Config(qualifiers = "w320dp-h740dp-mdpi") fun cossPagesAt320InBothThemes() = cossThemes(320)
+    @Test @Config(qualifiers = "w768dp-h1024dp-mdpi") fun cossPagesAt768InBothThemes() = cossThemes(768)
 }

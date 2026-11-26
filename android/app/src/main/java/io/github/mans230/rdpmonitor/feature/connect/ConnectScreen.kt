@@ -35,7 +35,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     Column(modifier.fillMaxSize().verticalScroll(scroll).padding(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { PulseMark(); Text("RDPMonitor", style = MaterialTheme.typography.titleLarge) }
         if (state.snapshot != null && state.connectionScreen) {
-            TextButton(onClick = model::closeConnections) { Text("Back to ${if (state.demo) "demo" else state.selected?.name ?: "monitor"}") }
+            CossTextButton(onClick = model::closeConnections) { Text("Back to ${if (state.demo) "demo" else state.selected?.name ?: "monitor"}") }
             Notice(if (state.demo) "Choose a server below, or return to the demo." else if (state.connected) "Your current server session is kept. Opening this screen does not sign you out." else "The previous readings are stale. Sign in again to resume monitoring.")
         }
         PageTitle("Your RDP connectors", "Add a server's private HTTPS address. Each connector keeps its own authorization.")
@@ -52,10 +52,10 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                     }
                 }
             }
-            OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Server name") }, singleLine = true,
+            CossField(value = name, onValueChange = { name = it }, label = "Server name", singleLine = true,
                 modifier = Modifier.fillMaxWidth(), enabled = available && state.pairingUrl == null)
-            OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Private HTTPS address") },
-                placeholder = { Text("https://server.tailnet.ts.net") }, singleLine = true,
+            CossField(value = address, onValueChange = { address = it }, label = "Private HTTPS address",
+                placeholder = "https://server.tailnet.ts.net", singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth(), enabled = available && state.pairingUrl == null)
             state.message?.let { Notice(it) }
             MotionButton(onClick = { model.connect(name, address) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
@@ -67,13 +67,13 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                 Text("Ready to approve ${scopeTitle(state.requestedScope).lowercase()} access", style = MaterialTheme.typography.titleMedium)
                 Text(state.pairingCode.orEmpty(), style = ReadingStyle)
                 Text("Read or copy this code first. In the browser, sign in with your existing Passkey, compare the code, then approve. Return here automatically after approval.", color = Muted)
-                TextButton(onClick = { clipboard.setPrimaryClip(ClipData.newPlainText("Pairing code", state.pairingCode.orEmpty())) }) { Text("Copy pairing code") }
-                Button(onClick = { openBrowser(url) }, modifier = Modifier.fillMaxWidth()) { Text("Continue in browser") }
+                CossTextButton(onClick = { clipboard.setPrimaryClip(ClipData.newPlainText("Pairing code", state.pairingCode.orEmpty())) }) { Text("Copy pairing code") }
+                CossButton(onClick = { openBrowser(url) }, modifier = Modifier.fillMaxWidth()) { Text("Continue in browser") }
                 Text("Waiting for approval · request expires after 10 minutes", color = Muted)
-                OutlinedButton(onClick = model::cancelPairing) { Text("Cancel pairing") }
+                CossOutlinedButton(onClick = model::cancelPairing) { Text("Cancel pairing") }
             }
             state.selected?.let { profile ->
-                TextButton(onClick = { openBrowser(profile.origin + "/") }, modifier = Modifier.fillMaxWidth()) { Text("Open secure web panel") }
+                CossTextButton(onClick = { openBrowser(profile.origin + "/") }, modifier = Modifier.fillMaxWidth()) { Text("Open secure web panel") }
             }
         }
         if (state.profiles.isNotEmpty()) {
@@ -90,7 +90,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                 }
             }
         }
-        OutlinedButton(onClick = model::preview, enabled = available, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Explore offline demo") }
+        CossOutlinedButton(onClick = model::preview, enabled = available, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Explore offline demo") }
         Text("The demo uses labelled sample data and cannot change a server.", color = Muted, style = MaterialTheme.typography.bodyMedium)
     }
 }

@@ -68,28 +68,28 @@ import kotlinx.coroutines.launch
                     }
                 }, enabled = !signingIn && BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Continue with Google") }
                 if (BuildConfig.GOOGLE_WEB_CLIENT_ID.isBlank()) Text("Google sign-in is not configured in this build.", color = Muted)
-                profile?.let { identity -> OutlinedButton(onClick = { inside = true }, modifier = Modifier.fillMaxWidth()) { Text("Continue as ${identity.name}") } }
+                profile?.let { identity -> CossOutlinedButton(onClick = { inside = true }, modifier = Modifier.fillMaxWidth()) { Text("Continue as ${identity.name}") } }
                 message?.let { Notice(it, true) }
             }
-            TextButton(onClick = ::privateWorkspace, enabled = !signingIn) { Text("Use a private workspace without Google") }
-            OutlinedButton(onClick = { privateWorkspace(); model.preview() }, enabled = !signingIn, modifier = Modifier.fillMaxWidth()) { Text("Explore offline demo") }
+            CossTextButton(onClick = ::privateWorkspace, enabled = !signingIn) { Text("Use a private workspace without Google") }
+            CossOutlinedButton(onClick = { privateWorkspace(); model.preview() }, enabled = !signingIn, modifier = Modifier.fillMaxWidth()) { Text("Explore offline demo") }
             Text("Connectors are saved on this device. Google sign-in does not sync server addresses, passwords or Passkeys.", color = Muted, style = MaterialTheme.typography.bodySmall)
         } else Column(Modifier.fillMaxSize()) {
             if (state.snapshot == null || state.connectionScreen) Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { account = true }, modifier = Modifier.weight(1f), enabled = !state.busy && !state.actionBusy) { Text(profile?.name ?: "Private workspace", maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                TextButton(onClick = { if (!state.busy && !state.actionBusy) inside = false }, enabled = !state.busy && !state.actionBusy) { Text("Account") }
+                CossTextButton(onClick = { account = true }, modifier = Modifier.weight(1f), enabled = !state.busy && !state.actionBusy) { Text(profile?.name ?: "Private workspace", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                CossTextButton(onClick = { if (!state.busy && !state.actionBusy) inside = false }, enabled = !state.busy && !state.actionBusy) { Text("Account") }
             }
             Box(Modifier.weight(1f).then(pageMotion(if (state.snapshot == null || state.connectionScreen) "connectors" else "monitor"))) { RdpApp(model, openBrowser) }
         }
         if (signingIn) LoadingPage("Signing in with Google", "Choose your account, then wait for verification.")
         else if (inside && state.busy && state.snapshot == null) LoadingPage("Connecting securely", state.selected?.name ?: "Checking your private connection…")
-        if (account) AlertDialog(onDismissRequest = { account = false }, title = { Text(profile?.name ?: "Private workspace") }, text = { Text(profile?.email ?: "Your connectors and authorization stay on this device.") }, confirmButton = {
-            TextButton(onClick = {
+        if (account) CossDialog(onDismissRequest = { account = false }, title = { Text(profile?.name ?: "Private workspace") }, text = { Text(profile?.email ?: "Your connectors and authorization stay on this device.") }, confirmButton = {
+            CossTextButton(onClick = {
                 if (model.signOutApp()) {
                     preferences.edit().clear().commit(); model.appIdentityChanged(); profile = null; inside = false; account = false
                     scope.launch { runCatching { GoogleIdentity.clear(context) } }
                 }
             }, enabled = !state.actionBusy && !state.busy) { Text("Sign out of app") }
-        }, dismissButton = { TextButton(onClick = { account = false }) { Text("Keep signed in") } })
+        }, dismissButton = { CossTextButton(onClick = { account = false }) { Text("Keep signed in") } })
     }
 }
