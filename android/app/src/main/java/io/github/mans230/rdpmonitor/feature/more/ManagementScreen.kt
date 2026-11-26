@@ -275,11 +275,12 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
                 }
             }
         }
+        val argumentRequired = diagnosticRequiresArgument(selected)
         Text(diagnosticHint(selected), color = Muted)
-        OutlinedTextField(argument, { model.diagnosticInput(selected, it) }, label = { Text("Optional parameters · see hint above") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(argument, { model.diagnosticInput(selected, it) }, label = { Text(if (argumentRequired) "Required parameter · see hint above" else "Optional parameters · see hint above") }, modifier = Modifier.fillMaxWidth())
         val path = "/api/diag?op=$selected&arg=" + URLEncoder.encode(argument, "UTF-8")
         val running = path in state.diagnostics
-        Button(onClick = { model.loadDocuments(listOf(path)) }, enabled = !state.demo && state.administration && !running) { Text(if (running) "Diagnostic running…" else "Run diagnostic") }
+        Button(onClick = { model.loadDocuments(listOf(path)) }, enabled = !state.demo && state.administration && !running && (!argumentRequired || argument.isNotBlank())) { Text(if (running) "Diagnostic running…" else "Run diagnostic") }
         if (running) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("You can switch pages. This diagnostic keeps running.", color = Muted) }
         state.documentErrors[path]?.let { Notice(it, true) }
         state.documents[path]?.let { NativeDocument(it, openBrowser) }

@@ -46,6 +46,21 @@ class UxRegressionTest {
         val user = ToolCatalog.tools(Feature.RdpAccess).first { it.action == "user" }
         assertTrue(runCatching { user.payload(mapOf("name" to "example", "op" to "")) }.isFailure)
     }
+    @Test fun diagnosticHintsMatchServerParameterRules() {
+        assertTrue(diagnosticRequiresArgument("ps"))
+        assertTrue(diagnosticHint("ps").contains("process name", ignoreCase = true))
+        assertFalse(diagnosticHint("ps").contains("Leave parameters empty"))
+        assertTrue(diagnosticRequiresArgument("nettest"))
+        assertFalse(diagnosticRequiresArgument("bigfiles"))
+        assertFalse(diagnosticHint("bigfiles").contains("folder", ignoreCase = true))
+        assertTrue(diagnosticHint("bigfiles").contains("system drive", ignoreCase = true))
+        assertTrue(diagnosticHint("bigfiles").contains("ignored", ignoreCase = true))
+        assertFalse(diagnosticHint("logins").contains("number of days", ignoreCase = true))
+        assertTrue(diagnosticHint("logins").contains("3 days"))
+        assertFalse(diagnosticRequiresArgument("diagnose"))
+        assertFalse(diagnosticRequiresArgument("speedtest"))
+        assertTrue(diagnosticHint("speedtest").contains("No parameters are needed"))
+    }
     @Test fun demoCoversEveryManagementSectionWithSampleData() {
         Feature.entries.forEach { feature -> ToolCatalog.documents(feature).forEach { (_, path) ->
             assertNotEquals(JsonNull, sectionDocument(feature, path, DemoDocuments.at(path)))
