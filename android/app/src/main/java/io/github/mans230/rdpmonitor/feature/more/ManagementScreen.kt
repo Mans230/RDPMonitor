@@ -134,11 +134,16 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
     }
     if (documents.isNotEmpty()) OutlinedButton(onClick = { model.loadDocuments(documents.map { it.second }) }, enabled = !state.demo && !state.documentLoading) { Text(if (state.documentLoading) "Refreshing…" else "Refresh section") }
     if (state.documentLoading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Signal)
-    documents.forEach { (title, path) -> Section(title) {
+    val controls = if (state.administration && !state.demo) edit else null
+    fun document(path: String) = if (state.demo) DemoDocuments.at(path) else state.documents[path]
+    if (feature == Feature.Backups) {
+        documents.forEach { (_, path) -> state.documentErrors[path]?.let { Notice(it, warning = true) } }
+        BackupDetailsScreen(document("/api/backup"), document("/api/setup"))
+    } else documents.forEach { (title, path) ->
         state.documentErrors[path]?.let { Notice(it, warning = true) }
-        (if (state.demo) DemoDocuments.at(path) else state.documents[path])?.let { data -> NativeDocument(sectionDocument(feature, path, data), openBrowser, if (state.administration && !state.demo) edit else null) }
-            ?: Text(if (state.documentLoading) "Loading server data…" else if (state.demo) "Connect a server to load this section." else "No server data received. Select Refresh to retry.", color = Muted)
-    } }
+        document(path)?.let { data -> ContextualDocument(feature, path, if (path == "/api/setup") sectionDocument(feature, path, data) else data, openBrowser, controls) }
+            ?: Section(title) { Text(if (state.documentLoading) "Loading server data…" else "No server data received. Select Refresh to retry.", color = Muted) }
+    }
     if (feature == Feature.Commands || feature == Feature.Diagnostics) Diagnostics(state, model, openBrowser)
     if (ToolCatalog.tools(feature).isNotEmpty()) Section("Actions", "Every change is reviewed before it runs on ${state.selected?.name ?: "the server"}.") {
         ToolCatalog.tools(feature).forEach { tool ->
@@ -146,6 +151,11 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = if (tool.dangerous) Warning else Signal),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text((if (tool.dangerous) "Caution · " else "") + tool.title) }
         }
+    }
+    if (feature == Feature.Backups) {
+        document("/api/setup/jobs")?.let { jobs -> if (jobs.obj()?.get("jobs").rows()?.isNotEmpty() == true) ContextualDocument(feature, "/api/setup/jobs", jobs, openBrowser, controls) }
+        document("/api/backup")?.let { RawDetails(it) }
+        document("/api/setup")?.let { RawDetails(sectionDocument(feature, "/api/setup", it), "backup configuration details") }
     }
     if (state.documentErrors.values.any { it.contains("owner", ignoreCase = true) }) Notice("These tools require the owner's approved Passkey. Ask the owner to sign in, or choose Monitoring only in Servers.")
     state.editingTool?.let { tool -> ToolForm(tool, state, model, model::closeForm) }
