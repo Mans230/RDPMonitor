@@ -20,7 +20,12 @@ data class AppState(val profiles: List<ServerProfile> = emptyList(), val selecte
     val busy: Boolean = false, val message: String? = null, val connected: Boolean = false,
     val documents: Map<String, JsonElement> = emptyMap(), val documentErrors: Map<String, String> = emptyMap(),
     val documentLoading: Boolean = false, val actionBusy: Boolean = false, val review: ToolReview? = null,
-    val actionResult: JsonElement? = null, val administration: Boolean = false, val connectionScreen: Boolean = false)
+    val actionResult: JsonElement? = null, val administration: Boolean = false, val connectionScreen: Boolean = false,
+    val requestedScope: String = "monitoring:read", val pairingCode: String? = null, val pairingUrl: String? = null,
+    val operationTitle: String = "Operation", val operationServer: String = "", val operationVisible: Boolean = false,
+    val diagnostics: Set<String> = emptySet(), val editingTool: Tool? = null, val formValues: Map<String, String> = emptyMap(),
+    val diagnosticOp: String = "diagnose", val diagnosticArgument: String = "", val readingsStale: Boolean = false,
+    val pairingExpiresAt: Long = 0)
 
 class RdpViewModel(application: Application): AndroidViewModel(application) {
     private val store = DeviceStore(application)
@@ -30,12 +35,46 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
     private var refreshJob: Job? = null
     private var documentJob: Job? = null
     private var documentGeneration = 0
+    private val diagnosticJobs = mutableMapOf<String, Job>()
     private var foreground = false
+    init {
+        val pending = store.pending()
+        if (pending != null && System.currentTimeMillis() - pending.createdAt in 0..600_000) {
+            val profile = store.profiles().firstOrNull { it.id == pending.profileId && it.origin == pending.origin }
+            if (profile != null) _state.update { it.copy(selected = profile, requestedScope = pending.scope,
+                pairingCode = BrowserPairing.matchCode(BrowserPairing.challenge(pending.verifier)), pairingUrl = store.pendingUrl(), pairingExpiresAt = pending.createdAt + 600_000) }
+        } else { store.pending(null); store.pendingUrl(null) }
+    }
 
-    fun preview() { refreshJob?.cancel(); documentJob?.cancel(); documentGeneration++; _state.update { it.copy(selected = null, demo = true, snapshot = DemoData.snapshot(), message = null, connected = false, documents = emptyMap(), documentErrors = emptyMap(), review = null, actionResult = null, administration = false, documentLoading = false, connectionScreen = false) } }
-    fun connectScreen() { refreshJob?.cancel(); documentJob?.cancel(); documentGeneration++; _state.update { it.copy(connectionScreen = true, message = null, documents = emptyMap(), documentErrors = emptyMap(), review = null, actionResult = null, documentLoading = false) } }
+    fun preview() {
+        if (_state.value.actionBusy) return
+        cancelPairing(); refreshJob?.cancel(); documentJob?.cancel(); documentGeneration++
+        diagnosticJobs.values.forEach { it.cancel() }; diagnosticJobs.clear()
+        _state.value = AppState(profiles = store.profiles(), demo = true, snapshot = DemoData.snapshot())
+    }
+    fun connectScreen() { refreshJob?.cancel(); documentJob?.cancel(); documentGeneration++; _state.update { it.copy(connectionScreen = true, message = null, documents = emptyMap(), documentErrors = emptyMap(), review = null, actionResult = null, operationVisible = false, editingTool = null, formValues = emptyMap(), documentLoading = false) } }
     fun closeConnections() { _state.update { it.copy(connectionScreen = false) }; foreground(foreground) }
-    fun destination(value: Destination) { _state.update { it.copy(destination = value) } }
+    fun destination(value: Destination) { _state.update { it.copy(destination = value, editingTool = null, formValues = emptyMap()) } }
+    fun chooseScope(scope: String) { if (scope !in setOf("monitoring:read", "administration")) return; cancelPairing(); _state.update { it.copy(requestedScope = scope) } }
+    fun cancelPairing() { store.pending(null); store.pendingUrl(null); _state.update { it.copy(pairingCode = null, pairingUrl = null, pairingExpiresAt = 0, message = null) } }
+    fun expirePairing() {
+        if (_state.value.pairingUrl != null && System.currentTimeMillis() >= _state.value.pairingExpiresAt) {
+            cancelPairing(); _state.update { it.copy(message = "Pairing expired. Check the connection to start a new request.") }
+        }
+    }
+    fun reconnect(management: Boolean = false) {
+        val profile = _state.value.selected ?: return
+        val scope = if (management) "administration" else store.session(profile.id)?.scope ?: _state.value.requestedScope
+        _state.update { it.copy(requestedScope = scope, connectionScreen = true) }
+        connect(profile.name, profile.origin, forcePair = true)
+    }
+    fun editTool(tool: Tool, initial: Map<String, String>) { _state.update { it.copy(editingTool = tool, formValues = tool.fields.associate { field -> field.key to initial[field.key].orEmpty() }) } }
+    fun updateForm(key: String, value: String) { _state.update { it.copy(formValues = it.formValues + (key to value)) } }
+    fun closeForm() { _state.update { it.copy(editingTool = null, formValues = emptyMap()) } }
+    fun dismissOperation() { if (!_state.value.actionBusy) _state.update { it.copy(operationVisible = false, actionResult = null) } }
+    fun showOperation() { _state.update { it.copy(operationVisible = true) } }
+    fun hideOperation() { _state.update { it.copy(operationVisible = false) } }
+    fun diagnosticInput(op: String, argument: String) { _state.update { it.copy(diagnosticOp = op, diagnosticArgument = argument) } }
     fun remove(profile: ServerProfile) {
         store.remove(profile.id)
         _state.update { state -> val active = state.selected?.id == profile.id
@@ -45,8 +84,9 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
     }
     fun clearMessage() { _state.update { it.copy(message = null) } }
 
-    fun connect(name: String, input: String, openBrowser: (String) -> Unit) {
-        if (_state.value.busy) return
+    fun connect(name: String, input: String, forcePair: Boolean = false) {
+        if (_state.value.busy || _state.value.actionBusy) return
+        val scope = _state.value.requestedScope
         val origin = runCatching { PrivateOrigin.parse(input) }.getOrElse {
             _state.update { state -> state.copy(message = it.message ?: "Check the private server address.") }; return
         }
@@ -54,22 +94,27 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
         val profile = store.profiles().firstOrNull { it.origin == origin }?.copy(name = name.trim())
             ?: ServerProfile(name = name.trim(), origin = origin)
         store.save(profile)
+        cancelPairing()
+        documentJob?.cancel(); documentGeneration++
+        diagnosticJobs.values.forEach { it.cancel() }; diagnosticJobs.clear()
         viewModelScope.launch {
-            _state.update { it.copy(profiles = store.profiles(), selected = profile, snapshot = null, demo = false, connected = false, busy = true, message = null) }
+            _state.update { it.copy(profiles = store.profiles(), selected = profile, snapshot = null, demo = false, connected = false, busy = true, message = null,
+                documents = emptyMap(), documentErrors = emptyMap(), actionResult = null, review = null, diagnostics = emptySet(), documentLoading = false,
+                operationVisible = false, editingTool = null, formValues = emptyMap()) }
             try {
                 when (val health = api.health(profile)) {
                     is DataResult.Ready -> {
                         val session = store.session(profile.id)
-                        if (session != null && session.scope == "administration" && session.origin == profile.origin && session.expiresAt > System.currentTimeMillis()) {
+                        if (!forcePair && session != null && session.scope == scope && session.origin == profile.origin && session.expiresAt > System.currentTimeMillis()) {
                             refresh(profile)
                         } else if (!health.value.pairingAvailable) {
                             _state.update { it.copy(message = "Server reachable. Native app pairing is not enabled on this server yet. You can open the secure web panel below.") }
-                        } else when (val launch = api.beginPairing(profile)) {
+                        } else when (val launch = api.beginPairing(profile, scope)) {
                             is DataResult.Ready -> {
                                 store.pending(launch.value.pending)
+                                store.pendingUrl(launch.value.url)
                                 val code = BrowserPairing.matchCode(BrowserPairing.challenge(launch.value.pending.verifier))
-                                _state.update { it.copy(message = "Pairing code: $code. Match this code in the browser before approving monitoring access.") }
-                                openBrowser(launch.value.url)
+                                _state.update { it.copy(pairingCode = code, pairingUrl = launch.value.url, message = null, pairingExpiresAt = launch.value.pending.createdAt + 600_000) }
                             }
                             else -> _state.update { it.copy(message = "This server cannot pair the native app yet. Open the secure web panel to continue.") }
                         }
@@ -87,10 +132,11 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
             _state.update { state -> state.copy(message = it.message ?: "Invalid sign-in response.") }; return
         }
         store.pending(null) // One callback attempt; a failed exchange starts a fresh sign-in.
+        store.pendingUrl(null)
         val profile = store.profiles().firstOrNull { it.id == parsed.pending.profileId && it.origin == parsed.pending.origin }
             ?: run { _state.update { it.copy(message = "The server profile changed. Start sign-in again.") }; return }
         viewModelScope.launch {
-            _state.update { it.copy(busy = true, selected = profile, demo = false, snapshot = null, connected = false) }
+            _state.update { it.copy(busy = true, selected = profile, demo = false, snapshot = null, connected = false, pairingCode = null, pairingUrl = null) }
             try {
                 when (val result = api.exchange(parsed)) {
                     is DataResult.Ready -> { store.session(result.value); refresh(profile) }
@@ -104,23 +150,24 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
         val session = store.session(profile.id) ?: return
         if (session.expiresAt <= System.currentTimeMillis()) {
             store.clearSession(profile.id)
-            _state.update { it.copy(connected = false, message = "Your session ended. Connect again to sign in.") }
+            _state.update { it.sessionEnded() }
             return
         }
         when (val result = api.snapshot(profile, session)) {
             is DataResult.Ready -> {
                 if (_state.value.demo || _state.value.selected?.id != profile.id || store.session(profile.id)?.cookie != session.cookie) return
                 store.session(session.copy(expiresAt = System.currentTimeMillis() + session.idleSeconds * 1000L))
-                _state.update { it.copy(snapshot = result.value, demo = false, connected = true, message = null, administration = session.scope == "administration") }
+                _state.update { it.copy(snapshot = result.value, demo = false, connected = true, readingsStale = false, message = null, administration = session.scope == "administration") }
             }
-            DataResult.SignInRequired -> { store.clearSession(profile.id); _state.update { it.copy(connected = false, message = "Your session ended. Connect again to sign in.") } }
-            is DataResult.Failed -> _state.update { it.copy(message = result.message) }
+            DataResult.SignInRequired -> { store.clearSession(profile.id); _state.update { it.sessionEnded() } }
+            is DataResult.Failed -> _state.update { it.copy(message = result.message, readingsStale = true) }
             else -> Unit
         }
     }
     fun refresh() { if (_state.value.demo) return; _state.value.selected?.let { viewModelScope.launch { refresh(it) } } }
     fun loadDocuments(paths: List<String>) {
         if (_state.value.demo) return
+        if (paths.size == 1 && paths[0].startsWith("/api/diag?")) { loadDiagnostic(paths[0]); return }
         val profile = _state.value.selected ?: return
         val session = store.session(profile.id) ?: return
         val generation = ++documentGeneration
@@ -142,6 +189,23 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
             } finally { if (generation == documentGeneration) _state.update { it.copy(documentLoading = false) } }
         }
     }
+    private fun loadDiagnostic(path: String) {
+        if (diagnosticJobs[path]?.isActive == true || _state.value.demo) return
+        val profile = _state.value.selected ?: return
+        val session = store.session(profile.id) ?: return
+        diagnosticJobs[path] = viewModelScope.launch {
+            _state.update { it.copy(diagnostics = it.diagnostics + path, documentErrors = it.documentErrors - path) }
+            try {
+                val result = api.document(profile, session, path)
+                if (_state.value.selected?.id != profile.id || _state.value.demo) return@launch
+                _state.update { when (result) {
+                    is DataResult.Ready -> it.copy(documents = it.documents + (path to result.value))
+                    is DataResult.Failed -> it.copy(documentErrors = it.documentErrors + (path to result.message))
+                    else -> it.copy(documentErrors = it.documentErrors + (path to "Sign in again to run this diagnostic."))
+                } }
+            } finally { if (_state.value.selected?.id == profile.id) _state.update { it.copy(diagnostics = it.diagnostics - path) } }
+        }
+    }
     fun review(tool: Tool, payload: JsonObject) {
         if (_state.value.demo || _state.value.actionBusy) return
         val profile = _state.value.selected ?: return
@@ -150,14 +214,14 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
             _state.update { it.copy(review = ToolReview(tool, payload, profile.id, "local", System.currentTimeMillis())) }; return
         }
         viewModelScope.launch {
-            _state.update { it.copy(actionBusy = true, actionResult = null) }
+            _state.update { it.copy(actionBusy = true, actionResult = null, operationTitle = "Preparing ${tool.title}", operationServer = profile.name, operationVisible = true) }
             try {
                 val prepare = JsonObject(payload.filterKeys { it != "action" } + mapOf("action" to JsonPrimitive("prepare"), "target" to JsonPrimitive(tool.action)))
                 when (val result = api.action(profile, session, prepare)) {
                     is DataResult.Ready -> {
                         val nonce = result.value["nonce"]?.jsonPrimitive?.content
                         if (nonce != null && _state.value.connected && _state.value.selected?.id == profile.id && !_state.value.demo)
-                            _state.update { it.copy(review = ToolReview(tool, payload, profile.id, nonce, System.currentTimeMillis())) }
+                            _state.update { it.copy(review = ToolReview(tool, payload, profile.id, nonce, System.currentTimeMillis()), operationVisible = false) }
                     }
                     is DataResult.Failed -> _state.update { it.copy(actionResult = buildJsonObject { put("error", result.message) }) }
                     else -> _state.update { it.copy(actionResult = buildJsonObject { put("error", "Reconnect to sign in again.") }) }
@@ -173,10 +237,10 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
         val session = store.session(profile.id)?.takeIf { it.scope == "administration" } ?: return
         if (_state.value.demo || _state.value.actionBusy) return
         if (System.currentTimeMillis() - review.createdAt > 55_000) {
-            _state.update { it.copy(actionResult = buildJsonObject { put("error", "Confirmation expired. Review the operation again.") }) }; return
+            _state.update { it.copy(actionResult = buildJsonObject { put("error", "Confirmation expired. Review the operation again.") }, operationTitle = review.tool.title, operationServer = profile.name, operationVisible = true) }; return
         }
         viewModelScope.launch {
-            _state.update { it.copy(actionBusy = true) }
+            _state.update { it.copy(actionBusy = true, operationTitle = review.tool.title, operationServer = profile.name, operationVisible = true, actionResult = null) }
             try {
                 val body = JsonObject(review.payload + ("nonce" to JsonPrimitive(review.nonce)))
                 when (val result = api.action(profile, session, body)) {
@@ -202,7 +266,7 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
                     }
                 }
             } finally {
-                store.clearSession(profile.id); store.pending(null)
+                store.clearSession(profile.id); store.pending(null); store.pendingUrl(null)
                 _state.update { it.copy(snapshot = null, connected = false, busy = false, connectionScreen = false, message = message) }
             }
         }

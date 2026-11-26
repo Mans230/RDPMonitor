@@ -58,3 +58,13 @@ See [the TEST plan and evidence](TEST_PAIRING.md).
 - SHA-256: `ab7a359f6d41c5f019ee4291e865f075d12ce53704a7c9894d64d182c6625a80`.
 - Physical-device interaction acceptance remains owner testing; the separate
   requested UX audit will report its method and findings against this version.
+
+## UX corrections — 0.4.0
+
+- Final Gradle debug build and lint: passed, zero errors.
+- Android JVM suite: seventeen passed (including six UX regression cases).
+- Python suite: 332 passed. Browser helper suite: 38 passed.
+- APK v2 signature verification: passed.
+- Artifact: `artifacts/RDPMonitor-Android-0.4.0-ux.apk`.
+- SHA-256: `8fdbd52f3a57c68c0aea458830491871364c56bcd1416577b7886ece5d69a248`.
+- See [UX fixes](UX_FIXES.md) for the report-to-change mapping and device limits.

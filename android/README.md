@@ -1,8 +1,9 @@
 # RDPMonitor for Android
 
 Native Kotlin / Jetpack Compose companion, developed separately from the Windows
-runtime. Version 0.3.0 adds native management sections, scoped owner consent,
-reviewed actions and live bandwidth/activity. See [native management](docs/MANAGEMENT.md).
+runtime. Version 0.4.0 corrects navigation, pairing, session recovery, operation
+feedback and form behavior from the UX review. See [UX corrections](docs/UX_FIXES.md)
+and [native management](docs/MANAGEMENT.md).
 
 ## Run it
 

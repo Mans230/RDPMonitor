@@ -70,8 +70,9 @@ class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
         else DataResult.Ready(ServerHealth(json["mobile_pairing"]?.jsonPrimitive?.booleanOrNull == true))
     }
     /** Opt-in server bridge. Older servers return PairingUnavailable, never fake success. */
-    suspend fun beginPairing(profile: ServerProfile): DataResult<PairingLaunch> = safe {
-        val pending = BrowserPairing.create(profile.id, profile.origin, System.currentTimeMillis()).copy(scope = "administration")
+    suspend fun beginPairing(profile: ServerProfile, scope: String): DataResult<PairingLaunch> = safe {
+        require(scope in setOf("monitoring:read", "administration"))
+        val pending = BrowserPairing.create(profile.id, profile.origin, System.currentTimeMillis()).copy(scope = scope)
         val reply = request(profile.origin, "/api/mobile/v1/pairings", buildJsonObject {
             put("code_challenge", BrowserPairing.challenge(pending.verifier)); put("code_challenge_method", "S256")
             put("state", pending.state); put("redirect_uri", BrowserPairing.REDIRECT)

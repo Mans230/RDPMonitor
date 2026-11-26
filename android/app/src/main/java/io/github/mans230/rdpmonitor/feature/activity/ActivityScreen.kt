@@ -12,6 +12,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 
 @Composable fun ActivityScreen(snapshot: Snapshot, incidents: List<Incident>, onStop: ((ProcessRow) -> Unit)? = null) {
     var section by rememberSaveable { mutableStateOf("Events") }
+    var query by rememberSaveable { mutableStateOf("") }
     PageTitle("Activity", "Recorded server events and current process readings.")
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         listOf("Events", "Processes").forEach { name ->
@@ -36,10 +37,14 @@ import io.github.mans230.rdpmonitor.ui.theme.*
         }
     } else Section("Processes", "Share of total CPU capacity · memory in MB/GB") {
         if (snapshot.processes.isEmpty()) Text("No process readings received.", color = Muted)
-        snapshot.processes.forEachIndexed { index, process ->
+        OutlinedTextField(query, { query = it }, label = { Text("Search process name or PID") }, modifier = Modifier.fillMaxWidth())
+        snapshot.processes.filter { it.name.contains(query, true) || it.pid.toString().contains(query) }.forEachIndexed { index, process ->
             if (index > 0) HorizontalDivider(color = Rule)
             MetricRow(process.name, percent(process.cpu), "PID ${process.pid} · ${bytes(process.memoryBytes)} RAM")
-            onStop?.let { stop -> OutlinedButton(onClick = { stop(process) }, enabled = process.pid > 4) { Text("Stop process") } }
+            onStop?.let { stop ->
+                OutlinedButton(onClick = { stop(process) }, enabled = process.pid > 4) { Text("Stop process") }
+                if (process.pid <= 4) Text("Core system process · stopping is unavailable", color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }

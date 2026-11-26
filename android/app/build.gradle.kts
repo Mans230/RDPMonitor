@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.mans230.rdpmonitor"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0-management"
+        versionCode = 4
+        versionName = "0.4.0-ux"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
