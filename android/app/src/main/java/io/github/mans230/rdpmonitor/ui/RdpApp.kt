@@ -2,6 +2,11 @@
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,7 +21,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,10 +62,10 @@ import io.github.mans230.rdpmonitor.ui.theme.*
         text = { Text("This ends this app session. Your saved server and approved Passkey are kept; you can sign in again without registering a new key.") },
         confirmButton = { TextButton(onClick = { signOut = false; model.disconnect() }) { Text("Disconnect and sign out") } },
         dismissButton = { TextButton(onClick = { signOut = false }) { Text("Keep connected") } })
-    Scaffold(containerColor = Color.Transparent) { padding ->
+    Scaffold(containerColor = Color.Transparent, contentColor = Signal) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding).navigationBarsPadding()) {
             val edge = if (maxWidth < 351.dp) 16.dp else 20.dp
-            LazyColumn(Modifier.align(Alignment.TopCenter).widthIn(max = 1104.dp).fillMaxHeight(), state = scroll,
+            LazyColumn(Modifier.align(Alignment.TopCenter).widthIn(max = 1104.dp).fillMaxHeight().testTag("app-content"), state = scroll,
                 contentPadding = PaddingValues(horizontal = edge, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -91,7 +98,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                     }
                 }
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(pageMotion(route), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         when (selected) {
                             Feature.Processes -> if (state.demo) ActivityScreen(snapshot, emptyList(), processesOnly = true) else LiveActivity(state, model, processesOnly = true)
                             Feature.History -> ResourceHistory(snapshot)
@@ -123,14 +130,17 @@ import io.github.mans230.rdpmonitor.ui.theme.*
             val labels = listOf("Overview", "Protect", "Backups", "Processes", "More")
             val features = listOf(null, Feature.Protection, Feature.Backups, Feature.Processes, null)
             labels.forEachIndexed { index, label ->
+                val interaction = remember { MutableInteractionSource() }
+                val pressed by interaction.collectIsPressedAsState()
+                val scale by animateFloatAsState(if (pressed) .96f else 1f, tween(100), label = "Navigation press")
                 val active = when (index) {
                     0 -> selected == null && destination == Destination.Overview
                     4 -> selected !in listOf(Feature.Protection, Feature.Backups, Feature.Processes) && !(selected == null && destination == Destination.Overview)
                     else -> selected == features[index]
                 }
                 val icon = when (index) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.VerifiedUser; 2 -> Icons.Outlined.Inventory2; 3 -> Icons.Outlined.BarChart; else -> Icons.Outlined.MoreHoriz }
-                Column(Modifier.weight(1f).background(if (active) Color.White.copy(alpha = .10f) else Color.Transparent, RoundedCornerShape(26.dp))
-                    .selectable(active, role = Role.Tab, onClick = { when (index) { 0 -> overview(); 4 -> more(); else -> open(features[index]!!) } })
+                Column(Modifier.weight(1f).graphicsLayer { scaleX = scale; scaleY = scale }.background(if (active) Color.White.copy(alpha = .10f) else Color.Transparent, RoundedCornerShape(26.dp))
+                    .selectable(active, interactionSource = interaction, indication = LocalIndication.current, role = Role.Tab, onClick = { when (index) { 0 -> overview(); 4 -> more(); else -> open(features[index]!!) } })
                     .padding(horizontal = 2.dp, vertical = 8.dp).heightIn(min = 44.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(icon, null, Modifier.size(18.dp), tint = if (active) Signal else Muted)
                     Text(label, fontSize = 11.sp, color = if (active) Signal else Muted)

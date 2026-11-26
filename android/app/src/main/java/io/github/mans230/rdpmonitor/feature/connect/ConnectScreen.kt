@@ -38,7 +38,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
             TextButton(onClick = model::closeConnections) { Text("Back to ${if (state.demo) "demo" else state.selected?.name ?: "monitor"}") }
             Notice(if (state.demo) "Choose a server below, or return to the demo." else if (state.connected) "Your current server session is kept. Opening this screen does not sign you out." else "The previous readings are stale. Sign in again to resume monitoring.")
         }
-        PageTitle("Connect your server", "Windows monitoring and control, through your private network.")
+        PageTitle("Your RDP connectors", "Add a server's private HTTPS address. Each connector keeps its own authorization.")
         if (state.actionBusy) Notice("A server operation is still running. Return to the monitor to see progress before changing servers.")
         Notice("Connect Tailscale on this device. Sign-in uses your saved passkey; new keys require your approval in Telegram.")
         Section("Private connection") {
@@ -58,7 +58,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                 placeholder = { Text("https://server.tailnet.ts.net") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth(), enabled = available && state.pairingUrl == null)
             state.message?.let { Notice(it) }
-            Button(onClick = { model.connect(name, address) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            MotionButton(onClick = { model.connect(name, address) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                 enabled = available && state.pairingUrl == null, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onSurface, contentColor = Ground)) {
                 if (state.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Ground)
                 else Text("Check private connection")

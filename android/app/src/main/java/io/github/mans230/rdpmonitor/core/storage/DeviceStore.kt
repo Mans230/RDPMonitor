@@ -16,8 +16,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 class DeviceStore(context: Context) {
-    private val profiles = context.getSharedPreferences("server_profiles", Context.MODE_PRIVATE)
-    private val secrets = context.getSharedPreferences("encrypted_sessions", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val namespace: String get() {
+        val owner = appContext.getSharedPreferences("app_identity", Context.MODE_PRIVATE).getString("connector_owner", "private") ?: "private"
+        return if (owner == "private") "" else "." + java.security.MessageDigest.getInstance("SHA-256").digest(owner.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+    private val profiles get() = appContext.getSharedPreferences("server_profiles$namespace", Context.MODE_PRIVATE)
+    private val secrets get() = appContext.getSharedPreferences("encrypted_sessions$namespace", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
     private val alias = "rdpmonitor.device-session.v1"
     private fun key(): SecretKey {
@@ -59,6 +64,7 @@ class DeviceStore(context: Context) {
     fun session(id: String): AppSession? = get("session:$id")?.let { runCatching { json.decodeFromString<AppSession>(it) }.getOrNull() }
     fun session(value: AppSession) = put("session:${value.profileId}", json.encodeToString(value))
     fun clearSession(id: String) = put("session:$id", null)
+    fun clearSessions() { secrets.edit().clear().commit() }
     fun pending(): PendingPairing? = get("pending")?.let { runCatching { json.decodeFromString<PendingPairing>(it) }.getOrNull() }
     fun pending(value: PendingPairing?) = put("pending", value?.let { json.encodeToString(it) })
     fun pendingUrl(): String? = get("pending-url")

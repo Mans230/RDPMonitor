@@ -2,6 +2,7 @@ package io.github.mans230.rdpmonitor.ui.theme
 
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -41,5 +42,6 @@ val ReadingStyle = TextStyle(fontFamily = InterfaceFont, fontFeatureSettings = "
             titleMedium = TextStyle(fontFamily = InterfaceFont, fontSize = 16.sp, fontWeight = FontWeight.Medium),
             bodyLarge = TextStyle(fontFamily = InterfaceFont, fontSize = 14.sp, lineHeight = 21.sp), bodyMedium = TextStyle(fontFamily = InterfaceFont, fontSize = 13.sp, lineHeight = 19.sp),
             bodySmall = TextStyle(fontFamily = InterfaceFont, fontSize = 12.sp, lineHeight = 17.sp),
-            labelLarge = TextStyle(fontFamily = InterfaceFont, fontSize = 13.sp, fontWeight = FontWeight.Medium)), content = content)
+            labelLarge = TextStyle(fontFamily = InterfaceFont, fontSize = 13.sp, fontWeight = FontWeight.Medium)),
+        content = { CompositionLocalProvider(LocalContentColor provides Signal) { content() } })
 }
