@@ -11,6 +11,10 @@ from urllib.parse import urlencode
 
 REDIRECT = 'io.github.mans230.rdpmonitor://auth/callback'
 READ_PATHS = frozenset(('/api/session', '/api/stats', '/api/history', '/api/bandwidth/usage'))
+MANAGE_PATHS = READ_PATHS | frozenset(('/api/bandwidth/connections', '/api/security', '/api/proc',
+    '/api/sysinfo', '/api/netstat', '/api/services', '/api/backup', '/api/suite-update',
+    '/api/setup', '/api/setup/jobs', '/api/setup/browse', '/api/rdp', '/api/settings',
+    '/api/traps', '/api/automation', '/api/users', '/api/diag', '/api/audit', '/api/usage', '/api/docs'))
 
 
 class PairingError(ValueError):
@@ -57,6 +61,9 @@ class Pairings:
         self.attempts[addr] = (start, count + 1)
 
     def begin(self, body, addr, origin):
+        scope = body.get('scope', 'monitoring:read')
+        if scope not in ('monitoring:read', 'administration'):
+            raise PairingError('Invalid app permission scope.')
         if (body.get('redirect_uri') != REDIRECT or body.get('code_challenge_method') != 'S256'
                 or not re.fullmatch(r'[A-Za-z0-9_-]{43}', str(body.get('code_challenge', '')))
                 or not re.fullmatch(r'[A-Za-z0-9_-]{43}', str(body.get('state', '')))):
@@ -68,7 +75,7 @@ class Pairings:
                 raise PairingError('Pairing is busy. Retry later.', 429)
             request_id = secrets.token_urlsafe(24)
             self.pending[request_id] = dict(challenge=body['code_challenge'], state=body['state'],
-                                           addr=addr, origin=origin, expires=self.clock() + 600)
+                                           addr=addr, origin=origin, scope=scope, expires=self.clock() + 600)
             return {'authorization_url': origin + '/mobile/authorize?' + urlencode({'request': request_id}),
                     'confirmation_code': match_code(body['code_challenge'])}
 
@@ -78,7 +85,7 @@ class Pairings:
             row = self.pending.get(request_id)
             if not row or row['addr'] != addr or row['origin'] != origin:
                 raise PairingError('App request expired or belongs to another device. Start again.', 404)
-            return {'confirmation_code': match_code(row['challenge']), 'scope': 'monitoring:read',
+            return {'confirmation_code': match_code(row['challenge']), 'scope': row['scope'],
                     'expires_in': max(0, int(row['expires'] - self.clock()))}
 
     def consent(self, request_id, addr, origin, actor, credential, approve):
@@ -112,4 +119,4 @@ class Pairings:
                     or not hmac.compare_digest(expected, row['challenge'])):
                 raise PairingError('App sign-in expired or could not be verified.', 403)
             del self.codes[key]  # Consume atomically after successful verification.
-            return row['actor'], row['credential']
+            return row['actor'], row['credential'], row['scope']

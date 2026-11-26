@@ -19,7 +19,7 @@ from urllib.parse import urlparse, parse_qs
 from http.cookies import SimpleCookie
 from action_policy import CONFIRMED_ACTIONS, audit_action, confirmation_arguments, requires_confirmation
 from proxy_security import serve_context, ProxyRejected
-from mobile_pairing import Pairings, PairingError, READ_PATHS
+from mobile_pairing import Pairings, PairingError, READ_PATHS, MANAGE_PATHS
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(BASE_DIR))
@@ -1420,7 +1420,7 @@ def authenticate_login(token):
     return None, ""
 
 
-def create_session(addr, actor="owner", credential_hash="", mobile=False):
+def create_session(addr, actor="owner", credential_hash="", mobile=False, mobile_scope='monitoring:read'):
     sid, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
     with _session_lock:
         now = time.time()
@@ -1432,7 +1432,7 @@ def create_session(addr, actor="owner", credential_hash="", mobile=False):
         _sessions[sid] = {"csrf": csrf, "created": now,
                           "expires": now + SESSION_TTL,
                           "addr": addr, "confirm": {}, "actor": actor,
-                          "credential_hash": credential_hash, "mobile": mobile}
+                          "credential_hash": credential_hash, "mobile": mobile, "mobile_scope": mobile_scope}
     return sid, csrf
 
 
@@ -1682,7 +1682,8 @@ class Handler(BaseHTTPRequestHandler):
         sid, sess = self._session()
         if not sess:
             return self._json(401, {'error': 'Sign in with your approved passkey.'})
-        if sess.get('mobile') or sess.get('actor') != 'owner':
+        if sess.get('actor') != 'owner' or (sess.get('mobile') and not (
+                sess.get('mobile_scope') == 'administration' and path == '/api/mobile/v1/sessions')):
             return self._json(403, {'error': 'Owner browser session required.'})
         if path == '/api/mobile/v1/request':
             values = parse_qs(query).get('request', [])
@@ -1697,7 +1698,7 @@ class Handler(BaseHTTPRequestHandler):
             with _session_lock:
                 now = time.time()
                 items = [{'id': hashlib.sha256(key.encode()).hexdigest()[:24],
-                          'created': row['created'], 'expires': row['expires'], 'scope': 'monitoring:read'}
+                          'created': row['created'], 'expires': row['expires'], 'scope': row.get('mobile_scope', 'monitoring:read')}
                          for key, row in _sessions.items() if row.get('mobile') and row['expires'] > now
                          and row.get('credential_hash') == sess.get('credential_hash')]
             return self._json(200, {'items': items})
@@ -1713,18 +1714,19 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/mobile/v1/pairings':
                 return self._json(201, _mobile_pairings.begin(body, addr, origin))
             if path == '/api/mobile/v1/exchange':
-                actor, credential = _mobile_pairings.exchange(body, addr, origin)
+                actor, credential, scope = _mobile_pairings.exchange(body, addr, origin)
                 if not credential.startswith('passkey:') or not passkey_store().active(credential[8:], actor):
                     return self._json(403, {'error': 'The approving passkey is no longer active.'})
-                sid, csrf = create_session(addr, actor, credential, mobile=True)
+                sid, csrf = create_session(addr, actor, credential, mobile=True, mobile_scope=scope)
                 self._usage_context.update(actor=actor, action='mobile_pair', session=hashlib.sha256(sid.encode()).hexdigest()[:16])
                 return self._json(200, {'ok': True, 'csrf': csrf, 'actor': actor,
-                                       'scope': 'monitoring:read', 'idle_timeout_seconds': SESSION_TTL},
+                                       'scope': scope, 'idle_timeout_seconds': SESSION_TTL},
                     {'Set-Cookie': 'rdpwc_session=%s; HttpOnly; SameSite=Strict; Path=/; Secure' % sid})
             sid, sess = self._session()
             if not sess:
                 return self._json(401, {'error': 'Sign in with your approved passkey.'})
-            if sess.get('mobile') or sess.get('actor') != 'owner':
+            if sess.get('actor') != 'owner' or (sess.get('mobile') and not (
+                    sess.get('mobile_scope') == 'administration' and path == '/api/mobile/v1/revoke')):
                 return self._json(403, {'error': 'Owner browser session required.'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token', '').encode(), sess['csrf'].encode()):
                 return self._json(403, {'error': 'CSRF check failed.'})
@@ -1851,7 +1853,8 @@ class Handler(BaseHTTPRequestHandler):
                                "idle_timeout_seconds": SESSION_TTL})
         _sid, active_session = self._session()
         if not active_session: return self._json(401, {"error": "authentication required"})
-        if active_session.get('mobile') and u.path not in READ_PATHS:
+        mobile_paths = MANAGE_PATHS if active_session.get('mobile_scope') == 'administration' else READ_PATHS
+        if active_session.get('mobile') and u.path not in mobile_paths:
             return self._json(403, {'error': 'This app session has monitoring access only.'})
         if u.path == "/api/stats":
             with _lock: s = dict(LIVE)
@@ -2074,7 +2077,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._login_success(actor, credential_hash)
         sid, sess = self._session()
         if not sess: return self._json(401, {"error": "authentication required"})
-        if sess.get('mobile') and u.path != '/api/logout':
+        if sess.get('mobile') and u.path != '/api/logout' and not (
+                sess.get('mobile_scope') == 'administration' and sess.get('actor') == 'owner' and u.path == '/api/action'):
             return self._json(403, {'error': 'This app session has monitoring access only.'})
         self._usage_context["actor"] = sess.get("actor", "owner")
         self._usage_context["session"] = hashlib.sha256(sid.encode()).hexdigest()[:16]

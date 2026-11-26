@@ -15,7 +15,10 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 @Composable fun BandwidthScreen(traffic: Traffic?) {
     PageTitle("Bandwidth", "Machine-wide traffic, with an explicit accounting window.")
     if (traffic == null) { Notice("No bandwidth accounting has been received for this server. No usage totals are estimated."); return }
-    Section("Billing-cycle usage", "Sample window · days 1–14") {
+    if (traffic.days.isEmpty()) { Notice("No accounting records have been collected yet. Usage is unknown."); return }
+    val chartDays = traffic.days.takeLast(14)
+    val chartMaximum = (chartDays.maxOfOrNull { it.totalBytes } ?: 0).coerceAtLeast(1_073_741_824)
+    Section("Billing-cycle usage", traffic.cycleStart?.let { "$it → ${traffic.cycleEnd} (end exclusive)" } ?: "Sample window · days 1–14") {
         Text(bytes(traffic.totalBytes), style = ReadingStyle.copy(fontSize = 30.sp))
         traffic.quotaFraction?.let { fraction ->
             LinearProgressIndicator(progress = { fraction.toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), color = Signal, trackColor = Rule)
@@ -25,19 +28,20 @@ import io.github.mans230.rdpmonitor.ui.theme.*
         MetricRow("Uploaded", bytes(traffic.uploadBytes))
     }
     Section("Daily transfer", "Total download + upload · GiB") {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("12 GiB", color = Muted); Text("Day 1–14", color = Muted) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(bytes(chartMaximum), color = Muted); Text("${chartDays.size} recorded days", color = Muted) }
         Canvas(Modifier.fillMaxWidth().height(160.dp)) {
             repeat(3) { i -> drawLine(Rule, Offset(0f, size.height * i / 2), Offset(size.width, size.height * i / 2), 1.dp.toPx()) }
-            val step = size.width / traffic.days.size.coerceAtLeast(1)
-            traffic.days.forEachIndexed { i, day ->
-                val height = size.height * (day.totalBytes / (12.0 * 1_073_741_824)).toFloat().coerceIn(0f, 1f)
+            val step = size.width / chartDays.size.coerceAtLeast(1)
+            chartDays.forEachIndexed { i, day ->
+                val height = size.height * (day.totalBytes / chartMaximum.toDouble()).toFloat().coerceIn(0f, 1f)
                 drawRect(Signal, Offset(i * step + step * .2f, size.height - height), androidx.compose.ui.geometry.Size(step * .6f, height))
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { listOf("1", "7", "14").forEach { Text(it, color = Muted) } }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { listOf(chartDays.first().label, chartDays.last().label).forEach { Text(it, color = Muted) } }
     }
     Section("Daily ledger") {
         traffic.days.asReversed().take(7).forEach { MetricRow("Day ${it.label}", bytes(it.totalBytes)) }
     }
+    traffic.scope?.let { Notice(it) }
     Notice("Accounting can contain gaps while the monitor is stopped. An unavailable reading is not a measured zero.")
 }

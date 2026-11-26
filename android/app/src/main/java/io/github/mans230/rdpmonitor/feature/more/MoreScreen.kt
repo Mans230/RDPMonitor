@@ -18,7 +18,8 @@ enum class Feature(val title: String, val summary: String, val capabilities: Lis
     Cloud("Cloud & images", "Guided cloud setup and system images", listOf("rclone account setup", "Backup and image upload destinations", "System image progress", "Archive and image verification")),
     Commands("Command center", "Commands grouped by their purpose", listOf("CPU & RAM", "Network & bandwidth", "Protection & accounts", "Programs & services", "Backups & recovery", "Settings & maintenance")),
     Updates("Updates", "Validated bot and panel releases", listOf("Current release and health", "Checksummed suite updates", "Installation status and rollback", "Preserve approved passkeys")),
-    Access("Private access", "Tailscale, passkeys and owner approval", listOf("HTTPS over the private tailnet", "Passkey sign-in in the system browser", "Owner approval in Telegram", "No chat login tokens or public IP fallback"))
+    Access("Private access", "Tailscale, passkeys and owner approval", listOf("HTTPS over the private tailnet", "Passkey sign-in in the system browser", "Owner approval in Telegram", "No chat login tokens or public IP fallback")),
+    Settings("Settings & alerts", "Monitoring thresholds, notifications and permissions", emptyList())
 }
 
 @Composable fun MoreScreen(onFeature: (Feature) -> Unit, onConnections: () -> Unit) {

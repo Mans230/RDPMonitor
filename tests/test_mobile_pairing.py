@@ -63,7 +63,7 @@ class PairingBoundaryTests(unittest.TestCase):
         with self.assertRaises(PairingError):
             self.pairings.exchange(body | {'code_verifier': 'a' * 43}, self.addr, self.origin)
         with self.assertRaises(PairingError): self.pairings.exchange(body, '100.64.1.2', self.origin)
-        self.assertEqual(self.pairings.exchange(body, self.addr, self.origin), ('owner', 'passkey:test'))
+        self.assertEqual(self.pairings.exchange(body, self.addr, self.origin), ('owner', 'passkey:test', 'monitoring:read'))
         with self.assertRaises(PairingError): self.pairings.exchange(body, self.addr, self.origin)
 
     def test_approved_code_expires_and_parallel_exchange_has_one_winner(self):
@@ -119,10 +119,10 @@ class MobileHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         return headers['Set-Cookie'].split(';')[0], result['csrf'], fingerprint
 
-    def pairing(self):
+    def pairing(self, scope='monitoring:read'):
         verifier = secrets.token_urlsafe(32)
         body = dict(code_challenge=challenge(verifier), code_challenge_method='S256',
-                    state=secrets.token_urlsafe(32), redirect_uri=REDIRECT)
+                    state=secrets.token_urlsafe(32), redirect_uri=REDIRECT, scope=scope)
         status, _, data = self.request('POST', '/api/mobile/v1/pairings', body)
         self.assertEqual(status, 201)
         request_id = parse_qs(urlsplit(data['authorization_url']).query)['request'][0]
@@ -191,6 +191,36 @@ class MobileHTTPTests(unittest.TestCase):
         self.assertEqual(self.request('POST', '/api/logout', {}, mobile)[0], 403)
         self.assertEqual(self.request('POST', '/api/logout', {}, mobile, {'X-CSRF-Token': result['csrf']})[0], 200)
         self.assertEqual(self.request('GET', '/api/stats', cookie=mobile)[0], 401)
+
+    def test_administration_requires_fresh_consent_and_retains_confirmation_binding(self):
+        from unittest import mock
+        owner, csrf, _ = self.owner()
+        verifier, request_id = self.pairing('administration')
+        _, _, description = self.request('GET', '/api/mobile/v1/request?request=' + request_id, cookie=owner)
+        self.assertEqual(description['scope'], 'administration')
+        _, _, consent = self.request('POST', '/api/mobile/v1/consent', dict(request=request_id, approve=True), owner, {'X-CSRF-Token': csrf})
+        code = parse_qs(urlsplit(consent['redirect_uri']).query)['code'][0]
+        _, headers, app = self.request('POST', '/api/mobile/v1/exchange', dict(code=code, code_verifier=verifier, redirect_uri=REDIRECT))
+        cookie = headers['Set-Cookie'].split(';')[0]
+        self.assertEqual(app['scope'], 'administration')
+        h = {'X-CSRF-Token': app['csrf']}
+        with mock.patch.object(self.wc, 'panel_request', return_value=(True, {'saved': True})) as host:
+            self.assertEqual(self.request('GET', '/api/setup', cookie=cookie)[0], 200)
+            host.reset_mock()
+            body = dict(action='settings_set', key='cpu', value='80')
+            self.assertEqual(self.request('POST', '/api/action', body, cookie, h)[0], 400)
+            self.assertEqual(self.request('POST', '/api/action', dict(body,action='prepare',target='settings_set'), cookie)[0], 403)
+            _, _, prepared = self.request('POST', '/api/action', dict(body,action='prepare',target='settings_set'), cookie, h)
+            self.assertEqual(self.request('POST', '/api/action', dict(body, value='99',nonce=prepared['nonce']), cookie, h)[0], 400)
+            host.assert_not_called()
+            _, _, prepared = self.request('POST', '/api/action', dict(body,action='prepare',target='settings_set'), cookie, h)
+            self.assertEqual(self.request('POST', '/api/action', dict(body,nonce=prepared['nonce']), cookie, h)[0], 200)
+            self.assertEqual(self.request('POST', '/api/action', dict(body,nonce=prepared['nonce']), cookie, h)[0], 400)
+            host.assert_called_once()
+        _, pending = self.pairing('administration')
+        self.assertEqual(self.request('POST', '/api/mobile/v1/consent', dict(request=pending,approve=True), cookie,h)[0], 403)
+        self.assertEqual(self.request('GET', '/api/file?path=C:/secret',cookie=cookie)[0],403)
+        self.assertEqual(self.request('GET', '/api/mobile/v1/sessions', cookie=cookie)[0],200)
 
 
 if __name__ == '__main__': unittest.main()

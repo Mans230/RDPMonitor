@@ -31,12 +31,14 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     val state by model.state.collectAsStateWithLifecycle()
     var detail by rememberSaveable { mutableStateOf<String?>(null) }
     val snapshot = state.snapshot
-    if (snapshot == null) {
+    if (snapshot == null || state.connectionScreen) {
+        BackHandler(enabled = snapshot != null && state.connectionScreen) { model.closeConnections() }
         Surface(color = Ground) { ConnectScreen(state, model, openBrowser, Modifier.safeDrawingPadding()) }
         return
     }
     val selected = detail?.let { name -> Feature.entries.firstOrNull { it.name == name } }
     BackHandler { if (detail != null) detail = null else model.connectScreen() }
+    ActionReviewDialog(state, model)
     Scaffold(containerColor = Ground,
         topBar = {
             Column(Modifier.statusBarsPadding()) {
@@ -86,12 +88,11 @@ import io.github.mans230.rdpmonitor.ui.theme.*
             state.message?.let { message -> item { Notice(message, warning = true) } }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                    if (selected != null) FeatureScreen(selected, state.demo, { detail = null },
-                        if (!state.demo) state.selected?.let { profile -> ({ openBrowser(profile.origin + "/") }) } else null)
+                    if (selected != null) ManagementScreen(selected, state, model, { detail = null }, openBrowser)
                     else when (state.destination) {
                         Destination.Overview -> OverviewScreen(snapshot)
-                        Destination.Bandwidth -> BandwidthScreen(if (state.demo) DemoData.traffic else null)
-                        Destination.Activity -> ActivityScreen(snapshot, if (state.demo) DemoData.incidents else emptyList())
+                        Destination.Bandwidth -> if (state.demo) BandwidthScreen(DemoData.traffic) else LiveBandwidth(state, model, openBrowser)
+                        Destination.Activity -> if (state.demo) ActivityScreen(snapshot, DemoData.incidents) else LiveActivity(state, model)
                         Destination.More -> {
                             MoreScreen({ detail = it.name }, { detail = null; model.connectScreen() })
                             if (!state.demo) OutlinedButton(onClick = model::disconnect, enabled = !state.busy,

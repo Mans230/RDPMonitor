@@ -10,7 +10,7 @@ import java.util.Base64
 
 @Serializable
 data class PendingPairing(val profileId: String, val origin: String, val verifier: String,
-                          val state: String, val createdAt: Long)
+                          val state: String, val createdAt: Long, val scope: String = "monitoring:read")
 data class PairingCallback(val code: String, val pending: PendingPairing)
 
 /** A code handoff contract, not an OAuth authorization server implementation. */
