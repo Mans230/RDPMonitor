@@ -17,7 +17,7 @@ data class ServerHealth(val pairingAvailable: Boolean)
 data class PairingLaunch(val pending: PendingPairing, val url: String)
 
 class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
-    .followRedirects(false).followSslRedirects(false).callTimeout(15, TimeUnit.SECONDS).build()) {
+    .followRedirects(false).followSslRedirects(false).readTimeout(330, TimeUnit.SECONDS).callTimeout(15, TimeUnit.SECONDS).build()) {
     private data class Reply(val status: Int, val body: String, val cookies: List<String>)
     private fun request(origin: String, path: String, body: JsonObject? = null, session: AppSession? = null): Reply {
         val canonical = PrivateOrigin.parse(origin)
@@ -31,13 +31,19 @@ class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
             session?.let { active -> request.header("X-CSRF-Token", active.csrf) }
             request.post(it.toString().toRequestBody("application/json".toMediaType()))
         }
-        return client.newCall(request.build()).execute().use { response ->
+        val call = client.newCall(request.build())
+        if (path == "/api/action") {
+            call.timeout().timeout(330, TimeUnit.SECONDS)
+        } else if (path.startsWith("/api/diag") || path == "/api/setup") {
+            call.timeout().timeout(180, TimeUnit.SECONDS)
+        }
+        return call.execute().use { response ->
             val output = ByteArrayOutputStream()
             response.body?.byteStream()?.use { stream ->
                 val buffer = ByteArray(4096)
                 while (true) {
                     val count = stream.read(buffer)
-                    if (count < 0) break
+                    if (count < 0) { break }
                     require(output.size() + count <= 2 * 1024 * 1024) { "Server response is too large." }
                     output.write(buffer, 0, count)
                 }
@@ -65,10 +71,11 @@ class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
     }
     /** Opt-in server bridge. Older servers return PairingUnavailable, never fake success. */
     suspend fun beginPairing(profile: ServerProfile): DataResult<PairingLaunch> = safe {
-        val pending = BrowserPairing.create(profile.id, profile.origin, System.currentTimeMillis())
+        val pending = BrowserPairing.create(profile.id, profile.origin, System.currentTimeMillis()).copy(scope = "administration")
         val reply = request(profile.origin, "/api/mobile/v1/pairings", buildJsonObject {
             put("code_challenge", BrowserPairing.challenge(pending.verifier)); put("code_challenge_method", "S256")
             put("state", pending.state); put("redirect_uri", BrowserPairing.REDIRECT)
+            put("scope", pending.scope)
         })
         if (reply.status == 404 || reply.status == 501) DataResult.PairingUnavailable
         else if (reply.status == 200 || reply.status == 201) {
@@ -86,14 +93,14 @@ class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
         if (reply.status != 200) DataResult.Failed("App sign-in was rejected or expired. Start again.")
         else {
             val data = Json.parseToJsonElement(reply.body).jsonObject
-            require(data["scope"]?.jsonPrimitive?.content == "monitoring:read") { "Monitoring session required" }
+            require(data["scope"]?.jsonPrimitive?.content == pending.scope) { "Approved session permissions did not match" }
             val cookie = reply.cookies.firstOrNull {
                 it.startsWith("rdpwc_session=") && it.contains("; Secure", true) && it.contains("; HttpOnly", true)
             }?.substringBefore(';') ?: error("Secure session cookie missing")
             val seconds = data["idle_timeout_seconds"]?.jsonPrimitive?.intOrNull?.coerceIn(60, 1800) ?: 1800
             val csrf = data["csrf"]?.jsonPrimitive?.content?.takeIf { it.length in 16..256 } ?: error("CSRF missing")
             DataResult.Ready(AppSession(pending.profileId, pending.origin, cookie, csrf,
-                data["actor"]?.jsonPrimitive?.content ?: "Signed in", System.currentTimeMillis() + seconds * 1000L, seconds))
+                data["actor"]?.jsonPrimitive?.content ?: "Signed in", System.currentTimeMillis() + seconds * 1000L, seconds, pending.scope))
         }
     }
     suspend fun snapshot(profile: ServerProfile, session: AppSession): DataResult<Snapshot> = safe {
@@ -113,5 +120,22 @@ class PanelApi(private val client: OkHttpClient = OkHttpClient.Builder()
         val reply = request(profile.origin, "/api/logout", buildJsonObject {}, session)
         if (reply.status in listOf(200, 401)) DataResult.Ready(Unit)
         else DataResult.Failed("Server sign-out failed. You can revoke this app session in the web panel.")
+    }
+    suspend fun document(profile: ServerProfile, session: AppSession, path: String): DataResult<JsonElement> = safe {
+        val reply = request(profile.origin, path, session = session)
+        when (reply.status) {
+            401 -> DataResult.SignInRequired
+            200 -> DataResult.Ready(Json.parseToJsonElement(reply.body))
+            else -> DataResult.Failed(runCatching { Json.parseToJsonElement(reply.body).jsonObject["error"]?.jsonPrimitive?.content }.getOrNull()
+                ?: "Server could not load this section (${reply.status}). Retry.")
+        }
+    }
+    suspend fun action(profile: ServerProfile, session: AppSession, body: JsonObject): DataResult<JsonObject> = safe {
+        val path = if (body["action"]?.jsonPrimitive?.content == "mobile_revoke") "/api/mobile/v1/revoke" else "/api/action"
+        val reply = request(profile.origin, path, body, session)
+        val data = runCatching { Json.parseToJsonElement(reply.body).jsonObject }.getOrDefault(JsonObject(emptyMap()))
+        if (reply.status == 401) DataResult.SignInRequired
+        else if (reply.status == 200 && data["ok"]?.jsonPrimitive?.booleanOrNull != false) DataResult.Ready(data)
+        else DataResult.Failed(data["error"]?.jsonPrimitive?.content ?: data["out"]?.toString() ?: "Action failed (${reply.status}). Nothing is assumed to have succeeded.")
     }
 }

@@ -45,3 +45,16 @@ Production capability remains unavailable; the supplied private URL was checked
 read-only. The isolated TEST runner was stopped after validation. Native phone
 Passkey/OS callback acceptance and production rollout are still outstanding.
 See [the TEST plan and evidence](TEST_PAIRING.md).
+
+## Native management milestone — 0.3.0
+
+- Python suite: 332 passed, including administration grant isolation, CSRF,
+  confirmation argument binding, replay rejection and mobile self-approval denial.
+- Browser helper suite: 38 passed.
+- Android JVM tests: eleven passed (seven core, four management/accounting).
+- Final Gradle build and lint: passed, zero lint errors.
+- APK signature: v2 verification passed.
+- Artifact: `artifacts/RDPMonitor-Android-0.3.0-management.apk`.
+- SHA-256: `ab7a359f6d41c5f019ee4291e865f075d12ce53704a7c9894d64d182c6625a80`.
+- Physical-device interaction acceptance remains owner testing; the separate
+  requested UX audit will report its method and findings against this version.

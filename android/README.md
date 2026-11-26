@@ -1,8 +1,8 @@
 # RDPMonitor for Android
 
 Native Kotlin / Jetpack Compose companion, developed separately from the Windows
-runtime. This first milestone is a runnable foundation, not a replacement for
-the full web panel.
+runtime. Version 0.3.0 adds native management sections, scoped owner consent,
+reviewed actions and live bandwidth/activity. See [native management](docs/MANAGEMENT.md).
 
 ## Run it
 
@@ -39,17 +39,16 @@ Passkey / Telegram owner approval flow.
 
 ## Current limits
 
-This branch implements **opt-in TEST native pairing** with browser Passkey
-sign-in, explicit owner consent, a matching code, PKCE and a separate read-only
-app session. Live resource readings and history are wired once pairing succeeds.
-The running production server does not yet advertise this capability. Until it
-is deployed and enabled there, the app reports that pairing is unavailable.
-Live bandwidth totals/incidents and native administration remain future work.
-See [TEST setup and evidence](docs/TEST_PAIRING.md).
+The panel supports browser Passkey pairing with a matching code and PKCE.
+Monitoring and administration are distinct grants. Existing monitoring sessions
+remain restricted until the owner approves a fresh administration request.
+Native sections use the existing validated server operations and execution gates.
+See [management permissions and coverage](docs/MANAGEMENT.md) and
+[the original TEST setup](docs/TEST_PAIRING.md).
 
 Tailscale remains a separate prerequisite. This app does not install it, expose
-the server publicly, or replace it with a shared token. No production source,
-configuration, firewall rules or running services are modified by the app.
+the server publicly, or replace it with a shared token. Production deployment is
+performed after automated checks under the owner's standing authorization.
 
 ## Structure
 

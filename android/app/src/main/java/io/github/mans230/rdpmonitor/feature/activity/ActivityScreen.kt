@@ -10,19 +10,19 @@ import io.github.mans230.rdpmonitor.core.model.*
 import io.github.mans230.rdpmonitor.ui.components.*
 import io.github.mans230.rdpmonitor.ui.theme.*
 
-@Composable fun ActivityScreen(snapshot: Snapshot, incidents: List<Incident>) {
-    var section by rememberSaveable { mutableStateOf("Incidents") }
-    PageTitle("Activity", "Incidents stay grouped; processes keep their CPU and memory units.")
+@Composable fun ActivityScreen(snapshot: Snapshot, incidents: List<Incident>, onStop: ((ProcessRow) -> Unit)? = null) {
+    var section by rememberSaveable { mutableStateOf("Events") }
+    PageTitle("Activity", "Recorded server events and current process readings.")
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        listOf("Incidents", "Processes").forEach { name ->
+        listOf("Events", "Processes").forEach { name ->
             TextButton(onClick = { section = name }) {
                 Text(if (section == name) "$name ·" else name, color = if (section == name) Signal else Muted)
             }
         }
     }
-    if (section == "Incidents") {
-        Section("Recent incidents") {
-            if (incidents.isEmpty()) Text("No incident feed has been received for this server.", color = Muted)
+    if (section == "Events") {
+        Section("Recent activity") {
+            if (incidents.isEmpty()) Text("No recorded activity was returned for this server.", color = Muted)
             incidents.forEachIndexed { i, incident ->
                 if (i > 0) HorizontalDivider(color = Rule)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -39,6 +39,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
         snapshot.processes.forEachIndexed { index, process ->
             if (index > 0) HorizontalDivider(color = Rule)
             MetricRow(process.name, percent(process.cpu), "PID ${process.pid} · ${bytes(process.memoryBytes)} RAM")
+            onStop?.let { stop -> OutlinedButton(onClick = { stop(process) }, enabled = process.pid > 4) { Text("Stop process") } }
         }
     }
 }

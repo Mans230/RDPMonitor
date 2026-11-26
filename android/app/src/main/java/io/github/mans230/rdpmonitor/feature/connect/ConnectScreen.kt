@@ -22,6 +22,10 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     var address by rememberSaveable { mutableStateOf("") }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { PulseMark(); Text("RDPMonitor", style = MaterialTheme.typography.titleLarge) }
+        if (state.snapshot != null && state.connectionScreen) {
+            TextButton(onClick = model::closeConnections) { Text("Back to ${if (state.demo) "demo" else state.selected?.name ?: "monitor"}") }
+            Notice(if (state.demo) "Choose a server below, or return to the demo." else "Your current server session is kept. Opening this screen does not sign you out.")
+        }
         PageTitle("Connect your server", "Windows monitoring and control, through your private network.")
         Notice("Connect Tailscale on this device. Sign-in uses your saved passkey; new keys require your approval in Telegram.")
         Section("Private connection") {

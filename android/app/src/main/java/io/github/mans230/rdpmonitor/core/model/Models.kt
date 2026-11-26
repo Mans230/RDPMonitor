@@ -8,7 +8,8 @@ data class ServerProfile(val id: String = UUID.randomUUID().toString(), val name
 
 @Serializable
 data class AppSession(val profileId: String, val origin: String, val cookie: String, val csrf: String,
-                      val actor: String, val expiresAt: Long, val idleSeconds: Int = 1800)
+                      val actor: String, val expiresAt: Long, val idleSeconds: Int = 1800,
+                      val scope: String = "monitoring:read")
 
 data class ResourcePoint(val secondsAgo: Int, val cpu: Double?, val ram: Double?)
 data class ProcessRow(val pid: Int, val name: String, val cpu: Double?, val memoryBytes: Long?)
@@ -20,9 +21,11 @@ data class Snapshot(val host: String, val cpu: Double?, val ram: Double?, val ra
 data class TrafficDay(val label: String, val downloadBytes: Long, val uploadBytes: Long) {
     val totalBytes get() = downloadBytes + uploadBytes
 }
-data class Traffic(val days: List<TrafficDay>, val quotaBytes: Long?) {
-    val downloadBytes get() = days.sumOf { it.downloadBytes }
-    val uploadBytes get() = days.sumOf { it.uploadBytes }
+data class Traffic(val days: List<TrafficDay>, val quotaBytes: Long?, val cycleStart: String? = null,
+                   val cycleEnd: String? = null, val scope: String? = null) {
+    private val billingDays get() = days.filter { (cycleStart == null || it.label >= cycleStart) && (cycleEnd == null || it.label < cycleEnd) }
+    val downloadBytes get() = billingDays.sumOf { it.downloadBytes }
+    val uploadBytes get() = billingDays.sumOf { it.uploadBytes }
     val totalBytes get() = downloadBytes + uploadBytes
     val quotaFraction get() = quotaBytes?.takeIf { it > 0 }?.let { totalBytes.toDouble() / it }
 }
