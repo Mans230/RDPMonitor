@@ -12,12 +12,25 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import io.github.mans230.rdpmonitor.core.model.Snapshot
+import io.github.mans230.rdpmonitor.AppState
+import io.github.mans230.rdpmonitor.data.DemoDocuments
+import io.github.mans230.rdpmonitor.feature.more.backupDetails
+import kotlinx.serialization.json.*
 import io.github.mans230.rdpmonitor.ui.components.*
 import io.github.mans230.rdpmonitor.ui.theme.*
 
-/** Resource summary stays above the in-flow dock on every function view. */
-@Composable fun OverviewScreen(snapshot: Snapshot) {
+/** Resource summary belongs only to the Overview route. */
+@Composable fun OverviewScreen(snapshot: Snapshot, state: AppState) {
     PageTitle("Server overview", snapshot.host)
+    fun document(path: String) = if (state.demo) DemoDocuments.at(path) else state.documents[path]
+    val backup = backupDetails(document("/api/backup"), document("/api/setup"))
+    val uptime = ((document("/api/sysinfo") as? JsonObject)?.get("uptime_s") as? JsonPrimitive)?.doubleOrNull
+    Section("Server status") {
+        MetricRow("Server uptime", uptimeText(uptime))
+        MetricRow("Latest backup result", backup.result)
+        if (!state.demo && !state.administration) Text("Uptime and backup details require administration approval.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        listOf("/api/sysinfo", "/api/backup").forEach { path -> state.documentErrors[path]?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodySmall) } }
+    }
     BoxWithConstraints {
         val narrow = maxWidth < 280.dp
         val density = LocalDensity.current

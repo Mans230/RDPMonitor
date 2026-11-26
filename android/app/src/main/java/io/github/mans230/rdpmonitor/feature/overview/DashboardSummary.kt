@@ -35,3 +35,10 @@ fun backupLead(setup: JsonElement?, status: JsonElement?): BackupLead {
     }
     return BackupLead(value, description, lastText)
 }
+
+/** Sampled server duration; never substitute phone uptime or invent a live timer. */
+fun uptimeText(seconds: Double?): String {
+    if (seconds == null || !seconds.isFinite() || seconds < 0 || seconds >= Long.MAX_VALUE.toDouble()) return "Unavailable"
+    val total = seconds.toLong()
+    return "${total / 86400}d ${(total % 86400) / 3600}h ${(total % 3600) / 60}m"
+}
