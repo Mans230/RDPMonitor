@@ -20,6 +20,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.ui.platform.testTag
@@ -127,9 +130,9 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     }
 }
 
-@Composable fun CossPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+@Composable fun CossPanel(modifier: Modifier = Modifier, inset: Dp = 20.dp, content: @Composable ColumnScope.() -> Unit) {
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = Ground, border = BorderStroke(1.dp, Rule)) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
+        Column(Modifier.padding(inset), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
     }
 }
 
@@ -148,10 +151,11 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 
 @Composable fun CossField(label: String, value: String, onValueChange: (String) -> Unit, hint: String? = null, enabled: Boolean = true,
                           singleLine: Boolean = true, modifier: Modifier = Modifier, placeholder: String? = null,
-                          keyboardOptions: KeyboardOptions = KeyboardOptions.Default, visualTransformation: VisualTransformation = VisualTransformation.None) {
+                          keyboardOptions: KeyboardOptions = KeyboardOptions.Default, visualTransformation: VisualTransformation = VisualTransformation.None,
+                          labelStyle: TextStyle = MaterialTheme.typography.labelLarge) {
     var focused by remember { mutableStateOf(false) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, style = MaterialTheme.typography.labelLarge)
+        Text(label, style = labelStyle)
         val phone = LocalConfiguration.current.screenWidthDp < 640
         val ink = if (enabled) Signal else Muted
         BasicTextField(value, onValueChange, modifier = Modifier.fillMaxWidth().heightIn(min = if (phone) 36.dp else 32.dp)
@@ -164,7 +168,8 @@ import io.github.mans230.rdpmonitor.ui.theme.*
             decorationBox = { inner ->
                 Surface(shape = RoundedCornerShape(8.dp), border = BorderStroke(if (focused) 3.dp else 1.dp, if (focused) Signal.copy(alpha = .3f) else InputRule), color = androidx.compose.ui.graphics.Color.Transparent) {
                     Box(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 7.dp)) {
-                        if (value.isEmpty() && placeholder != null) Text(placeholder, color = Muted, style = MaterialTheme.typography.bodyMedium)
+                        if (value.isEmpty() && placeholder != null) Text(placeholder, color = Muted, maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+                            overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium.copy(fontSize = if (phone) 16.sp else 14.sp))
                         inner()
                     }
                 }

@@ -59,6 +59,7 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
     }
     fun signOutApp(): Boolean {
         if (_state.value.actionBusy || _state.value.busy) return false
+        cancelPairing()
         val sessions = store.profiles().mapNotNull { profile -> store.session(profile.id)?.let { profile to it } }
         store.clearSessions()
         appIdentityChanged()
@@ -72,7 +73,7 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
     fun cancelPairing() { store.pending(null); store.pendingUrl(null); _state.update { it.copy(pairingCode = null, pairingUrl = null, pairingExpiresAt = 0, message = null) } }
     fun expirePairing() {
         if (_state.value.pairingUrl != null && System.currentTimeMillis() >= _state.value.pairingExpiresAt) {
-            cancelPairing(); _state.update { it.copy(message = "Pairing expired. Check the connection to start a new request.") }
+            cancelPairing(); _state.update { it.copy(message = "Approval expired. Connect again.") }
         }
     }
     fun reconnect(management: Boolean = false) {
@@ -121,7 +122,7 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
                         if (!forcePair && session != null && session.scope == scope && session.origin == profile.origin && session.expiresAt > System.currentTimeMillis()) {
                             refresh(profile)
                         } else if (!health.value.pairingAvailable) {
-                            _state.update { it.copy(message = "Server reachable. Native app pairing is not enabled on this server yet. You can open the secure web panel below.") }
+                            _state.update { it.copy(message = "Update the server suite to enable app pairing.") }
                         } else when (val launch = api.beginPairing(profile, scope)) {
                             is DataResult.Ready -> {
                                 store.pending(launch.value.pending)
@@ -129,7 +130,7 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
                                 val code = BrowserPairing.matchCode(BrowserPairing.challenge(launch.value.pending.verifier))
                                 _state.update { it.copy(pairingCode = code, pairingUrl = launch.value.url, message = null, pairingExpiresAt = launch.value.pending.createdAt + 600_000) }
                             }
-                            else -> _state.update { it.copy(message = "This server cannot pair the native app yet. Open the secure web panel to continue.") }
+                            else -> _state.update { it.copy(message = "App pairing is unavailable on this server.") }
                         }
                     }
                     is DataResult.Failed -> _state.update { it.copy(message = health.message) }

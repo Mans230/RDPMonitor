@@ -59,9 +59,9 @@ class AppJourneyTest {
     }
 
     @Test fun serverChooserReturnsToMonitorInsteadOfForcingLogin() {
-        ui.onNodeWithText("Explore offline demo").performScrollTo().performClick()
+        preview()
         ui.onNodeWithContentDescription("Server connections").performClick()
-        ui.onNodeWithText("Back to demo").assertIsDisplayed().performClick()
+        ui.onNodeWithContentDescription("Go back").assertIsDisplayed().performClick()
         ui.onNodeWithText("Server overview").assertExists()
         ui.runOnIdle { check(model.state.value.demo); check(!model.state.value.connectionScreen) }
         screenshot("390-overview")
@@ -80,12 +80,17 @@ class AppJourneyTest {
         }
         check(readable > 15) { "Dark default text became invisible on the transparent app surface." }
     }
-    @Test fun welcomeExplainsGoogleAndPrivateConnectorsBeforeNavigation() {
-        ui.onNodeWithText("Continue with Google").assertExists()
+    @Test fun welcomeAndGoogleAreSeparateCleanPagesWithBackNavigation() {
+        ui.onNodeWithText("Get started").assertIsDisplayed()
+        ui.onNodeWithText("Continue with Google").assertDoesNotExist()
+        ui.onNodeWithText("Explore offline demo").assertDoesNotExist()
         screenshot("390-welcome")
-        ui.onNodeWithText("Use a private workspace without Google").performScrollTo().performClick()
-        ui.onNodeWithText("Your RDP connectors").assertIsDisplayed()
-        screenshot("390-connectors")
+        ui.onNodeWithText("Get started").performClick()
+        ui.onNodeWithText("Continue with Google").assertIsDisplayed()
+        ui.onNodeWithText("Use a private workspace without Google").assertDoesNotExist()
+        screenshot("390-google-signin")
+        ui.onNodeWithContentDescription("Go back").performClick()
+        ui.onNodeWithText("Get started").assertIsDisplayed()
         ui.runOnIdle { check(!model.state.value.connected); check(model.state.value.review == null) }
     }
     @Test fun connectorsAreIsolatedBetweenGoogleAccountsAndLegacyPrivateWorkspace() {
