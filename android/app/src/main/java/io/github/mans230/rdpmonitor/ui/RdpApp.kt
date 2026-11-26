@@ -45,7 +45,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     val snapshot = state.snapshot
     if (snapshot == null || state.connectionScreen) {
         BackHandler(enabled = snapshot != null && state.connectionScreen) { model.closeConnections() }
-        Surface(color = Color.Transparent) { ConnectScreen(state, model, openBrowser, Modifier.safeDrawingPadding()) }
+        Surface(color = Color.Transparent) { ConnectScreen(state, model, openBrowser) }
         return
     }
     val selected = detail?.let { name -> Feature.entries.firstOrNull { it.name == name } }
@@ -96,6 +96,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(if (state.demo) "Sample data" else state.selected?.name ?: snapshot.host, Modifier.weight(1f), color = Muted, fontSize = 12.sp)
                         IconButton(onClick = { detail = null; model.connectScreen() }) { Icon(Icons.Outlined.Dns, "Server connections") }
+                        LocalAppAccount.current?.let { account -> IconButton(onClick = account, enabled = !state.busy && !state.actionBusy) { Icon(Icons.Outlined.AccountCircle, "Account") } }
                         if (!state.demo) IconButton(onClick = {
                             model.refresh()
                             if (isOverview && state.administration) model.loadDocuments(listOf("/api/backup", "/api/sysinfo"))

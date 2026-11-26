@@ -1,96 +1,116 @@
 package io.github.mans230.rdpmonitor.feature.connect
 
+import android.content.ClipboardManager
+import android.content.ClipData
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalContext
-import android.content.ClipboardManager
-import android.content.ClipData
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.mans230.rdpmonitor.*
+import io.github.mans230.rdpmonitor.core.security.PrivateOrigin
 import io.github.mans230.rdpmonitor.ui.components.*
 import io.github.mans230.rdpmonitor.ui.theme.*
+import kotlinx.coroutines.delay
 
-@Composable fun ConnectScreen(state: AppState, model: RdpViewModel, openBrowser: (String) -> Unit, modifier: Modifier = Modifier) {
+internal fun serverFormError(name: String, address: String): String? = when {
+    name.isBlank() -> "Enter a server name."
+    name.trim().length > 60 -> "Use 60 characters or fewer for the name."
+    runCatching { PrivateOrigin.parse(address) }.isFailure -> "Use your server's private HTTPS .ts.net address."
+    else -> null
+}
+
+@Composable fun ConnectScreen(state: AppState, model: RdpViewModel, openBrowser: (String) -> Unit, modifier: Modifier = Modifier,
+                              connect: (String, String) -> Unit = { name, address -> model.connect(name, address) }) {
     var name by rememberSaveable(state.selected?.id) { mutableStateOf(state.selected?.name.orEmpty()) }
     var address by rememberSaveable(state.selected?.id) { mutableStateOf(state.selected?.origin.orEmpty()) }
-    val scroll = rememberScrollState()
-    val coroutine = rememberCoroutineScope()
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var saved by rememberSaveable { mutableStateOf(false) }
     val clipboard = LocalContext.current.getSystemService(ClipboardManager::class.java)
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val approvalView = remember { BringIntoViewRequester() }
     val available = !state.busy && !state.actionBusy
+    val labelSize = if (LocalConfiguration.current.screenWidthDp < 640) 16.sp else 14.sp
+    val back = LocalOnboardingBack.current
     LaunchedEffect(state.pairingUrl, state.pairingExpiresAt) {
         if (state.pairingUrl != null) { delay((state.pairingExpiresAt - System.currentTimeMillis()).coerceAtLeast(0)); model.expirePairing() }
     }
-    Column(modifier.fillMaxSize().verticalScroll(scroll).padding(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { PulseMark(); Text("RDPMonitor", style = MaterialTheme.typography.titleLarge) }
-        if (state.snapshot != null && state.connectionScreen) {
-            CossTextButton(onClick = model::closeConnections) { Text("Back to ${if (state.demo) "demo" else state.selected?.name ?: "monitor"}") }
-            Notice(if (state.demo) "Choose a server below, or return to the demo." else if (state.connected) "Your current server session is kept. Opening this screen does not sign you out." else "The previous readings are stale. Sign in again to resume monitoring.")
-        }
-        PageTitle("Your RDP connectors", "Add a server's private HTTPS address. Each connector keeps its own authorization.")
-        if (state.actionBusy) Notice("A server operation is still running. Return to the monitor to see progress before changing servers.")
-        Notice("Connect Tailscale on this device. Sign-in uses your saved passkey; new keys require your approval in Telegram.")
-        Section("Private connection") {
-            Text("Access requested", style = MaterialTheme.typography.titleMedium)
-            listOf("monitoring:read", "administration").forEach { scope ->
-                Row(Modifier.fillMaxWidth().clickable(enabled = available) { model.chooseScope(scope) }.heightIn(min = 48.dp)) {
-                    RadioButton(selected = state.requestedScope == scope, onClick = { model.chooseScope(scope) }, enabled = available)
-                    Column(Modifier.weight(1f).padding(top = 10.dp)) {
-                        Text(scopeTitle(scope))
-                        Text(if (scope == "administration") "Manage server settings and operations after confirmation" else "Read monitoring data without management permissions", color = Muted, style = MaterialTheme.typography.bodySmall)
+    LaunchedEffect(state.pairingUrl) {
+        if (state.pairingUrl != null) { withFrameNanos { }; approvalView.bringIntoView() }
+    }
+    Box(modifier) {
+        OnboardingScaffold(onBack = { if (available) { if (state.snapshot != null) model.closeConnections() else back() } }, actions = {
+            if (state.profiles.isNotEmpty()) IconButton(onClick = { saved = true }, enabled = available, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.Dns, "Saved servers", Modifier.size(18.dp)) }
+        }, footer = {
+            if (state.pairingUrl != null) OnboardingPrimary("Continue in browser", { openBrowser(state.pairingUrl) }, available)
+            else OnboardingPrimary("Connect server", {
+                error = serverFormError(name, address)
+                if (error == null) { focus.clearFocus(); keyboard?.hide(); connect(name.trim(), address.trim()) }
+            }, available)
+        }) {
+            OnboardingBody {
+                Spacer(Modifier.height(31.dp))
+                OnboardingMark(small = true); Spacer(Modifier.height(22.dp))
+                OnboardingHeadline("Add your server.", server = true); Spacer(Modifier.height(32.dp))
+                BoxWithConstraints {
+                val panelInset = if (maxWidth < 310.dp) 17.dp else 20.dp
+                Surface(color = androidx.compose.ui.graphics.lerp(Ground, Tray, .72f), shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.padding(4.dp)) {
+                        CossPanel(inset = panelInset) {
+                            Column(verticalArrangement = Arrangement.spacedBy(25.dp)) {
+                                CossField("Server name", name, { name = it; error = null; model.clearMessage() }, placeholder = "Work server", labelStyle = MaterialTheme.typography.labelLarge.copy(fontSize = labelSize), enabled = available && state.pairingUrl == null)
+                                CossField("Server address", address, { address = it; error = null; model.clearMessage() }, placeholder = "https://server.tailnet.ts.net", labelStyle = MaterialTheme.typography.labelLarge.copy(fontSize = labelSize),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = available && state.pairingUrl == null)
+                            }
+                        }
                     }
                 }
-            }
-            CossField(value = name, onValueChange = { name = it }, label = "Server name", singleLine = true,
-                modifier = Modifier.fillMaxWidth(), enabled = available && state.pairingUrl == null)
-            CossField(value = address, onValueChange = { address = it }, label = "Private HTTPS address",
-                placeholder = "https://server.tailnet.ts.net", singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth(), enabled = available && state.pairingUrl == null)
-            state.message?.let { Notice(it) }
-            MotionButton(onClick = { model.connect(name, address) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                enabled = available && state.pairingUrl == null, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onSurface, contentColor = Ground)) {
-                if (state.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Ground)
-                else Text("Check private connection")
-            }
-            state.pairingUrl?.let { url ->
-                Text("Ready to approve ${scopeTitle(state.requestedScope).lowercase()} access", style = MaterialTheme.typography.titleMedium)
-                Text(state.pairingCode.orEmpty(), style = ReadingStyle)
-                Text("Read or copy this code first. In the browser, sign in with your existing Passkey, compare the code, then approve. Return here automatically after approval.", color = Muted)
-                CossTextButton(onClick = { clipboard.setPrimaryClip(ClipData.newPlainText("Pairing code", state.pairingCode.orEmpty())) }) { Text("Copy pairing code") }
-                CossButton(onClick = { openBrowser(url) }, modifier = Modifier.fillMaxWidth()) { Text("Continue in browser") }
-                Text("Waiting for approval · request expires after 10 minutes", color = Muted)
-                CossOutlinedButton(onClick = model::cancelPairing) { Text("Cancel pairing") }
-            }
-            state.selected?.let { profile ->
-                CossTextButton(onClick = { openBrowser(profile.origin + "/") }, modifier = Modifier.fillMaxWidth()) { Text("Open secure web panel") }
+                }
+                (error ?: state.message)?.let { Spacer(Modifier.height(18.dp)); Text(it, style = MaterialTheme.typography.bodyMedium) }
+                if (state.actionBusy) { Spacer(Modifier.height(12.dp)); Text("Finish the current server operation first.", color = Muted) }
+                state.pairingUrl?.let {
+                    Spacer(Modifier.height(18.dp))
+                    CossFrame("Approve connection", scopeTitle(state.requestedScope)) { CossPanel {
+                        Text(state.pairingCode.orEmpty(), Modifier.bringIntoViewRequester(approvalView), style = ReadingStyle.copy(fontSize = 20.sp))
+                        Text("Match this code in the browser, then approve.", color = Muted)
+                        CossTextButton(onClick = { clipboard.setPrimaryClip(ClipData.newPlainText("Pairing code", state.pairingCode.orEmpty())) }) { Text("Copy code") }
+                        CossTextButton(onClick = model::cancelPairing) { Text("Cancel pairing") }
+                    } }
+                }
+                if (state.message != null && state.selected != null && state.pairingUrl == null) CossTextButton(onClick = { openBrowser(state.selected.origin + "/") }) { Text("Open web panel") }
+                Spacer(Modifier.height(16.dp))
             }
         }
-        if (state.profiles.isNotEmpty()) {
-            Section("Saved servers", "Addresses are stored on this device. No bot token is needed.") {
+        if (saved) CossDialog(onDismissRequest = { saved = false }, title = { Text("Saved servers") }, text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 state.profiles.forEach { profile ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Column(Modifier.weight(1f).clickable(enabled = available) { model.cancelPairing(); name = profile.name; address = profile.origin; coroutine.launch { scroll.animateScrollTo(0) } }.padding(vertical = 8.dp)) {
-                            Text(profile.name, style = MaterialTheme.typography.bodyLarge)
-                            Text(profile.origin.removePrefix("https://"), color = Muted, style = MaterialTheme.typography.bodyMedium)
-                            Text(if (address == profile.origin) "Selected above" else "Tap to select this server", color = Signal, style = MaterialTheme.typography.bodySmall)
+                        Column(Modifier.weight(1f).testTag("saved-server-${profile.id}").clickable(enabled = available) {
+                            model.cancelPairing(); name = profile.name; address = profile.origin; error = null; saved = false
+                        }.padding(vertical = 8.dp)) {
+                            Text(profile.name); Text(profile.origin.removePrefix("https://"), color = Muted, style = MaterialTheme.typography.bodySmall)
                         }
                         IconButton(onClick = { model.remove(profile) }, enabled = available) { Icon(Icons.Outlined.Close, "Remove saved server ${profile.name}") }
                     }
                 }
             }
-        }
-        CossOutlinedButton(onClick = model::preview, enabled = available, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Explore offline demo") }
-        Text("The demo uses labelled sample data and cannot change a server.", color = Muted, style = MaterialTheme.typography.bodyMedium)
+        }, confirmButton = { CossOutlinedButton(onClick = { saved = false }, modifier = Modifier.fillMaxWidth()) { Text("Done") } })
     }
 }
