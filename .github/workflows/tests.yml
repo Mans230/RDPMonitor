@@ -45,8 +45,11 @@ jobs:
           java-version: '21'
           cache: gradle
           cache-dependency-path: android/**/*.gradle.kts
-      - name: Install Android compile SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - name: Set up Android SDK and compile tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          cmdline-tools-version: '12266719'
+          packages: 'platform-tools platforms;android-36 build-tools;35.0.0'
       - name: Run Android checks without a physical device
         working-directory: android
         run: bash gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
