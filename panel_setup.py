@@ -66,6 +66,8 @@ class SetupService:
                           "backup_targets": cfg.get("cloud", {}).get("remotes", []),
                           "folder": cfg.get("cloud", {}).get("remote_folder", "VPS-Backups")},
                 "backup": {"sources": cfg.get("backup", {}).get("sources", []),
+                           "retention_editable": True,
+                           "keep_local_copies": cfg.get("backup", {}).get("keep_local_copies", 1),
                            "schedule": cfg.get("schedule", {}),
                            "timezone": time.tzname[0]},
                 "images": {"enabled": bool(m.config.get("image_enabled")), "files": images,
@@ -261,6 +263,9 @@ class SetupService:
             if mode not in {"daily", "interval", "times"} or not isinstance(a.get("enabled"), bool):
                 raise ValueError("Choose a schedule mode and enabled state.")
             cm, cfg = m._backup_cfg()
+            retention = a.get("keep_local_copies")
+            if retention is not None and (type(retention) is not int or not 1 <= retention <= 1000):
+                raise ValueError("Local retention must be a whole number from 1 to 1000 copies.")
             schedule = dict(cfg.get("schedule", {}), enabled=a["enabled"], mode=mode)
             if mode == "interval":
                 hours = int(a.get("value", 0))
@@ -278,8 +283,10 @@ class SetupService:
                     times.append(part.strip())
                 schedule["time" if mode == "daily" else "times"] = times[0] if mode == "daily" else sorted(set(times))
             cfg["schedule"] = schedule
+            if retention is not None:
+                cfg.setdefault("backup", {})["keep_local_copies"] = retention
             cm.save_config(cfg)
-            return "Schedule saved in the server timezone; the worker reloads it automatically."
+            return "Backup policy saved in the server timezone; the worker reloads it automatically. Retention applies on future backups."
         if op.startswith("image_"):
             if op == "image_link":
                 path = a.get("path")

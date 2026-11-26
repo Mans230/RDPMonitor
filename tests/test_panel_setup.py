@@ -50,6 +50,20 @@ class SetupTests(unittest.TestCase):
             with self.assertRaises(ValueError):self.s.execute(args,'x')
         self.m._rclone_run.assert_not_called()
 
+    def test_backup_policy_validates_before_saving_schedule_and_retention_together(self):
+        for value in (0, -1, 1001, True, "3", 1.5):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.s.execute({'op':'schedule','mode':'daily','value':'03:00','enabled':True,'keep_local_copies':value},'x')
+        with self.assertRaises(ValueError):
+            self.s.execute({'op':'schedule','mode':'daily','value':'25:00','enabled':True,'keep_local_copies':3},'x')
+        self.cm.save_config.assert_not_called()
+        self.s.execute({'op':'schedule','mode':'daily','value':'03:00','enabled':True,'keep_local_copies':7},'x')
+        saved = self.cm.save_config.call_args.args[0]
+        self.assertEqual(saved['backup']['keep_local_copies'],7)
+        self.assertEqual(saved['backup']['sources'],['old'])
+        self.assertEqual(saved['schedule']['retry_count'],7)
+        self.assertEqual(saved['schedule']['time'],'03:00')
+
     def test_provider_options_cannot_inject_shell_commands(self):
         with self.assertRaises(ValueError):
             self.s.execute({'op':'create','name':'fresh','provider':'sftp','options':{'ssh':'powershell evil'}},'x')

@@ -184,7 +184,7 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
                     Text("${label(key)}: ${(value as? JsonPrimitive)?.content ?: value.toString()}", style = MaterialTheme.typography.bodyMedium)
                 }
             }
-        }, confirmButton = { CossTextButton(onClick = model::confirmAction) { Text("Confirm and run") } }, dismissButton = { CossTextButton(onClick = model::cancelReview) { Text("Cancel") } })
+        }, confirmButton = { CossButton(onClick = model::confirmAction, modifier = Modifier.fillMaxWidth()) { Text("Confirm and run") } }, dismissButton = { CossOutlinedButton(onClick = model::cancelReview, modifier = Modifier.fillMaxWidth()) { Text("Cancel") } })
     }
 }
 

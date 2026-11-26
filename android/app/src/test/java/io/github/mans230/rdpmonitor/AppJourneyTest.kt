@@ -141,7 +141,7 @@ class AppJourneyTest {
         dock("Backups")
         ui.onNodeWithTag("page-title-Backups").assertIsDisplayed()
         ui.onNodeWithTag("page-title-Server overview").assertDoesNotExist()
-        workspace("Back up now")
+        workspace("Back up selected folders")
         dock("Protect")
         ui.onNodeWithTag("page-title-Protection").assertIsDisplayed()
         ui.onNodeWithTag("page-title-Backups").assertDoesNotExist()
@@ -162,8 +162,8 @@ class AppJourneyTest {
         workspace("Run diagnostic")
         ui.onNodeWithText("Run diagnostic").assertIsNotEnabled()
         screenshot("390-diagnostics-demo")
-        dock("Backups"); workspace("Back up now")
-        ui.onNodeWithText("Back up now").assertIsNotEnabled()
+        dock("Backups"); workspace("Back up selected folders")
+        ui.onNodeWithText("Back up selected folders").assertIsNotEnabled()
         ui.runOnIdle { check(!model.state.value.actionBusy); check(model.state.value.review == null) }
     }
     @Test fun backupNumbersStayWithTheirRunArchiveAndRetentionLabels() {
@@ -171,16 +171,21 @@ class AppJourneyTest {
         ui.onNodeWithText("Files processed in the latest run").assertIsDisplayed()
         ui.onNodeWithText("42").assertIsDisplayed()
         ui.onNodeWithText("No job running").assertExists()
-        workspace("Stored archives")
-        ui.onNodeWithText("Archive size").assertIsDisplayed()
+        workspace("Local archives")
+        ui.onNodeWithTag("archive-0").performClick()
+        ui.onNodeWithText("Size").assertIsDisplayed()
         ui.onNodeWithText("500 MiB").assertIsDisplayed()
-        ui.onNodeWithText("Archive last modified").assertExists()
+        ui.onNodeWithText("Exact bytes").assertIsDisplayed()
+        ui.onNodeWithText("524,288,000").assertIsDisplayed()
+        ui.onNode(hasText("Done") and hasClickAction()).assertIsEnabled()
+        screenshot("390-backup-archive-sheet")
+        ui.onNode(hasText("Done") and hasClickAction()).performClick()
         ui.onNodeWithText("Worker").assertDoesNotExist()
         screenshot("390-backup-archives")
         workspace("Local retention")
-        ui.onNodeWithText("Up to 3 local copies").assertIsDisplayed()
+        ui.onNodeWithText("3 copies maximum").assertIsDisplayed()
         screenshot("390-backup-plan")
-        workspace("Back up now"); ui.onNodeWithText("Back up now").assertIsNotEnabled()
+        workspace("Back up selected folders"); ui.onNodeWithText("Back up selected folders").assertIsNotEnabled()
     }
 
     @Test @Config(qualifiers = "w320dp-h740dp-mdpi") fun narrowPhoneCanReachWorkspaceAndAppearance() {
@@ -192,9 +197,9 @@ class AppJourneyTest {
         ui.onNodeWithText("Choose background image").assertIsDisplayed()
         ui.onNodeWithText("Remove background").assertIsNotEnabled()
         screenshot("320-appearance")
-        ui.onNodeWithText("Done").performClick()
+        ui.onNode(hasText("Done") and hasClickAction()).performClick()
         dock("Backups"); workspace("Backup policy"); screenshot("320-backup-policy")
-        workspace("Stored archives"); screenshot("320-backup-archives")
+        workspace("Local archives"); screenshot("320-backup-archives")
     }
 
     @Test @Config(qualifiers = "w768dp-h1024dp-mdpi") fun tabletShowsResourcesAndWorkspace() {

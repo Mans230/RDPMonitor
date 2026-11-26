@@ -78,6 +78,6 @@ internal fun matchingProcesses(rows: List<ProcessRow>, query: String, high: Bool
                 if (!stillReported) Text("This process is no longer in the current sample. Refresh before reviewing a change.")
                 CossOutlinedButton(onClick = { inspected = null; onStop?.invoke(row) }, enabled = row.pid > 4 && stillReported && onStop != null) { Text("Review stop PID ${row.pid}") }
             }
-        }, confirmButton = { CossTextButton(onClick = { inspected = null }) { Text("Done") } })
+        }, confirmButton = { CossOutlinedButton(onClick = { inspected = null }, modifier = Modifier.fillMaxWidth()) { Text("Done") } })
     }
 }

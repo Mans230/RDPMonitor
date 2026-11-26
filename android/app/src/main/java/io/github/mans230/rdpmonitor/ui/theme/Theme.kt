@@ -22,6 +22,7 @@ val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
 val Signal: Color @Composable get() = MaterialTheme.colorScheme.onSurface
 val Warning: Color @Composable get() = Signal
 val Tray: Color @Composable get() = MaterialTheme.colorScheme.surfaceContainer
+val InputRule: Color @Composable get() = if (LocalDarkAppearance.current) Color(0xFF292929) else Color(0xFFE5E5E5)
 val LocalDarkAppearance = staticCompositionLocalOf { true }
 val LocalToggleAppearance = staticCompositionLocalOf<() -> Unit> { {} }
 @OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
@@ -39,7 +40,7 @@ val ReadingStyle = TextStyle(fontFamily = InterfaceFont, fontFeatureSettings = "
     val ink = if (dark) Color(0xFFF5F5F5) else Color(0xFF262626)
     val muted = if (dark) Color(0xFFA3A3A3) else Color(0xFF666666)
     val tray = if (dark) Color(0xFF202020) else Color(0xFFF5F5F5)
-    val rule = if (dark) Color(0xFF333333) else Color(0xFFE6E6E6)
+    val rule = if (dark) Color(0xFF242424) else Color(0xFFEBEBEB)
     val raised = if (dark) Color(0xFF303030) else Color(0xFFECECEC)
     val scheme = (if (dark) darkColorScheme() else lightColorScheme()).copy(
         primary = ink, onPrimary = ground, background = ground, onBackground = ink,
@@ -63,11 +64,11 @@ val ReadingStyle = TextStyle(fontFamily = InterfaceFont, fontFeatureSettings = "
     MaterialTheme(colorScheme = scheme,
         shapes = Shapes(extraSmall = RoundedCornerShape(6.dp), small = RoundedCornerShape(6.dp),
             medium = RoundedCornerShape(10.dp), large = RoundedCornerShape(12.dp), extraLarge = RoundedCornerShape(8.dp)),
-        typography = Typography(titleLarge = TextStyle(fontFamily = InterfaceFont, fontSize = 24.sp, fontWeight = FontWeight.Medium),
-            titleMedium = TextStyle(fontFamily = InterfaceFont, fontSize = 16.sp, fontWeight = FontWeight.Medium),
+        typography = Typography(titleLarge = TextStyle(fontFamily = InterfaceFont, fontSize = 23.sp, fontWeight = FontWeight.SemiBold),
+            titleMedium = TextStyle(fontFamily = InterfaceFont, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
             bodyLarge = TextStyle(fontFamily = InterfaceFont, fontSize = 14.sp, lineHeight = 21.sp), bodyMedium = TextStyle(fontFamily = InterfaceFont, fontSize = 13.sp, lineHeight = 19.sp),
             bodySmall = TextStyle(fontFamily = InterfaceFont, fontSize = 12.sp, lineHeight = 17.sp),
-            labelLarge = TextStyle(fontFamily = InterfaceFont, fontSize = 13.sp, fontWeight = FontWeight.Medium)),
+            labelLarge = TextStyle(fontFamily = InterfaceFont, fontSize = 14.sp, fontWeight = FontWeight.Medium)),
         content = { CompositionLocalProvider(LocalContentColor provides ink, LocalDarkAppearance provides dark,
             LocalToggleAppearance provides { dark = !dark; preferences.edit().putBoolean("dark", dark).apply() }) { content() } })
 }
