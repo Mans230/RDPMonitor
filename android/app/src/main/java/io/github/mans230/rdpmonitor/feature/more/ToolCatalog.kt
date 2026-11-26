@@ -4,6 +4,8 @@ import kotlinx.serialization.json.*
 
 data class ToolField(val key: String, val label: String, val kind: String = "text", val options: List<String> = emptyList(), val optional: Boolean = false)
 data class Tool(val title: String, val effect: String, val action: String, val fixed: Map<String, String> = emptyMap(), val fields: List<ToolField> = emptyList()) {
+    val dangerous get() = action in setOf("reboot", "shutdown", "restore", "kill", "logoff", "set_rdp_port", "block_subnet") ||
+        action == "rdp" && fixed["op"] in setOf("panic", "lockdown", "rdp_allow_apply", "rdp_allow_clear")
     fun visibleFields(values: Map<String, String>) = fields.filter { !it.key.startsWith("options.") || it.key.removePrefix("options.") in providerOptions(values["provider"].orEmpty()) }
     fun safeArguments(body: JsonObject): JsonObject {
         fun redact(value: JsonElement, path: String = ""): JsonElement = when (value) {
@@ -24,7 +26,7 @@ data class Tool(val title: String, val effect: String, val action: String, val f
             val value = values[field.key].orEmpty().trim()
             require(field.optional || value.isNotEmpty()) { "${field.label} is required." }
             require(value.length <= 16000) { "${field.label} is too long." }
-            if (field.options.isNotEmpty()) require(value in field.options) { "Choose ${field.label}." }
+            if (field.options.isNotEmpty() && value.isNotEmpty()) require(value in field.options) { "Choose ${field.label}." }
             if (field.key.startsWith("options.")) {
                 if (value.isNotEmpty()) options[field.key.removePrefix("options.")] = JsonPrimitive(value)
                 return@forEach
@@ -94,7 +96,7 @@ object ToolCatalog {
             setup("Set OAuth client", "client", f("name", "Existing remote"), f("client_id", "Client ID"), f("client_secret", "Client secret", "secret")),
             setup("Test cloud destination", "test", f("target", "Remote destination")),
             setup("Remove cloud remote", "delete", f("name", "Remote name")),
-            setup("Save cloud destinations", "targets", f("image", "Image target · remote:folder", optional=true), f("backups", "Backup remotes · one per line", "lines"), f("folder", "Backup folder")),
+            setup("Save cloud destinations", "targets", f("image", "Image destination · remote:folder", optional=true), f("backups", "Backup remotes · one remote: per line", "lines"), f("folder", "Backup cloud folder")),
             setup("Create system image", "image_start"), setup("Upload system image", "image_upload", f("path", "Existing image path", "file")),
             setup("Stop image operation", "image_stop"), setup("Send image link to Telegram", "image_link", f("path", "Existing image path", "file")))
         Feature.RdpAccess -> listOf(

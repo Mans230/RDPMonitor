@@ -61,4 +61,6 @@ class DeviceStore(context: Context) {
     fun clearSession(id: String) = put("session:$id", null)
     fun pending(): PendingPairing? = get("pending")?.let { runCatching { json.decodeFromString<PendingPairing>(it) }.getOrNull() }
     fun pending(value: PendingPairing?) = put("pending", value?.let { json.encodeToString(it) })
+    fun pendingUrl(): String? = get("pending-url")
+    fun pendingUrl(value: String?) = put("pending-url", value)
 }
