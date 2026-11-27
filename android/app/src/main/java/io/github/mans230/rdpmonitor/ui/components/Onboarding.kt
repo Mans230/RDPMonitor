@@ -35,6 +35,9 @@ val LocalServerWorkspace = staticCompositionLocalOf<(() -> Unit)?> { null }
                 Icon(CossIcons.Server, null, Modifier.size(21.dp))
                 Text("RDPMonitor", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium.copy(fontSize = if (narrow) 14.sp else 15.sp, letterSpacing = (-.4).sp))
                 actions()
+                if (io.github.mans230.rdpmonitor.BuildConfig.DEBUG) MotionIconButton(onClick = LocalMotionPreview.current, modifier = Modifier.size(44.dp)) {
+                    Icon(Icons.Outlined.PlayCircleOutline, "Motion previews", Modifier.size(18.dp))
+                }
                 val toggle = LocalToggleAppearance.current; val dark = LocalDarkAppearance.current
                 MotionIconButton(onClick = toggle, modifier = Modifier.size(44.dp).offset(x = 7.dp)) {
                     Icon(if (dark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, "Toggle appearance", Modifier.size(18.dp))
@@ -80,7 +83,7 @@ val LocalServerWorkspace = staticCompositionLocalOf<(() -> Unit)?> { null }
     OnboardingScaffold(footer = { OnboardingPrimary("Get started", onStart) }) {
         OnboardingBody(bottomInset = 26, centered = true) {
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Image(serverArtwork(), null, Modifier.widthIn(max = 320.dp).fillMaxWidth().height(if (maxWidth < 310.dp) 215.dp else 240.dp))
+                EngineArtwork(Modifier.widthIn(max = 320.dp).fillMaxWidth().height(if (maxWidth < 310.dp) 215.dp else 240.dp))
             }
             Spacer(Modifier.height(if (narrow) 28.dp else 35.dp))
             Box(Modifier.padding(start = 4.dp)) { OnboardingHeadline("Your servers.\nOne place.") }

@@ -20,6 +20,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.unit.dp
 import com.airbnb.lottie.compose.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import io.github.mans230.rdpmonitor.R
 import io.github.mans230.rdpmonitor.ui.theme.*
 
@@ -67,8 +70,9 @@ fun Modifier.motionClickable(enabled: Boolean = true, onClickLabel: String? = nu
 @Composable fun pageMotion(key: Any?): Modifier {
     val progress = remember { Animatable(1f) }
     val motion = LocalMotionEnabled.current
+    val easing = engineEasing()
     LaunchedEffect(key, motion) {
-        if (motion) { progress.snapTo(0f); progress.animateTo(1f, tween(220, easing = FastOutSlowInEasing)) }
+        if (motion) { progress.snapTo(0f); progress.animateTo(1f, tween(240, easing = easing)) }
         else progress.snapTo(1f)
     }
     return Modifier.graphicsLayer { alpha = progress.value; translationY = (1 - progress.value) * 10.dp.toPx() }
@@ -80,25 +84,29 @@ fun Modifier.motionClickable(enabled: Boolean = true, onClickLabel: String? = nu
     CossButton(onClick, modifier, enabled = enabled, colors = colors, content = content)
 }
 
-@Composable fun LoadingPage(title: String, detail: String) {
+@Composable fun LoadingIndicator(label: String) {
     val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.connection_pulse))
-    val motion = LocalMotionEnabled.current
+    val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val motion = LocalMotionEnabled.current && lifecycle.isAtLeast(Lifecycle.State.STARTED)
     val progress by animateLottieCompositionAsState(composition, isPlaying = motion,
         iterations = LottieConstants.IterateForever)
+    Box(Modifier.size(64.dp).clearAndSetSemantics {
+        testTag = if (composition != null) "lottie-loader" else "loading-fallback"
+        progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+        stateDescription = label
+    }, contentAlignment = Alignment.Center) {
+        if (composition != null) LottieAnimation(composition, progress = { if (motion) progress else .35f }, modifier = Modifier.size(64.dp))
+        else if (motion) CircularProgressIndicator(Modifier.size(38.dp), color = Signal, strokeWidth = 2.dp)
+        ManimGlyph(Modifier.size(18.dp))
+    }
+}
+
+@Composable fun LoadingPage(title: String, detail: String) {
     Surface(color = Ground, modifier = Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 PulseMark()
-                Box(Modifier.size(64.dp).clearAndSetSemantics {
-                    testTag = if (composition != null) "lottie-loader" else "loading-fallback"
-                    progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
-                    stateDescription = title
-                }, contentAlignment = Alignment.Center) {
-                    if (composition != null) LottieAnimation(composition, progress = { if (motion) progress else .35f },
-                        modifier = Modifier.size(64.dp))
-                    else if (!motion) PulseMark()
-                    else CircularProgressIndicator(Modifier.size(32.dp), color = Signal, strokeWidth = 2.dp)
-                }
+                LoadingIndicator(title)
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(detail, color = Muted, style = MaterialTheme.typography.bodyMedium)
             }

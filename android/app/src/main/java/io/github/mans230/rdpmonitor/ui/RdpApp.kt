@@ -163,6 +163,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 @Composable internal fun FunctionDock(selected: Feature?, destination: Destination, overview: () -> Unit,
     open: (Feature) -> Unit, more: () -> Unit, scrolling: Boolean = false) {
     val motion = LocalMotionEnabled.current
+    val easing = engineEasing()
     val dockScale by animateFloatAsState(if (scrolling && motion) .985f else 1f,
         if (motion) spring(dampingRatio = 1f, stiffness = 550f) else snap(), label = "Dock scroll response")
     BoxWithConstraints {
@@ -180,7 +181,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                 }
                 val cell = maxWidth / 5
                 val position by animateDpAsState(cell * activeIndex,
-                    if (motion) spring(dampingRatio = .86f, stiffness = 480f) else snap(), label = "Dock selection position")
+                    if (motion) tween(280, easing = easing) else snap(), label = "Dock selection position")
                 Box(Modifier.matchParentSize()) {
                     Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(position.roundToPx(), 0) }.width(cell).fillMaxHeight()
                         .background(Signal.copy(alpha = .12f), RoundedCornerShape(26.dp)).testTag("dock-indicator"))

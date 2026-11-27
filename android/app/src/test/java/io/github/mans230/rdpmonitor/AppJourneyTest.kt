@@ -72,6 +72,29 @@ class AppJourneyTest {
         check(content.bottom <= navigation.top + 1f)
         screenshot("390-motion-navigation")
     }
+    private fun motionReview(width: Int) {
+        ui.onNodeWithText("Get started").assertIsDisplayed()
+        ui.onNodeWithContentDescription("Motion previews").performClick()
+        ui.onNodeWithText("Server artwork").assertIsDisplayed()
+        ui.onNodeWithText("Pause previews").performClick()
+        ui.onNodeWithText("Play previews").assertIsDisplayed()
+        screenshot("$width-motion-studio-artwork-dark")
+        ui.onNodeWithTag("motion-navigation-preview").performScrollTo()
+        val tab = hasText("Backups") and hasClickAction() and hasAnyAncestor(hasTestTag("motion-navigation-preview"))
+        ui.onNode(tab).performClick().assertIsSelected()
+        screenshot("$width-motion-studio-navigation-dark")
+        ui.runOnIdle { check(!model.state.value.connected); check(model.state.value.snapshot == null); check(model.state.value.review == null) }
+        ui.onNodeWithText("Done").performClick()
+        ui.onNodeWithText("Get started").assertIsDisplayed()
+        ui.onNodeWithContentDescription("Toggle appearance").performClick()
+        ui.onNodeWithContentDescription("Motion previews").performClick()
+        ui.onNodeWithText("Pause previews").performClick()
+        screenshot("$width-motion-studio-artwork-light")
+        ui.onNodeWithText("Done").performClick()
+    }
+    @Test fun motionStudioAt390DoesNotAuthorizeOrExecuteServerActions() = motionReview(390)
+    @Test @Config(qualifiers = "w320dp-h740dp-mdpi") fun motionStudioAt320Fits() = motionReview(320)
+    @Test @Config(qualifiers = "w768dp-h1024dp-mdpi") fun motionStudioAt768Fits() = motionReview(768)
     @Test fun serverChooserReturnsToMonitorInsteadOfForcingLogin() {
         preview()
         ui.onNodeWithContentDescription("Server connections").performClick()

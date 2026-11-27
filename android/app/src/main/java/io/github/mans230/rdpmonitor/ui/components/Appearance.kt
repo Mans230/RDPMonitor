@@ -42,6 +42,7 @@ private val LocalBackdrop = staticCompositionLocalOf { Backdrop() }
 /** Session-only, bounded local image. Nothing is saved to a profile or uploaded. */
 @Composable fun AppearanceShell(content: @Composable () -> Unit) {
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var motionReview by remember { mutableStateOf(false) }
     var dialog by rememberSaveable { mutableStateOf(false) }
     var blur by rememberSaveable { mutableFloatStateOf(24f) }
     var shade by rememberSaveable { mutableFloatStateOf(.85f) }
@@ -80,7 +81,7 @@ private val LocalBackdrop = staticCompositionLocalOf { Backdrop() }
             loading = false
         }
     }
-    CompositionLocalProvider(LocalAppearance provides { dialog = true }, LocalBackdrop provides Backdrop(bitmap, rootSize, shade)) {
+    CompositionLocalProvider(LocalAppearance provides { dialog = true }, LocalMotionPreview provides { motionReview = true }, LocalBackdrop provides Backdrop(bitmap, rootSize, shade)) {
         Box(Modifier.fillMaxSize().onGloballyPositioned { rootSize = it.size }.background(Ground)) {
             bitmap?.let { image ->
                 // Blur the image layer only. Older Android uses a stronger opaque fallback.
@@ -89,8 +90,12 @@ private val LocalBackdrop = staticCompositionLocalOf { Backdrop() }
             }
             content()
         }
+        if (io.github.mans230.rdpmonitor.BuildConfig.DEBUG && motionReview) CossDialog(onDismissRequest = { motionReview = false }, title = { Text("Motion previews") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(16.dp)) { MotionPreviewContent() } },
+            confirmButton = { CossOutlinedButton(onClick = { motionReview = false }, modifier = Modifier.fillMaxWidth()) { Text("Done") } })
         if (dialog) CossDialog(onDismissRequest = { dialog = false }, title = { Text("Appearance") }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (io.github.mans230.rdpmonitor.BuildConfig.DEBUG) CossOutlinedButton(onClick = { dialog = false; motionReview = true }) { Text("Motion previews") }
                 Text("Optional local background. It stays on this device for this session and is never uploaded.")
                 CossOutlinedButton(onClick = { picker.launch("image/*") }, enabled = !loading) { Text(if (loading) "Opening image…" else "Choose background image") }
                 Text("Background blur · ${blur.toInt()}")
