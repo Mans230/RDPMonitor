@@ -21,6 +21,7 @@ import java.net.URLEncoder
 import io.github.mans230.rdpmonitor.data.DemoDocuments
 
 private val privateKeys = setOf("token", "access_token", "refresh_token", "client_secret", "password", "cookie", "csrf", "nonce", "credential_hash")
+private val reportJson = Json { prettyPrint = true }
 private fun label(key: String) = key.replace('_', ' ').replaceFirstChar { it.uppercase() }
 private fun display(value: JsonPrimitive): String = readableValue("", value)
 
@@ -120,7 +121,8 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
     }
 }
 
-@Composable fun ManagementScreen(feature: Feature, state: AppState, model: RdpViewModel, onBack: () -> Unit, openBrowser: (String) -> Unit) {
+@Composable fun ManagementScreen(feature: Feature, state: AppState, model: RdpViewModel, onBack: () -> Unit, openBrowser: (String) -> Unit,
+    onFeature: (Feature) -> Unit = {}) {
     val documents = ToolCatalog.documents(feature)
     LaunchedEffect(feature, state.selected?.id, state.demo) { if (documents.isNotEmpty()) model.loadDocuments(documents.map { it.second }) }
     val edit: (Tool, Map<String, String>) -> Unit = model::editTool
@@ -134,33 +136,70 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
     }
     if (documents.isNotEmpty()) CossOutlinedButton(onClick = { model.loadDocuments(documents.map { it.second }) }, enabled = !state.demo && !state.documentLoading) { Text(if (state.documentLoading) "Refreshing…" else "Refresh section") }
     if (state.documentLoading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Signal)
-    val controls = if (state.administration && !state.demo) edit else null
+    val controls = if (state.administration && state.connected && !state.demo && !state.actionBusy) edit else null
     fun document(path: String) = if (state.demo) DemoDocuments.at(path) else state.documents[path]
     if (feature == Feature.Backups) {
         documents.forEach { (_, path) -> state.documentErrors[path]?.let { Notice(it, warning = true) } }
         BackupWorkspace(document("/api/backup"), document("/api/setup"), state.administration && state.connected && !state.demo && !state.actionBusy,
             model::review, { edit(ToolCatalog.tools(Feature.Backups).first { it.fixed["op"] == "sources" },
-                existingValues(ToolCatalog.tools(Feature.Backups).first { it.fixed["op"] == "sources" }, state)) })
-    } else documents.forEach { (title, path) ->
-        state.documentErrors[path]?.let { Notice(it, warning = true) }
-        document(path)?.let { data -> ContextualDocument(feature, path, if (path == "/api/setup") sectionDocument(feature, path, data) else data, openBrowser, controls) }
-            ?: Section(title) { Text(if (state.documentLoading) "Loading server data…" else "No server data received. Select Refresh to retry.", color = Muted) }
-    }
-    if (feature == Feature.Commands || feature == Feature.Diagnostics) Diagnostics(state, model, openBrowser)
-    if (ToolCatalog.tools(feature).isNotEmpty()) Section("Actions", "Every change is reviewed before it runs on ${state.selected?.name ?: "the server"}.") {
-        ToolCatalog.tools(feature).filterNot { feature == Feature.Backups && (it.action == "backup_now" || it.fixed["op"] in setOf("schedule", "sources")) }.forEach { tool ->
-            CossOutlinedButton(onClick = { edit(tool, existingValues(tool, state)) }, enabled = state.administration && !state.demo && !state.actionBusy,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = if (tool.dangerous) Warning else Signal),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text((if (tool.dangerous) "Caution · " else "") + tool.title) }
+                existingValues(ToolCatalog.tools(Feature.Backups).first { it.fixed["op"] == "sources" }, state)) }, { onFeature(Feature.Cloud) })
+    } else {
+        val tools = ToolCatalog.tools(feature).filter { feature != Feature.Commands || it.action == "run_command" }
+        val ownedDocuments = if (feature == Feature.Commands) emptyList() else documents
+        val owners = (ownedDocuments.map { documentSection(feature, it.second) } + tools.map { toolSection(feature, it) }).distinct()
+        owners.forEach { owner ->
+            val ownedTools = tools.filter { toolSection(feature, it) == owner }
+            val parts = ownedDocuments.filter { documentSection(feature, it.second) == owner || feature == Feature.Cloud && owner in setOf("System image", "Cloud destinations") && it.second == "/api/setup" || feature == Feature.Updates && owner == "Update policy" && it.second == "/api/suite-update" }
+            CossFrame(owner) {
+            if (parts.isNotEmpty()) CossPanel {
+                parts.forEach { (title, path) ->
+                    state.documentErrors[path]?.let { Notice(it, warning = true) }
+                    document(path)?.let { data ->
+                        val presented = if (path == "/api/setup") sectionDocument(feature, path, data) else if (path == "/api/setup/jobs" && data is JsonObject)
+                            JsonObject(data + ("jobs" to JsonArray(data["jobs"].rows().orEmpty().filter { it.text("state") !in setOf("done", "completed", "cancelled") }))) else data
+                        if (path != "/api/setup/jobs" || presented.obj()?.get("jobs").rows()?.isNotEmpty() == true) ContextualDocument(feature, path, presented, openBrowser, controls,
+                        cardFilter = { card -> when {
+                            feature == Feature.Updates -> (card.title == "Automatic update policy") == (owner == "Update policy")
+                            feature == Feature.Cloud && path == "/api/setup" -> when (owner) {
+                                "System image" -> card.title.contains("image", true)
+                                "Cloud destinations" -> card.title == "Cloud destinations"
+                                else -> card.title == "Cloud configuration"
+                            }
+                            else -> true
+                        } }) }
+                        ?: Text(if (state.documentLoading) "Loading $title…" else "$title unavailable. Refresh to retry.", color = Muted)
+                }
+            }
+            if (ownedTools.isNotEmpty()) CossPanel { ContextualTools(ownedTools, state) { edit(it, existingValues(it, state)) } }
+            }
         }
+        if (feature == Feature.Commands) CossFrame("Server tools") { CossPanel {
+            listOf(Feature.SystemTools, Feature.Processes, Feature.Automation, Feature.Maintenance).forEach { target ->
+                DirectoryRow(target.title) { onFeature(target) }
+            }
+        } }
     }
+    if (feature == Feature.Diagnostics) Diagnostics(state, model, openBrowser)
     if (feature == Feature.Backups) {
-        document("/api/setup/jobs")?.let { jobs -> if (jobs.obj()?.get("jobs").rows()?.isNotEmpty() == true) ContextualDocument(feature, "/api/setup/jobs", jobs, openBrowser, controls) }
-        document("/api/backup")?.let { RawDetails(it) }
-        document("/api/setup")?.let { RawDetails(sectionDocument(feature, "/api/setup", it), "backup configuration details") }
+        document("/api/setup/jobs")?.obj()?.let { root ->
+            val active = root["jobs"].rows().orEmpty().filter { it.text("state") !in setOf("done", "completed", "cancelled") }
+            if (active.isNotEmpty()) CossFrame("Active setup operations") { CossPanel { ContextualDocument(feature, "/api/setup/jobs", JsonObject(root + ("jobs" to JsonArray(active))), openBrowser, controls) } }
+        }
     }
     if (state.documentErrors.values.any { it.contains("owner", ignoreCase = true) }) Notice("These tools require the owner's approved Passkey. Ask the owner to sign in, or choose Monitoring only in Servers.")
     state.editingTool?.let { tool -> ToolForm(tool, state, model, model::closeForm) }
+}
+
+@Composable private fun ContextualTools(tools: List<Tool>, state: AppState, edit: (Tool) -> Unit) {
+    var more by remember { mutableStateOf(false) }
+    val common = tools.filterNot { it.action == "setup" && it.fixed["op"] in uncommonCloudOps }
+    val uncommon = tools - common.toSet()
+    (common + if (more) uncommon else emptyList()).forEach { tool ->
+        CossOutlinedButton(onClick = { edit(tool) }, enabled = state.administration && state.connected && !state.demo && !state.actionBusy,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = if (tool.dangerous) Warning else Signal),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)) { Text(tool.title) }
+    }
+    if (uncommon.isNotEmpty()) CossTextButton(onClick = { more = !more }) { Text(if (more) "Fewer options" else "More options") }
 }
 
 @Composable fun OperationFeedback(state: AppState, model: RdpViewModel, openBrowser: (String) -> Unit) {
@@ -169,7 +208,7 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Server: ${state.operationServer}", color = Muted)
             if (state.actionBusy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Waiting for the server. This operation will not be automatically repeated.") }
-            state.actionResult?.let { NativeDocument(it, openBrowser) }
+            state.actionResult?.let { NativeDocument(redactedDetails(it), openBrowser) }
         }
     }, confirmButton = { CossTextButton(onClick = { if (state.actionBusy) model.hideOperation() else model.dismissOperation() }) { Text(if (state.actionBusy) "Continue in background" else "Done") } })
 }
@@ -277,7 +316,9 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
     val selected = state.diagnosticOp
     val argument = state.diagnosticArgument
     var expanded by remember { mutableStateOf(false) }
-    Section("Diagnostics") {
+    var details by remember(state.selected?.id) { mutableStateOf(false) }
+    var reportLimit by remember { mutableIntStateOf(12000) }
+    Section("Report selection") {
         Box {
             CossOutlinedButton(onClick = { expanded = true }) { Text(diagnosticTitle(selected)) }
             DropdownMenu(expanded, { expanded = false }) {
@@ -295,5 +336,18 @@ private fun existingValues(tool: Tool, state: AppState): Map<String, String> {
         if (running) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("You can switch pages. This diagnostic keeps running.", color = Muted) }
         state.documentErrors[path]?.let { Notice(it, true) }
         state.documents[path]?.let { NativeDocument(it, openBrowser) }
+        CossOutlinedButton(onClick = { reportLimit = 12000; details = true }, enabled = state.documents.isNotEmpty() || state.documentErrors.isNotEmpty()) { Text("Report details") }
     }
+    if (details) CossDialog(onDismissRequest = { details = false }, title = { Text("Report details") }, text = {
+        Text("Server: ${state.selected?.name.orEmpty()}")
+        Text("${state.documents.size} cached responses", color = Muted)
+        val report = buildJsonObject {
+            put("server", state.selected?.origin.orEmpty())
+            put("latest_reading_ms", state.snapshot?.capturedAt?.let(::JsonPrimitive) ?: JsonNull)
+            put("responses", JsonObject(state.documents)); put("errors", JsonObject(state.documentErrors.mapValues { JsonPrimitive(it.value) }))
+        }
+        val text = remember(report) { reportJson.encodeToString(JsonElement.serializer(), redactedDetails(report)) }
+        Text(text.take(reportLimit), style = MaterialTheme.typography.bodySmall)
+        if (reportLimit < text.length) CossTextButton(onClick = { reportLimit += 12000 }) { Text("More report data") }
+    }, confirmButton = { CossOutlinedButton(onClick = { details = false }, modifier = Modifier.fillMaxWidth()) { Text("Done") } })
 }

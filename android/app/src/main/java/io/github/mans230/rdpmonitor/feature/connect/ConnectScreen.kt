@@ -41,7 +41,6 @@ internal fun serverFormError(name: String, address: String): String? = when {
     var name by rememberSaveable(state.selected?.id) { mutableStateOf(state.selected?.name.orEmpty()) }
     var address by rememberSaveable(state.selected?.id) { mutableStateOf(state.selected?.origin.orEmpty()) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    var saved by rememberSaveable { mutableStateOf(false) }
     val clipboard = LocalContext.current.getSystemService(ClipboardManager::class.java)
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -49,6 +48,7 @@ internal fun serverFormError(name: String, address: String): String? = when {
     val available = !state.busy && !state.actionBusy
     val labelSize = if (LocalConfiguration.current.screenWidthDp < 640) 16.sp else 14.sp
     val back = LocalOnboardingBack.current
+    val servers = LocalServerWorkspace.current
     LaunchedEffect(state.pairingUrl, state.pairingExpiresAt) {
         if (state.pairingUrl != null) { delay((state.pairingExpiresAt - System.currentTimeMillis()).coerceAtLeast(0)); model.expirePairing() }
     }
@@ -57,7 +57,7 @@ internal fun serverFormError(name: String, address: String): String? = when {
     }
     Box(modifier) {
         OnboardingScaffold(onBack = { if (available) { if (state.snapshot != null) model.closeConnections() else back() } }, actions = {
-            if (state.profiles.isNotEmpty()) IconButton(onClick = { saved = true }, enabled = available, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.Dns, "Saved servers", Modifier.size(18.dp)) }
+            if (state.profiles.isNotEmpty() && servers != null) IconButton(onClick = servers, enabled = available, modifier = Modifier.size(44.dp)) { Icon(Icons.Outlined.Dns, "Saved servers", Modifier.size(18.dp)) }
         }, footer = {
             if (state.pairingUrl != null) OnboardingPrimary("Continue in browser", { openBrowser(state.pairingUrl) }, available)
             else OnboardingPrimary("Connect server", {
@@ -98,19 +98,5 @@ internal fun serverFormError(name: String, address: String): String? = when {
                 Spacer(Modifier.height(16.dp))
             }
         }
-        if (saved) CossDialog(onDismissRequest = { saved = false }, title = { Text("Saved servers") }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                state.profiles.forEach { profile ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Column(Modifier.weight(1f).testTag("saved-server-${profile.id}").clickable(enabled = available) {
-                            model.cancelPairing(); name = profile.name; address = profile.origin; error = null; saved = false
-                        }.padding(vertical = 8.dp)) {
-                            Text(profile.name); Text(profile.origin.removePrefix("https://"), color = Muted, style = MaterialTheme.typography.bodySmall)
-                        }
-                        IconButton(onClick = { model.remove(profile) }, enabled = available) { Icon(Icons.Outlined.Close, "Remove saved server ${profile.name}") }
-                    }
-                }
-            }
-        }, confirmButton = { CossOutlinedButton(onClick = { saved = false }, modifier = Modifier.fillMaxWidth()) { Text("Done") } })
     }
 }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,31 +38,30 @@ import io.github.mans230.rdpmonitor.feature.overview.*
 import io.github.mans230.rdpmonitor.ui.components.*
 import io.github.mans230.rdpmonitor.ui.theme.*
 
-@Composable fun RdpApp(model: RdpViewModel, openBrowser: (String) -> Unit) {
+@Composable fun RdpApp(model: RdpViewModel, openBrowser: (String) -> Unit,
+    workspaceContent: (@Composable () -> Unit)? = null, workspaceKey: String? = null, showShell: Boolean = false,
+    workspaceBack: (() -> Unit)? = null, onNavigate: () -> Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
     var detail by rememberSaveable { mutableStateOf<String?>(null) }
-    var signOut by rememberSaveable { mutableStateOf(false) }
     val appearance = appearanceAction()
     val snapshot = state.snapshot
-    if (snapshot == null || state.connectionScreen) {
+    val serverWorkspace = LocalServerWorkspace.current
+    val connections = { if (serverWorkspace != null && !state.demo) serverWorkspace() else model.connectScreen() }
+    if (workspaceContent == null && (state.connectionScreen || snapshot == null && !showShell)) {
         BackHandler(enabled = snapshot != null && state.connectionScreen) { model.closeConnections() }
         Surface(color = Color.Transparent) { ConnectScreen(state, model, openBrowser) }
         return
     }
     val selected = detail?.let { name -> Feature.entries.firstOrNull { it.name == name } }
     val back = rootBack(detail != null, state.destination)
-    BackHandler(enabled = back != RootBack.System) {
+    BackHandler(enabled = workspaceContent == null && back != RootBack.System) {
         if (back == RootBack.Tools) detail = null else model.destination(Destination.Overview)
     }
-    val route = "${state.selected?.id}:${state.destination}:$detail"
+    val route = "${state.selected?.id}:${state.destination}:$detail:$workspaceKey"
     val scroll = rememberSaveable(route, saver = LazyListState.Saver) { LazyListState() }
     val open: (Feature) -> Unit = { model.closeForm(); model.destination(Destination.More); detail = it.name }
     ActionReviewDialog(state, model)
     OperationFeedback(state, model, openBrowser)
-    if (signOut) CossDialog(onDismissRequest = { signOut = false }, title = { Text("Disconnect from ${state.selected?.name}?") },
-        text = { Text("This ends this app session. Your saved server and approved Passkey are kept; you can sign in again without registering a new key.") },
-        confirmButton = { CossTextButton(onClick = { signOut = false; model.disconnect() }) { Text("Disconnect and sign out") } },
-        dismissButton = { CossTextButton(onClick = { signOut = false }) { Text("Keep connected") } })
     val isOverview = selected == null && state.destination == Destination.Overview
     LaunchedEffect(state.selected?.id, state.demo, state.administration, state.connected, isOverview) {
         if (isOverview && !state.demo && state.administration && state.connected)
@@ -69,8 +69,9 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     }
     Scaffold(containerColor = Color.Transparent, contentColor = Signal, bottomBar = {
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp).testTag("section-navigation"), contentAlignment = Alignment.Center) {
-            FunctionDock(selected, state.destination, { detail = null; model.closeForm(); model.destination(Destination.Overview) }, open,
-                { detail = null; model.closeForm(); model.destination(Destination.More) })
+            FunctionDock(if (workspaceContent != null) null else selected, if (workspaceContent != null) Destination.More else state.destination,
+                { onNavigate(); detail = null; model.closeForm(); model.destination(Destination.Overview) }, { onNavigate(); open(it) },
+                { onNavigate(); detail = null; model.closeForm(); model.destination(Destination.More) })
         }
     }) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
@@ -94,8 +95,8 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                         }
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(if (state.demo) "Sample data" else state.selected?.name ?: snapshot.host, Modifier.weight(1f), color = Muted, fontSize = 12.sp)
-                        IconButton(onClick = { detail = null; model.connectScreen() }) { Icon(Icons.Outlined.Dns, "Server connections") }
+                        Text(if (state.demo) "Sample data" else state.selected?.name ?: snapshot?.host ?: "No server connected", Modifier.weight(1f), color = Muted, fontSize = 12.sp)
+                        IconButton(onClick = { detail = null; connections() }, enabled = !state.busy && !state.actionBusy) { Icon(Icons.Outlined.Dns, "Server connections") }
                         LocalAppAccount.current?.let { account -> IconButton(onClick = account, enabled = !state.busy && !state.actionBusy) { Icon(Icons.Outlined.AccountCircle, "Account") } }
                         if (!state.demo) IconButton(onClick = {
                             model.refresh()
@@ -105,19 +106,25 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                     }
                 }
                 if (state.demo) item { Notice("Demo mode · Sample data · Server changes are unavailable") }
-                else item { Text("Last reading ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(snapshot.capturedAt))}", color = Muted, fontSize = 12.sp) }
-                if (!state.demo && (!state.connected || state.readingsStale)) item {
+                else if (snapshot != null) item { Text("Last reading ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(snapshot.capturedAt))}", color = Muted, fontSize = 12.sp) }
+                if (snapshot != null && !state.demo && (!state.connected || state.readingsStale)) item {
                     Notice(if (!state.connected) "Session ended · readings are stale" else "Connection interrupted · readings are stale", true)
                     CossTextButton(onClick = { if (state.connected) model.refresh() else model.reconnect() }) { Text(if (state.connected) "Retry" else "Sign in again") }
                 }
                 state.message?.let { message -> item { Notice(message, true) } }
+                if (workspaceContent != null) item { IconButton(onClick = { workspaceBack?.invoke() ?: onNavigate() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Go back") } }
                 if (state.actionBusy || state.actionResult != null) item {
                     CossTextButton(onClick = model::showOperation) { Text("${state.operationTitle} · ${if (state.actionBusy) "Running — view progress" else "Result ready"}") }
                 }
                 if (state.diagnostics.isNotEmpty()) item { CossTextButton(onClick = { open(Feature.Diagnostics) }) { Text("Diagnostic running · view status") } }
                 item {
                     Column(pageMotion(route), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        when (selected) {
+                        if (workspaceContent != null) workspaceContent()
+                        else if (snapshot == null) {
+                            PageTitle("Server disconnected", "")
+                            Notice("Choose a saved server to reconnect. No readings are displayed.")
+                            CossOutlinedButton(onClick = connections) { Text("Server connections") }
+                        } else when (selected) {
                             Feature.Processes -> if (state.demo) ActivityScreen(snapshot, emptyList(), processesOnly = true) else LiveActivity(state, model, processesOnly = true)
                             Feature.History -> ResourceHistory(snapshot)
                             null -> when (state.destination) {
@@ -125,14 +132,11 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                                 Destination.Bandwidth -> if (state.demo) BandwidthScreen(DemoData.traffic) else LiveBandwidth(state, model, openBrowser)
                                 Destination.Activity -> if (state.demo) ActivityScreen(snapshot, DemoData.incidents) else LiveActivity(state, model)
                                 Destination.More -> {
-                                    MoreScreen(open, { detail = null; model.connectScreen() })
-                                    CossOutlinedButton(onClick = { model.destination(Destination.Bandwidth) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Bandwidth · recorded usage & billing window") }
-                                    CossOutlinedButton(onClick = { model.destination(Destination.Activity) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Activity · recorded events") }
-                                    if (!state.demo) CossOutlinedButton(onClick = { signOut = true }, enabled = !state.busy && !state.actionBusy,
-                                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Disconnect and sign out") }
+                                    MoreScreen(open, { detail = null; connections() },
+                                        { model.destination(Destination.Bandwidth) }, { model.destination(Destination.Activity) })
                                 }
                             }
-                            else -> ManagementScreen(selected, state, model, { detail = null }, openBrowser)
+                            else -> ManagementScreen(selected, state, model, { detail = null }, openBrowser, open)
                         }
                     }
                 }

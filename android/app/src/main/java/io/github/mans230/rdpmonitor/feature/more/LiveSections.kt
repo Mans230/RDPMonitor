@@ -35,16 +35,18 @@ import kotlinx.serialization.json.*
 }
 
 @Composable fun LiveActivity(state: AppState, model: RdpViewModel, processesOnly: Boolean = false) {
-    LaunchedEffect(state.selected?.id, state.demo, processesOnly) { if (!processesOnly) model.loadDocuments(listOf("/api/audit")) }
-    if (!processesOnly) CossOutlinedButton(onClick = { model.loadDocuments(listOf("/api/audit")) }, enabled = !state.documentLoading) { Text("Refresh activity") }
+    val paths = if (state.administration) listOf("/api/audit", "/api/usage") else listOf("/api/audit")
+    LaunchedEffect(state.selected?.id, state.demo, processesOnly) { if (!processesOnly) model.loadDocuments(paths) }
+    if (!processesOnly) CossOutlinedButton(onClick = { model.loadDocuments(paths) }, enabled = !state.documentLoading) { Text("Refresh activity") }
     state.documentErrors["/api/audit"]?.let { Notice(it, true) }
     val items = ((state.documents["/api/audit"] as? JsonObject)?.get("items") as? JsonArray).orEmpty()
-    val events = items.mapNotNull { it as? JsonObject }.asReversed().groupBy { it["action"]?.jsonPrimitive?.content ?: "Event" }.map { (name, rows) ->
-        val latest = rows.first()
+    val events = items.mapNotNull { it as? JsonObject }.asReversed().map { latest ->
+        val name = latest["action"]?.jsonPrimitive?.content ?: "Event"
         val detail = latest["detail"]?.jsonPrimitive?.content.orEmpty()
         val at = latest["t"]?.jsonPrimitive?.doubleOrNull
-        Incident(name.replace('_', ' '), "$detail${if (rows.size > 1) " · ${rows.size} recorded events" else ""}",
-            at?.let { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date((it * 1000).toLong())) } ?: "",
+        val actor = latest["actor"]?.jsonPrimitive?.contentOrNull
+        Incident(name.replace('_', ' '), listOfNotNull(actor?.let { "Actor: $it" }, detail.takeIf { it.isNotBlank() }).joinToString(" · "),
+            at?.let { java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date((it * 1000).toLong())) + " · device time" } ?: "Time unavailable",
             detail.contains("failed", true) || detail.contains("blocked", true))
     }
     state.snapshot?.let { ActivityScreen(it, events, if (state.administration && state.connected && !state.actionBusy) { process ->
@@ -54,5 +56,12 @@ import kotlinx.serialization.json.*
         val tool = Tool("End selected processes", "Terminate only the reviewed PIDs on ${state.selected?.name}. Unsaved work may be lost. Server protection rules still apply.", "kill")
         model.review(tool, buildJsonObject { put("action", "kill"); put("pids", JsonArray(processes.map { JsonPrimitive(it.pid) })) })
     } else null) }
-    state.actionResult?.let { Section("Operation result") { NativeDocument(it, {}) } }
+    if (!processesOnly) state.documents["/api/usage"]?.let { usage ->
+        var more by remember { mutableStateOf(false) }
+        Section("Activity summary") {
+            MetricRow("Events in returned history", usage.obj().count("events")?.toString() ?: "Unavailable")
+            CossTextButton(onClick = { more = !more }) { Text(if (more) "Fewer options" else "More options") }
+            if (more) ContextualDocument(Feature.Maintenance, "/api/usage", usage, {}, null)
+        }
+    }
 }

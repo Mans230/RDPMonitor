@@ -100,7 +100,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                           colors: ButtonColors = ButtonDefaults.buttonColors(containerColor = Signal, contentColor = Ground), interactionSource: MutableInteractionSource? = null,
                           content: @Composable RowScope.() -> Unit) {
     val phone = LocalConfiguration.current.screenWidthDp < 640
-    Button(onClick, modifier.height(if (phone) 36.dp else 32.dp), enabled = enabled, shape = RoundedCornerShape(8.dp),
+    Button(onClick, modifier.heightIn(min = if (phone) 36.dp else 32.dp), enabled = enabled, shape = RoundedCornerShape(8.dp),
         contentPadding = PaddingValues(horizontal = 11.dp), colors = colors, interactionSource = interactionSource) {
         ProvideTextStyle(MaterialTheme.typography.labelLarge.copy(fontSize = if (phone) 16.sp else 14.sp)) { content() }
     }
@@ -109,7 +109,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 @Composable fun CossOutlinedButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
                                   colors: ButtonColors = ButtonDefaults.outlinedButtonColors(contentColor = Signal), content: @Composable RowScope.() -> Unit) {
     val phone = LocalConfiguration.current.screenWidthDp < 640
-    OutlinedButton(onClick, modifier.height(if (phone) 36.dp else 32.dp), enabled = enabled, shape = RoundedCornerShape(8.dp),
+    OutlinedButton(onClick, modifier.heightIn(min = if (phone) 36.dp else 32.dp), enabled = enabled, shape = RoundedCornerShape(8.dp),
         contentPadding = PaddingValues(horizontal = 11.dp), border = BorderStroke(1.dp, InputRule), colors = colors) {
         ProvideTextStyle(MaterialTheme.typography.labelLarge.copy(fontSize = if (phone) 16.sp else 14.sp)) { content() }
     }
@@ -117,12 +117,16 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 
 /** Native translation of coss Frame: a tinted tray, 4dp inset, independent bordered panels. */
 @Composable fun CossFrame(title: String, description: String? = null, footer: (@Composable ColumnScope.() -> Unit)? = null,
+                         headerActions: (@Composable () -> Unit)? = null,
                          content: @Composable ColumnScope.() -> Unit) {
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = Tray) {
         Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 description?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp)) }
+            }
+            headerActions?.invoke()
             }
             content()
             footer?.let { Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = it) }

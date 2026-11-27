@@ -2,12 +2,17 @@ package io.github.mans230.rdpmonitor.feature.activity
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.mans230.rdpmonitor.core.model.*
@@ -34,7 +39,7 @@ internal fun matchingProcesses(rows: List<ProcessRow>, query: String, high: Bool
         Text("${rows.size} shown · ${current.size} selected", color = Muted, style = MaterialTheme.typography.bodySmall)
         CossOutlinedButton(onClick = { onStopMany?.invoke(current) }, enabled = current.size in 1..50 && onStopMany != null,
             modifier = Modifier.fillMaxWidth()) { Text("Review end action") }
-        if (onStopMany == null) Text("Ending processes requires a connected administration session. Preview changes are disabled.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        if (onStopMany == null) Text("Administration access required to end processes.", color = Muted, style = MaterialTheme.typography.bodySmall)
     }) {
         CossPanel {
             CossField("Search process name or PID", query, { query = it; selected = emptySet() })
@@ -45,14 +50,16 @@ internal fun matchingProcesses(rows: List<ProcessRow>, query: String, high: Bool
                 Text(if (snapshot.processes.isEmpty()) "No process readings received." else "No matching processes.", color = Muted)
                 CossTextButton(onClick = { query = ""; filter = 0; selected = emptySet() }) { Text("Clear filters") }
             }
-            rows.forEachIndexed { index, row ->
+            val listHeight = (LocalConfiguration.current.screenHeightDp * .40f).dp.coerceIn(220.dp, 360.dp)
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = listHeight).testTag("process-list")) {
+            itemsIndexed(rows, key = { _, row -> processIdentity(row) }) { index, row ->
                 if (index > 0) HorizontalDivider(color = Rule)
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                     val compact = maxWidth < 340.dp
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = processIdentity(row) in selected, enabled = row.pid > 4 && (processIdentity(row) in selected || current.size < 50),
                             onCheckedChange = { checked -> selected = if (checked) selected + processIdentity(row) else selected - processIdentity(row) },
-                            modifier = Modifier.testTag("select-process-${row.pid}"))
+                            modifier = Modifier.testTag("select-process-${row.pid}").semantics { contentDescription = "Select ${row.name}, PID ${row.pid}" })
                         Column(Modifier.weight(1f).clickable { inspected = row }.padding(vertical = 8.dp).testTag("process-${row.pid}"), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Text(row.name, style = MaterialTheme.typography.bodyMedium)
                             Text("PID ${row.pid}", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -65,6 +72,7 @@ internal fun matchingProcesses(rows: List<ProcessRow>, query: String, high: Bool
                         }
                     }
                 }
+            }
             }
         }
     }

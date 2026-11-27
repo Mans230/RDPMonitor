@@ -5,7 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -31,30 +32,40 @@ enum class Feature(val title: String, val summary: String, val capabilities: Lis
     Maintenance("Maintenance", "Cleanup, logs and power controls", emptyList())
 }
 
-@Composable fun MoreScreen(onFeature: (Feature) -> Unit, onConnections: () -> Unit) {
-    PageTitle("All sections", "Monitor, protect and maintain your server.")
-    Section("Server tools") {
-        Feature.entries.forEachIndexed { i, feature ->
-            if (i > 0) HorizontalDivider(color = Rule)
-            Row(Modifier.fillMaxWidth().testTag("feature-${feature.name}").clickable { onFeature(feature) }.padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(feature.title, style = MaterialTheme.typography.bodyLarge)
-                    Text(feature.summary, color = Muted, style = MaterialTheme.typography.bodyMedium)
-                }
-                Icon(Icons.AutoMirrored.Outlined.ArrowForward, "Open ${feature.title}", tint = Muted, modifier = Modifier.size(20.dp))
+
+@Composable fun MoreScreen(onFeature: (Feature) -> Unit, onConnections: () -> Unit,
+    onBandwidth: () -> Unit = {}, onActivity: () -> Unit = {}) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val account = LocalAppAccount.current
+    val appearance = appearanceAction()
+    val groups = listOf(
+        "Monitor" to listOf(Feature.Processes, Feature.History, Feature.Diagnostics),
+        "Protect" to listOf(Feature.Protection, Feature.RdpAccess, Feature.LocalUsers, Feature.Access),
+        "Store & recover" to listOf(Feature.Backups, Feature.Cloud),
+        "Manage" to listOf(Feature.Commands, Feature.SystemTools, Feature.Automation, Feature.Updates, Feature.Settings, Feature.Maintenance, Feature.Reference))
+    PageTitle("All sections", "")
+    CossField("Search functions", query, { query = it })
+    groups.forEach { (title, features) ->
+        val matches = features.filter { query.isBlank() || it.title.contains(query, true) || it.summary.contains(query, true) }
+        val network = title == "Monitor" && (query.isBlank() || "Network bandwidth recorded usage".contains(query, true))
+        val activity = title == "Monitor" && (query.isBlank() || "Activity events".contains(query, true))
+        if (matches.isNotEmpty() || network || activity) Section(title) {
+            matches.forEach { feature ->
+                DirectoryRow(feature.title, Modifier.testTag("feature-${feature.name}")) { onFeature(feature) }
             }
+            if (network) DirectoryRow("Network & bandwidth", onClick = onBandwidth)
+            if (activity) DirectoryRow("Activity", onClick = onActivity)
         }
     }
-    CossOutlinedButton(onClick = onConnections, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Server connections") }
+    if (query.isBlank() || "Account appearance".contains(query, true)) Section("Account") {
+        DirectoryRow("Account", onClick = account ?: onConnections)
+        DirectoryRow("Appearance", onClick = appearance)
+    }
 }
 
-@Composable fun FeatureScreen(feature: Feature, demo: Boolean, onBack: () -> Unit, openPanel: (() -> Unit)?) {
-    CossTextButton(onClick = onBack) { Text("Back to tools") }
-    PageTitle(feature.title, feature.summary)
-    Section("${feature.title} workflow") {
-        feature.capabilities.forEach { Text(it, style = MaterialTheme.typography.bodyLarge) }
+@Composable internal fun DirectoryRow(title: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f))
+        Icon(Icons.AutoMirrored.Outlined.ArrowForward, "Open $title", Modifier.size(18.dp), tint = Muted)
     }
-    Notice(if (demo) "Preview only. These workflows cannot change a server. Connect to your server to use its web panel."
-        else "Use the authenticated web panel for these operations. Server changes require review and confirmation.")
-    openPanel?.let { CossButton(onClick = it, modifier = Modifier.fillMaxWidth()) { Text("Open authenticated web panel") } }
 }
