@@ -2,6 +2,8 @@ package io.github.mans230.rdpmonitor.feature.more
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -31,7 +33,7 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
 /** Uses the existing setup/prepare/confirm API. Drafts never silently change server policy. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable internal fun BackupWorkspace(status: JsonElement?, setup: JsonElement?, canEdit: Boolean,
-                                         onReview: (Tool, JsonObject) -> Unit, onEditSources: () -> Unit) {
+                                         onReview: (Tool, JsonObject) -> Unit, onEditSources: () -> Unit, onCloud: () -> Unit = {}) {
     val details = backupDetails(status, setup)
     val schedule = setup.obj()?.get("backup").obj()?.get("schedule").obj()
     val modes = listOf("daily", "interval", "times")
@@ -64,6 +66,11 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
                     error = null; onReview(scheduleTool, scheduleTool.payload(values))
                 }
             }, enabled = canEdit && setup != null) { Text("Review changes"); Spacer(Modifier.width(8.dp)); Icon(CossIcons.ArrowRight, null, Modifier.size(18.dp)) }
+        }
+        CossTextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Fewer schedule options" else "More schedule options") }
+        if (advanced) {
+            if (canEdit) CossSegments(listOf("Daily", "Interval", "Times"), modes.indexOf(mode), { mode = modes[it]; value = "" }, Modifier.fillMaxWidth())
+            Text(details.scheduleNote, color = Muted, style = MaterialTheme.typography.bodySmall)
         }
     }) {
         CossPanel {
@@ -103,6 +110,7 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
         }
     }
     CossFrame("Source folders", "Included in the next manual backup.", footer = {
+        CossOutlinedButton(onClick = onEditSources, enabled = canEdit) { Text("Add or edit server folders") }
         if (selectedSources != details.sources.orEmpty().toSet()) {
         CossOutlinedButton(onClick = {
             val tool = ToolCatalog.tools(Feature.Backups).first { it.fixed["op"] == "sources" }
@@ -116,7 +124,7 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
     }) {
         CossPanel {
             if (details.sources.isNullOrEmpty()) Text(if (details.sources == null) "Source list unavailable." else "No source folders configured.", color = Muted)
-            details.sources?.forEachIndexed { index, path ->
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp)) { itemsIndexed(details.sources.orEmpty()) { index, path ->
                 Row(Modifier.fillMaxWidth().clickable(enabled = canEdit) {
                     selectedSources = if (path in selectedSources) selectedSources - path else selectedSources + path
                 }, verticalAlignment = Alignment.CenterVertically) {
@@ -125,7 +133,7 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
                     Spacer(Modifier.width(10.dp))
                     Text(path, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 }
-            }
+            } }
 
         }
     }
@@ -136,7 +144,7 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
     } ?: "Archive list unavailable") {
         CossPanel {
             if (details.archives?.isEmpty() == true) Text("No local archives were reported.", color = Muted)
-            details.archives?.forEachIndexed { index, archive ->
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) { itemsIndexed(details.archives.orEmpty()) { index, archive ->
                 if (index > 0) HorizontalDivider(color = Rule)
                 Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).clickable { inspected = archive }.testTag("archive-$index"),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -147,10 +155,13 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
                     }
                     Icon(CossIcons.ArrowRight, null, Modifier.size(17.dp), tint = Muted)
                 }
-            }
+            } }
         }
     }
-    CossFrame("Latest backup result", "Latest-run file count is separate from stored archive count.") {
+    CossFrame("Latest backup result", "Latest-run file count is separate from stored archive count.", footer = {
+        Text("Uses the server's configured restore verification drill.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        CossOutlinedButton(onClick = { val tool = ToolCatalog.tools(Feature.Backups).first { it.action == "drill" }; onReview(tool, tool.payload(emptyMap())) }, enabled = canEdit) { Text("Restore verification drill") }
+    }) {
         CossPanel {
             Text(details.result, style = MaterialTheme.typography.titleMedium)
             MetricRow("Files processed in the latest run", details.files)
@@ -158,14 +169,10 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
             MetricRow("Backup activity", details.activity); MetricRow("Backup engine", details.engine)
         }
     }
-    CossTextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide schedule options" else "Schedule options") }
-    if (advanced) CossFrame("Schedule options", "Daily, interval and several-times-per-day modes are preserved.") { CossPanel {
-        if (canEdit) CossSegments(listOf("Daily", "Interval", "Times"), modes.indexOf(mode), { mode = modes[it]; value = "" }, Modifier.fillMaxWidth())
-        Text(details.scheduleNote, color = Muted, style = MaterialTheme.typography.bodySmall)
-        CossOutlinedButton(onClick = onEditSources, enabled = canEdit) { Text("Add or edit server folders") }
-        Text("Sources & destination", style = MaterialTheme.typography.labelLarge)
+    CossFrame("Cloud destinations") { CossPanel {
         Text(details.remotes?.joinToString("\n")?.ifEmpty { "No cloud remotes configured" } ?: "Cloud destinations unavailable", color = Muted)
         Text(details.folder, color = Muted, style = MaterialTheme.typography.bodySmall)
+        DirectoryRow("Cloud & images", onClick = onCloud)
     } }
     inspected?.let { archive -> CossDialog(onDismissRequest = { inspected = null }, title = { Text(archive.name) },
         description = "Compressed local archive metadata", text = {
@@ -179,6 +186,10 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
                 Text(data, Modifier.weight(.65f), textAlign = TextAlign.End, style = MaterialTheme.typography.bodyMedium)
             }
         }
+        CossOutlinedButton(onClick = {
+            val tool = ToolCatalog.tools(Feature.Backups).first { it.action == "restore" }
+            inspected = null; onReview(tool, tool.payload(mapOf("name" to archive.name)))
+        }, enabled = canEdit, modifier = Modifier.fillMaxWidth()) { Text("Restore ${archive.name}") }
     }, confirmButton = { CossOutlinedButton(onClick = { inspected = null }, modifier = Modifier.fillMaxWidth()) { Text("Done") } }) }
     if (showTime) {
         val time = runCatching { LocalTime.parse(value) }.getOrDefault(LocalTime.MIDNIGHT)

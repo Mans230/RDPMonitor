@@ -17,6 +17,10 @@ import javax.crypto.spec.GCMParameterSpec
 
 class DeviceStore(context: Context) {
     private val appContext = context.applicationContext
+    fun accountOwner(): String? {
+        val identity = appContext.getSharedPreferences("app_identity", Context.MODE_PRIVATE)
+        return identity.getString("subject", null)?.takeIf { it.isNotBlank() && it == identity.getString("connector_owner", null) }
+    }
     private val namespace: String get() {
         val owner = appContext.getSharedPreferences("app_identity", Context.MODE_PRIVATE).getString("connector_owner", "private") ?: "private"
         return if (owner == "private") "" else "." + java.security.MessageDigest.getInstance("SHA-256").digest(owner.toByteArray()).joinToString("") { "%02x".format(it) }

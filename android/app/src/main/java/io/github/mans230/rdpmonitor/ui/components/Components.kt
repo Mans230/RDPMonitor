@@ -36,17 +36,18 @@ fun rate(value: Double?) = value?.let { String.format(Locale.US, "%.1f Mbps", it
 }
 @Composable fun MetricRow(label: String, value: String, detail: String? = null) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(.45f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge)
             detail?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodyMedium) }
         }
-        Text(value, style = ReadingStyle.copy(fontSize = 16.sp), color = if (value == "—") Muted else MaterialTheme.colorScheme.onSurface)
+        Text(value, Modifier.weight(.55f), textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            style = ReadingStyle.copy(fontSize = 16.sp), color = if (value == "—") Muted else MaterialTheme.colorScheme.onSurface)
     }
 }
 @Composable fun PageTitle(title: String, detail: String) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, Modifier.testTag("page-title-$title"), style = MaterialTheme.typography.titleLarge)
-        Text(detail, style = MaterialTheme.typography.bodyMedium, color = Muted)
+        if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodyMedium, color = Muted)
     }
 }
 @Composable fun Notice(text: String, warning: Boolean = false) {

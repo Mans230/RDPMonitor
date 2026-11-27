@@ -1,6 +1,8 @@
 package io.github.mans230.rdpmonitor.feature.activity
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -18,16 +20,14 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     if (section == "Events") {
         Section("Recent activity") {
             if (incidents.isEmpty()) Text("No recorded activity was returned for this server.", color = Muted)
-            incidents.forEachIndexed { i, incident ->
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 340.dp)) { itemsIndexed(incidents) { i, incident ->
                 if (i > 0) HorizontalDivider(color = Rule)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(incident.title, color = if (incident.needsAttention) Warning else MaterialTheme.colorScheme.onSurface)
                         Text(incident.detail, color = Muted, style = MaterialTheme.typography.bodyMedium)
-                    }
                     Text(incident.age, color = Muted, style = MaterialTheme.typography.bodyMedium)
                 }
-            }
+            } }
         }
     } else ProcessWorkspace(snapshot, onStop, onStopMany)
 }

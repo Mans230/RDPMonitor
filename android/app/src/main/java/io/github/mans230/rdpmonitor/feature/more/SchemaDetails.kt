@@ -24,7 +24,7 @@ fun schemaCards(feature: Feature, path: String, data: JsonElement): List<DetailC
         "/api/security" -> {
             val blocked = root["blocked"].obj()
             listOf(DetailCard("Blocked addresses", listOf(field("Addresses in the reported block list", blocked?.size?.toString())))) +
-                blocked?.entries.orEmpty().map { (address, record) -> DetailCard(address, listOf(field("Block reason", record.obj().text("reason")))) } + sessions(root["sessions"].rows())
+                blocked?.entries.orEmpty().map { (address, record) -> DetailCard(address, listOf(field("Block reason", record.obj().text("reason")))) }
         }
         "/api/services" -> collection("Windows service inventory", "Services", rows()) { row -> DetailCard(shown(row.text("display") ?: row.text("display_name") ?: row.text("name")), listOf(
             field("Windows service name", row.text("name")), field("Service status", row.text("status")))) }
@@ -56,9 +56,10 @@ fun schemaCards(feature: Feature, path: String, data: JsonElement): List<DetailC
         "/api/suite-update" -> {
             val settings = root["settings"].obj(); val state = root["state"].obj()
             listOf(DetailCard("Suite updater", listOf(field("Updater task installed", when (root.flag("installed")) { true -> "Installed"; false -> "Not installed"; null -> "Unavailable" }),
-                field("Installed commit", root.text("current")), field("Update phase", words(state.text("phase"))), field("Update message", state.text("message")),
+                field("Installed commit", root.text("current")), field("Update phase", words(state.text("phase"))), field("Update message", state.text("message"))), "Update checks are separate from installing a release."),
+                DetailCard("Automatic update policy", listOf(
                 field("Automatic update checks", yesNo(settings.flag("enabled"))), field("Check interval (hours)", settings.count("interval_hours")?.toString()),
-                field("Reported next update check", deviceTimestamp(root["next_check"]))), "Update checks are separate from installing a release."))
+                field("Reported next update check", deviceTimestamp(root["next_check"])))))
         }
         "/api/usage" -> listOf(DetailCard("Recorded operation usage", listOf(field("Events in the returned audit history", root.count("events")?.toString())), "Counts cover the server's returned history; no calendar period is inferred.")) +
             listOf("by_actor" to "Events by actor", "by_action" to "Events by operation", "by_status" to "Events by result").map { (key, title) ->
@@ -69,12 +70,13 @@ fun schemaCards(feature: Feature, path: String, data: JsonElement): List<DetailC
             else if (feature == Feature.Cloud) {
                 val cloud = root["cloud"].obj(); val images = root["images"].obj(); val remotes = strings(cloud, "remotes")
                 listOf(DetailCard("Cloud configuration", listOf(field("rclone health check", when (cloud.flag("healthy")) { true -> "Passed"; false -> "Failed or unavailable"; null -> "Unavailable" }),
-                    field("rclone version", cloud.text("version")), field("Configured storage remotes", remotes?.let { if (it.isEmpty()) "None configured" else it.joinToString("\n") }),
-                    field("System image upload destination", cloud.text("image_target"))), "Configured destinations do not prove an upload succeeded."),
+                    field("rclone version", cloud.text("version")), field("Configured storage remotes", remotes?.let { if (it.isEmpty()) "None configured" else it.joinToString("\n") })), "Configured destinations do not prove an upload succeeded."),
                     DetailCard("System image operation", listOf(field("System imaging enabled", yesNo(images.flag("enabled"))), field("Reported operation phase", words(images.text("phase"))),
                         field("Current operation image file", images.text("file")), field("Current operation remote", images.text("remote")), field("Server operation detail", images.text("detail")),
                         field("Reported upload progress (%)", images.number("percent")?.takeIf { it <= 100 }?.toString()?.removeSuffix(".0"))))) + images?.get("files").rows().orEmpty().map { row -> DetailCard("Stored system image", listOf(
-                            field("Image path on server", row.text("path")), field("Image size", detailBytes(row.count("size"))), field("Image last modified", deviceTimestamp(row["modified"])))) }
+                            field("Image path on server", row.text("path")), field("Image size", detailBytes(row.count("size"))), field("Image last modified", deviceTimestamp(row["modified"])))) } +
+                    listOf(DetailCard("Cloud destinations", listOf(field("System image upload destination", cloud.text("image_target")),
+                        field("Backup remotes", strings(cloud, "backup_targets")?.joinToString("\n")), field("Backup folder", cloud.text("folder")))))
             } else null
         else -> null
     }

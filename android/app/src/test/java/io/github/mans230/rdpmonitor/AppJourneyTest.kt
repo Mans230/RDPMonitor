@@ -111,7 +111,7 @@ class AppJourneyTest {
         }
     }
 
-    @Test fun everySectionOpensAndReturnsWithoutLosingTheServer() {
+    private fun everySectionAt(width: Int) {
         preview()
         listOf("dark", "light").forEachIndexed { index, theme ->
             if (index == 1) {
@@ -120,13 +120,18 @@ class AppJourneyTest {
             }
             Feature.entries.forEach { feature ->
                 dock("More")
+                if (feature == Feature.entries.first()) {
+                    ui.onNodeWithTag("app-content").performScrollToIndex(0)
+                    screenshot("$width-contextual-more-$theme")
+                }
                 ui.onNodeWithTag("app-content").performScrollToNode(hasTestTag("feature-${feature.name}"))
                 ui.onNodeWithTag("feature-${feature.name}").performClick()
                 ui.onNodeWithTag("page-title-Server overview").assertDoesNotExist()
                 ui.onNodeWithTag("page-title-${feature.title}").assertIsDisplayed()
                 ui.onNodeWithTag("page-title-${feature.title}").assertIsDisplayed()
                 alignWorkspace(ui.onNodeWithTag("page-title-${feature.title}"))
-                screenshot(if (theme == "dark") "390-section-${feature.name}" else "390-light-section-${feature.name}")
+                ui.onNodeWithTag("section-navigation").assertIsDisplayed()
+                screenshot(if (theme == "dark") "$width-section-${feature.name}" else "$width-light-section-${feature.name}")
                 ui.runOnIdle { check(model.state.value.snapshot != null); check(!model.state.value.connectionScreen) }
                 ui.runOnIdle { ui.activity.onBackPressedDispatcher.onBackPressed() }
                 ui.onNodeWithText("All sections").assertIsDisplayed()
@@ -135,6 +140,10 @@ class AppJourneyTest {
         dock("Overview"); ui.onNodeWithTag("app-content").performScrollToIndex(0)
         ui.onNodeWithContentDescription("Toggle theme").performClick()
     }
+
+    @Test fun everySectionOpensAndReturnsWithoutLosingTheServer() = everySectionAt(390)
+    @Test @Config(qualifiers = "w320dp-h740dp-mdpi") fun everySectionAt320() = everySectionAt(320)
+    @Test @Config(qualifiers = "w768dp-h1024dp-mdpi") fun everySectionAt768() = everySectionAt(768)
 
     @Test fun navigationStaysVisibleAndEachDestinationStartsWithoutOverview() {
         preview()
@@ -152,8 +161,8 @@ class AppJourneyTest {
         ui.onNodeWithTag("page-title-Backups").assertDoesNotExist()
         dock("More")
         ui.onNodeWithText("All sections").assertIsDisplayed()
-        workspace("Bandwidth \u00b7 recorded usage & billing window")
-        ui.onNodeWithText("Bandwidth \u00b7 recorded usage & billing window").performClick()
+        workspace("Network & bandwidth")
+        ui.onNodeWithText("Network & bandwidth").performClick()
         ui.onNodeWithTag("page-title-Bandwidth").assertIsDisplayed()
         ui.onNodeWithTag("page-title-Server overview").assertDoesNotExist()
         screenshot("390-bandwidth-page")

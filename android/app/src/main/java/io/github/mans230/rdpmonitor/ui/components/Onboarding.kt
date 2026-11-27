@@ -23,6 +23,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 
 val LocalOnboardingBack = staticCompositionLocalOf<() -> Unit> { {} }
 val LocalAppAccount = staticCompositionLocalOf<(() -> Unit)?> { null }
+val LocalServerWorkspace = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 /** Native insets replace the reference's fixed artboard height; its content geometry is preserved. */
 @Composable fun OnboardingScaffold(onBack: (() -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {},
@@ -35,13 +36,13 @@ val LocalAppAccount = staticCompositionLocalOf<(() -> Unit)?> { null }
                 Text("RDPMonitor", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium.copy(fontSize = if (narrow) 14.sp else 15.sp, letterSpacing = (-.4).sp))
                 actions()
                 val toggle = LocalToggleAppearance.current; val dark = LocalDarkAppearance.current
-                IconButton(onClick = toggle, modifier = Modifier.size(36.dp).offset(x = 7.dp)) {
+                IconButton(onClick = toggle, modifier = Modifier.size(44.dp).offset(x = 7.dp)) {
                     Icon(if (dark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, "Toggle appearance", Modifier.size(18.dp))
                 }
             }
             if (onBack != null) {
                 Spacer(Modifier.height(30.dp))
-                IconButton(onClick = onBack, modifier = Modifier.size(36.dp).offset(x = (-8).dp)) {
+                IconButton(onClick = onBack, modifier = Modifier.size(44.dp).offset(x = (-8).dp)) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Go back", Modifier.size(18.dp))
                 }
             }
@@ -109,7 +110,7 @@ val LocalAppAccount = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 @Composable fun OnboardingPrimary(label: String, action: () -> Unit, enabled: Boolean = true) {
     val phone = LocalConfiguration.current.screenWidthDp < 640
-    CossButton(onClick = action, enabled = enabled, modifier = Modifier.fillMaxWidth().height(if (phone) 44.dp else 40.dp)) {
+    CossButton(onClick = action, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = if (phone) 44.dp else 40.dp)) {
         Text(label, Modifier.weight(1f)); Icon(CossIcons.ArrowRight, null, Modifier.size(18.dp))
     }
 }

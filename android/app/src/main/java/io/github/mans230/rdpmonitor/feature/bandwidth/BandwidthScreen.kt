@@ -19,7 +19,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     if (traffic.days.isEmpty()) { Notice("No accounting records have been collected yet. Usage is unknown."); return }
     val chartDays = traffic.days.takeLast(14)
     val chartMaximum = (chartDays.maxOfOrNull { it.totalBytes } ?: 0).coerceAtLeast(1_073_741_824)
-    Section("Billing-cycle usage", traffic.cycleStart?.let { "$it → ${traffic.cycleEnd} (end exclusive)" } ?: "Sample window · days 1–14") {
+    Section("Recorded usage", if (traffic.cycleStart != null && traffic.cycleEnd != null) "Current billing window" else "Recorded ledger; billing window unavailable") {
         Text(bytes(traffic.totalBytes), style = ReadingStyle.copy(fontSize = 30.sp))
         traffic.quotaFraction?.let { fraction ->
             LinearProgressIndicator(progress = { fraction.toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), color = Signal, trackColor = Rule)
@@ -27,6 +27,10 @@ import io.github.mans230.rdpmonitor.ui.theme.*
         }
         MetricRow("Downloaded", bytes(traffic.downloadBytes))
         MetricRow("Uploaded", bytes(traffic.uploadBytes))
+    }
+    Section("Billing window") {
+        MetricRow("Start", traffic.cycleStart ?: "Unavailable")
+        MetricRow("End (exclusive)", traffic.cycleEnd ?: "Unavailable")
     }
     Section("Daily transfer", "Total download + upload · GiB") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(bytes(chartMaximum), color = Muted); Text("${chartDays.size} recorded days", color = Muted) }

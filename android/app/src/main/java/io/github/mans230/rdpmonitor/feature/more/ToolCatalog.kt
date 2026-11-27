@@ -66,13 +66,13 @@ object ToolCatalog {
         Feature.Commands -> listOf("Services" to "/api/services", "Automation" to "/api/automation?list=watch", "Keep alive" to "/api/automation?list=keepalive")
         Feature.Updates -> listOf("Suite updater" to "/api/suite-update")
         Feature.Access -> listOf("Private access" to "/api/setup", "App sessions" to "/api/mobile/v1/sessions")
-        Feature.Settings -> listOf("Settings" to "/api/settings", "Usage" to "/api/usage")
+        Feature.Settings -> listOf("Settings" to "/api/settings")
         Feature.Processes, Feature.History, Feature.Diagnostics -> emptyList()
         Feature.LocalUsers -> listOf("Local users" to "/api/users")
         Feature.SystemTools -> listOf("Services" to "/api/services", "System information" to "/api/sysinfo")
         Feature.Automation -> listOf("Watch rules" to "/api/automation?list=watch", "Keep alive" to "/api/automation?list=keepalive", "Service watch" to "/api/automation?list=svcwatch")
         Feature.Reference -> listOf("Command reference" to "/api/docs")
-        Feature.Maintenance -> listOf("Usage" to "/api/usage")
+        Feature.Maintenance -> emptyList()
     }
     fun tools(feature: Feature): List<Tool> = when (feature) {
         Feature.Protection -> listOf(

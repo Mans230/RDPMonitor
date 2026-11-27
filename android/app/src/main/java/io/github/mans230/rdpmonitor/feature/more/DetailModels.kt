@@ -60,7 +60,7 @@ fun backupDetails(status: JsonElement?, setup: JsonElement?): BackupDetails {
         else -> "Unavailable"
     }
     val note = when {
-        conflict -> "Latest-result fields disagree. Inspect additional server details."
+        conflict -> "Latest-result fields disagree. Open Report details in Diagnostics."
         result == "Verified" -> "The latest run passed its verification check. This does not identify the contents of each stored archive."
         last.text("last_success") != null -> "Last successful run: ${last.text("last_success")} · server-reported time. Archive verification is not reported."
         else -> "Latest-run result is separate from the current worker activity and stored archives."

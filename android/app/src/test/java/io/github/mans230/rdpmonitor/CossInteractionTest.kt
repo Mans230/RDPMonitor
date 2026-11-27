@@ -26,6 +26,21 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CossInteractionTest {
     @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
+    @Test fun longProcessListScrollsInsideABoundedViewportAndKeepsReviewNearby() {
+        val rows = (10..110).map { ProcessRow(it, "worker-$it.exe", 1.0, 1048576) }
+        var reviewed = emptyList<ProcessRow>()
+        ui.setContent { RdpTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
+            ProcessWorkspace(DemoData.snapshot().copy(processes = rows), {}, { reviewed = it })
+        } } }
+        ui.onNodeWithTag("process-list").performScrollTo()
+        val bounds = ui.onNodeWithTag("process-list").fetchSemanticsNode().boundsInRoot
+        assertTrue(bounds.height <= 361f)
+        ui.onNodeWithTag("process-list").performScrollToNode(hasTestTag("process-110"))
+        ui.onNodeWithTag("process-110").assertIsDisplayed()
+        ui.onNodeWithTag("select-process-110").performClick()
+        ui.onNodeWithText("Review end action").performScrollTo().performClick()
+        ui.runOnIdle { assertEquals(listOf(110), reviewed.map { it.pid }) }
+    }
     @Test fun processSelectionAndDetailsKeepExactPidAndFiltersClearHiddenSelections() {
         val rows = listOf(ProcessRow(17, "worker.exe", 12.0, 1048576), ProcessRow(18, "worker.exe", 0.0, 2097152), ProcessRow(4, "System", 1.0, 0))
         var reviewed = emptyList<ProcessRow>()

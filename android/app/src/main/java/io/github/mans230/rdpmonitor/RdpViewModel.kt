@@ -27,6 +27,11 @@ data class AppState(val profiles: List<ServerProfile> = emptyList(), val selecte
     val diagnosticOp: String = "diagnose", val diagnosticArgument: String = "", val readingsStale: Boolean = false,
     val pairingExpiresAt: Long = 0)
 
+/** A disconnected transport must retain no observations or selections from its former server. */
+internal fun AppState.disconnected(message: String? = null) = AppState(profiles = profiles, message = message)
+internal fun savedConnectionScope(profile: ServerProfile, session: AppSession?, now: Long): String =
+    session?.takeIf { it.profileId == profile.id && it.origin == profile.origin && it.expiresAt > now && it.scope in setOf("monitoring:read", "administration") }?.scope ?: "monitoring:read"
+
 class RdpViewModel(application: Application): AndroidViewModel(application) {
     private val store = DeviceStore(application)
     private val api = PanelApi()
@@ -41,7 +46,7 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
         val pending = store.pending()
         if (pending != null && System.currentTimeMillis() - pending.createdAt in 0..600_000) {
             val profile = store.profiles().firstOrNull { it.id == pending.profileId && it.origin == pending.origin }
-            if (profile != null) _state.update { it.copy(selected = profile, requestedScope = pending.scope,
+            if (profile != null && store.accountOwner() != null) _state.update { it.copy(selected = profile, requestedScope = pending.scope,
                 pairingCode = BrowserPairing.matchCode(BrowserPairing.challenge(pending.verifier)), pairingUrl = store.pendingUrl(), pairingExpiresAt = pending.createdAt + 600_000) }
         } else { store.pending(null); store.pendingUrl(null) }
     }
@@ -90,16 +95,36 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
     fun hideOperation() { _state.update { it.copy(operationVisible = false) } }
     fun diagnosticInput(op: String, argument: String) { _state.update { it.copy(diagnosticOp = op, diagnosticArgument = argument) } }
     fun remove(profile: ServerProfile) {
+        if (_state.value.busy || _state.value.actionBusy) return
+        if (store.profiles().none { it.id == profile.id && it.origin == profile.origin }) return
+        if (store.pending()?.profileId == profile.id) cancelPairing()
+        val session = store.session(profile.id)
         store.remove(profile.id)
-        _state.update { state -> val active = state.selected?.id == profile.id
-            state.copy(profiles = store.profiles(), selected = if (active) null else state.selected,
-                snapshot = if (active) null else state.snapshot, connected = state.connected && !active, message = null)
-        }
+        if (_state.value.selected?.id == profile.id) appIdentityChanged()
+        else _state.update { it.copy(profiles = store.profiles()) }
+        if (session != null && session.expiresAt > System.currentTimeMillis()) viewModelScope.launch { api.logout(profile, session) }
     }
     fun clearMessage() { _state.update { it.copy(message = null) } }
 
+    fun startNewServer() {
+        if (_state.value.busy || _state.value.actionBusy) return
+        cancelPairing()
+        appIdentityChanged()
+        _state.update { it.copy(connectionScreen = true) }
+    }
+
+    fun connectSaved(profile: ServerProfile) {
+        if (_state.value.busy || _state.value.actionBusy) return
+        if (store.accountOwner() == null) { _state.update { it.copy(message = "Sign in to your Google account first.") }; return }
+        val owned = store.profiles().firstOrNull { it.id == profile.id && it.origin == profile.origin } ?: return
+        val session = store.session(owned.id)
+        _state.update { it.copy(requestedScope = savedConnectionScope(owned, session, System.currentTimeMillis())) }
+        connect(owned.name, owned.origin)
+    }
+
     fun connect(name: String, input: String, forcePair: Boolean = false) {
         if (_state.value.busy || _state.value.actionBusy) return
+        if (store.accountOwner() == null) { _state.update { it.copy(message = "Sign in to your Google account first.") }; return }
         val scope = _state.value.requestedScope
         val origin = runCatching { PrivateOrigin.parse(input) }.getOrElse {
             _state.update { state -> state.copy(message = it.message ?: "Check the private server address.") }; return
@@ -139,8 +164,9 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
             } finally { _state.update { it.copy(busy = false, connectionScreen = !it.connected) }; foreground(foreground) }
         }
     }
-    fun hasPendingPairing() = store.pending() != null
+    fun hasPendingPairing() = store.accountOwner() != null && store.pending() != null
     fun callback(uri: String) {
+        if (store.accountOwner() == null) { _state.update { it.copy(message = "Sign in to your Google account before approving a server.") }; return }
         val pending = store.pending()
         val parsed = runCatching { BrowserPairing.callback(uri, pending, System.currentTimeMillis()) }.getOrElse {
             _state.update { state -> state.copy(message = it.message ?: "Invalid sign-in response.") }; return
@@ -267,8 +293,9 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
     }
     fun disconnect() {
         val profile = _state.value.selected ?: return
-        if (_state.value.busy) return
-        refreshJob?.cancel()
+        if (_state.value.busy || _state.value.actionBusy) return
+        refreshJob?.cancel(); documentJob?.cancel(); documentGeneration++
+        diagnosticJobs.values.forEach { it.cancel() }; diagnosticJobs.clear()
         viewModelScope.launch {
             _state.update { it.copy(busy = true) }
             var message = "Disconnected. Your saved server address is kept."
@@ -281,7 +308,7 @@ class RdpViewModel(application: Application): AndroidViewModel(application) {
                 }
             } finally {
                 store.clearSession(profile.id); store.pending(null); store.pendingUrl(null)
-                _state.update { it.copy(snapshot = null, connected = false, busy = false, connectionScreen = false, message = message) }
+                _state.update { it.disconnected(message).copy(profiles = store.profiles()) }
             }
         }
     }
