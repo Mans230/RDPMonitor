@@ -22,6 +22,7 @@ class LoadingScreenTest {
     @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
     @Test fun loadingKeepsItsPurposeVisibleDuringAnimation() {
         ui.setContent { RdpTheme { LoadingPage("Connecting securely", "Preview connector") } }
+        ui.waitUntil(timeoutMillis = 5000) { ui.onAllNodesWithTag("lottie-loader").fetchSemanticsNodes().isNotEmpty() }
         ui.mainClock.advanceTimeBy(300)
         ui.onNodeWithText("Connecting securely").assertIsDisplayed()
         ui.onNodeWithText("Preview connector").assertIsDisplayed()

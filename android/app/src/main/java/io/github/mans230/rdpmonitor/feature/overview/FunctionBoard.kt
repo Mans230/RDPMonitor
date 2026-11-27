@@ -39,7 +39,7 @@ import kotlinx.serialization.json.*
         if (state.documentLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
         BoxWithConstraints {
             val leadCard: @Composable () -> Unit = {
-                GlassSurface(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Review backup schedule") { open(Feature.Backups) }) {
+                GlassSurface(Modifier.fillMaxWidth().motionClickable(role = Role.Button, onClickLabel = "Review backup schedule") { open(Feature.Backups) }) {
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("Next backup", style = MaterialTheme.typography.bodyLarge)
                         Text(if (state.documentLoading && document("/api/setup") == null) "Loading…" else lead.value, style = ReadingStyle.copy(fontSize = 30.sp))
@@ -63,7 +63,7 @@ import kotlinx.serialization.json.*
                             FunctionCard("Processes", "${snapshot.processes.size} reported · ${percent(snapshot.cpu)} CPU", Modifier.weight(1f), { open(Feature.Processes) })
                         }
                     }
-                    Surface(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Open RDP access") { open(Feature.RdpAccess) }, shape = RoundedCornerShape(14.dp), color = Color.Transparent, border = BorderStroke(1.dp, Rule)) {
+                    Surface(Modifier.fillMaxWidth().motionClickable(role = Role.Button, onClickLabel = "Open RDP access") { open(Feature.RdpAccess) }, shape = RoundedCornerShape(14.dp), color = Color.Transparent, border = BorderStroke(1.dp, Rule)) {
                         Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("RDP access")
@@ -89,7 +89,7 @@ import kotlinx.serialization.json.*
 }
 
 @Composable private fun FunctionCard(title: String, summary: String, modifier: Modifier, onClick: () -> Unit) {
-    Surface(modifier.clickable(role = Role.Button, onClickLabel = "Open $title", onClick = onClick), shape = RoundedCornerShape(14.dp), color = Color.Transparent, border = BorderStroke(1.dp, Rule)) {
+    Surface(modifier.motionClickable(role = Role.Button, onClickLabel = "Open $title", onClick = onClick), shape = RoundedCornerShape(14.dp), color = Color.Transparent, border = BorderStroke(1.dp, Rule)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(title); Text(summary, color = Muted, style = MaterialTheme.typography.bodyMedium); OpenRow("Open")
         }

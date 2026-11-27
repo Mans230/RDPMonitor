@@ -70,5 +70,6 @@ val ReadingStyle = TextStyle(fontFamily = InterfaceFont, fontFeatureSettings = "
             bodySmall = TextStyle(fontFamily = InterfaceFont, fontSize = 12.sp, lineHeight = 17.sp),
             labelLarge = TextStyle(fontFamily = InterfaceFont, fontSize = 14.sp, fontWeight = FontWeight.Medium)),
         content = { CompositionLocalProvider(LocalContentColor provides ink, LocalDarkAppearance provides dark,
+            io.github.mans230.rdpmonitor.ui.components.LocalMotionEnabled provides io.github.mans230.rdpmonitor.ui.components.systemMotionEnabled(),
             LocalToggleAppearance provides { dark = !dark; preferences.edit().putBoolean("dark", dark).apply() }) { content() } })
 }

@@ -64,7 +64,7 @@ enum class Feature(val title: String, val summary: String, val capabilities: Lis
 }
 
 @Composable internal fun DirectoryRow(title: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Row(modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().motionClickable(onClick = onClick).heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f))
         Icon(Icons.AutoMirrored.Outlined.ArrowForward, "Open $title", Modifier.size(18.dp), tint = Muted)
     }
