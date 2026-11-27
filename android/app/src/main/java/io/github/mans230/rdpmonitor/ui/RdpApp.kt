@@ -60,6 +60,10 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     val route = "${state.selected?.id}:${state.destination}:$detail:$workspaceKey"
     val scroll = rememberSaveable(route, saver = LazyListState.Saver) { LazyListState() }
     val open: (Feature) -> Unit = { model.closeForm(); model.destination(Destination.More); detail = it.name }
+    val directory: @Composable () -> Unit = {
+        MoreScreen(open, { detail = null; connections() },
+            { model.destination(Destination.Bandwidth) }, { model.destination(Destination.Activity) })
+    }
     ActionReviewDialog(state, model)
     OperationFeedback(state, model, openBrowser)
     val isOverview = selected == null && state.destination == Destination.Overview
@@ -120,6 +124,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                 item {
                     Column(pageMotion(route), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (workspaceContent != null) workspaceContent()
+                        else if (selected == null && state.destination == Destination.More) directory()
                         else if (snapshot == null) {
                             PageTitle("Server disconnected", "")
                             Notice("Choose a saved server to reconnect. No readings are displayed.")
@@ -132,8 +137,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                                 Destination.Bandwidth -> if (state.demo) BandwidthScreen(DemoData.traffic) else LiveBandwidth(state, model, openBrowser)
                                 Destination.Activity -> if (state.demo) ActivityScreen(snapshot, DemoData.incidents) else LiveActivity(state, model)
                                 Destination.More -> {
-                                    MoreScreen(open, { detail = null; connections() },
-                                        { model.destination(Destination.Bandwidth) }, { model.destination(Destination.Activity) })
+                                    directory()
                                 }
                             }
                             else -> ManagementScreen(selected, state, model, { detail = null }, openBrowser, open)

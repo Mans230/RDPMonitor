@@ -24,7 +24,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 
-private enum class EntryPage { Welcome, SignIn, Servers, Account, Connection }
+internal enum class EntryPage { Welcome, SignIn, Servers, Account, Connection }
+internal fun visibleEntryPage(page: EntryPage, hasAccount: Boolean, fixture: Boolean = false): EntryPage = when {
+    fixture -> page
+    !hasAccount -> if (page == EntryPage.SignIn) EntryPage.SignIn else EntryPage.Welcome
+    page == EntryPage.SignIn -> EntryPage.Servers
+    else -> page
+}
 
 /** Google identifies the local workspace; only the existing Passkey/PKCE protocol grants server access. */
 @Composable fun AppEntry(model: RdpViewModel, openBrowser: (String) -> Unit,
@@ -82,7 +88,9 @@ private enum class EntryPage { Welcome, SignIn, Servers, Account, Connection }
     CompositionLocalProvider(LocalOnboardingBack provides ::leaveConnection, LocalAppAccount provides { page = EntryPage.Account },
         LocalServerWorkspace provides { if (!state.busy && !state.actionBusy) { model.cancelPairing(); model.closeConnections(); page = EntryPage.Servers } }) {
         Box(Modifier.fillMaxSize()) {
-            when (page) {
+            // Restored navigation is not proof of account ownership.
+            val visiblePage = visibleEntryPage(page, profile != null, state.demo)
+            when (visiblePage) {
                 EntryPage.Welcome -> WelcomePage {
                     page = if (profile == null) EntryPage.SignIn else EntryPage.Servers
                     workspaceShell = profile != null

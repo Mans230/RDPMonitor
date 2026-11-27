@@ -3,11 +3,21 @@ package io.github.mans230.rdpmonitor
 import io.github.mans230.rdpmonitor.core.model.*
 import io.github.mans230.rdpmonitor.data.DemoData
 import io.github.mans230.rdpmonitor.feature.more.*
+import io.github.mans230.rdpmonitor.ui.EntryPage
+import io.github.mans230.rdpmonitor.ui.visibleEntryPage
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 
 class AccountStateTest {
+    @Test fun restoredRoutesCannotExposeAWorkspaceWithoutItsAccountOrRepeatGoogleWithOne() {
+        listOf(EntryPage.Servers, EntryPage.Account, EntryPage.Connection).forEach { route ->
+            assertEquals(EntryPage.Welcome, visibleEntryPage(route, hasAccount = false))
+        }
+        assertEquals(EntryPage.SignIn, visibleEntryPage(EntryPage.SignIn, hasAccount = false))
+        assertEquals(EntryPage.Servers, visibleEntryPage(EntryPage.SignIn, hasAccount = true))
+        assertEquals(EntryPage.Welcome, visibleEntryPage(EntryPage.Welcome, hasAccount = true))
+    }
     @Test fun disconnectClearsAllServerStateAndRetainsOnlySavedProfiles() {
         val profile = ServerProfile(id = "owned", name = "Work", origin = "https://work.tailnet.ts.net")
         val state = AppState(profiles = listOf(profile), selected = profile, connected = true, snapshot = DemoData.snapshot(),

@@ -1,4 +1,4 @@
-# Native UI/UX audit and contextual actions � 0.9.0
+# Native UI/UX audit and contextual actions â€” 0.9.0
 
 This audit follows the approved CONTEXTUAL-ACTIONS-SPEC.md from the design thread. It applies pstack's Experience First, Model the Domain, Fix Root Causes and Prove It Works principles. The implementation is native Compose; the HTML is a reference, not a replacement for authentication or server APIs.
 
@@ -53,6 +53,6 @@ These checks do not claim real Google chooser, actual saved-session transport/Pa
 
 ## Verified artifact
 
-Local final check: assembleDebug, all 76 tests and lintDebug passed; lint reports 0 errors and 38 advisory warnings. Screenshots were regenerated for all 16 feature destinations at 320/390/768dp in dark/light, plus onboarding, account/server routes, archive details and 1.5x text/long-list cases. The audit covers the 25 routes including entry and workspace pages. Native contact sheets are generated review artifacts, not live server screenshots.
+Local final check: assembleDebug, all 77 tests and lintDebug passed; lint reports 0 errors and 38 advisory warnings. Screenshots were regenerated for all 16 feature destinations at 320/390/768dp in dark/light, plus onboarding, account/server routes, archive details and 1.5x text/long-list cases. The audit covers the 25 routes including entry and workspace pages. Native contact sheets are generated review artifacts, not live server screenshots.
 
-APK: artifacts/RDPMonitor-Android-0.9.0-contextual.apk, versionCode 12, package io.github.mans230.rdpmonitor.dev. SHA-256: 3156F201C66DD7980FB4EFFCB7000D3F87E5B9886E5D37FB506397B70A81324A. Signing SHA-1 remains C6:DE:96:B0:AC:1A:3D:7C:21:11:33:E9:7F:1D:9A:6C:CB:18:19:1F. GitHub CI/merge status is reported separately; these are local verification results.
+APK: artifacts/RDPMonitor-Android-0.9.0-contextual.apk, versionCode 12, package io.github.mans230.rdpmonitor.dev. SHA-256: D0AB788002C173F64FF12CDF7186887B9A32C2466BB755BF2FF910ABA9DBCEB0. Signing SHA-1 remains C6:DE:96:B0:AC:1A:3D:7C:21:11:33:E9:7F:1D:9A:6C:CB:18:19:1F. GitHub CI/merge status is reported separately; these are local verification results.
