@@ -125,7 +125,7 @@ internal fun validBackupSchedule(mode: String, value: String): Boolean {
         CossPanel {
             if (details.sources.isNullOrEmpty()) Text(if (details.sources == null) "Source list unavailable." else "No source folders configured.", color = Muted)
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp)) { itemsIndexed(details.sources.orEmpty()) { index, path ->
-                Row(Modifier.fillMaxWidth().clickable(enabled = canEdit) {
+                Row(Modifier.fillMaxWidth().motionClickable(enabled = canEdit) {
                     selectedSources = if (path in selectedSources) selectedSources - path else selectedSources + path
                 }, verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(path in selectedSources, { checked -> selectedSources = if (checked) selectedSources + path else selectedSources - path }, enabled = canEdit, modifier = Modifier.testTag("backup-source-$index"))

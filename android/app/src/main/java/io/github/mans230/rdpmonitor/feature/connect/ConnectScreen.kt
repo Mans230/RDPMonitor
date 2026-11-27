@@ -57,7 +57,7 @@ internal fun serverFormError(name: String, address: String): String? = when {
     }
     Box(modifier) {
         OnboardingScaffold(onBack = { if (available) { if (state.snapshot != null) model.closeConnections() else back() } }, actions = {
-            if (state.profiles.isNotEmpty() && servers != null) IconButton(onClick = servers, enabled = available, modifier = Modifier.size(44.dp)) { Icon(Icons.Outlined.Dns, "Saved servers", Modifier.size(18.dp)) }
+            if (state.profiles.isNotEmpty() && servers != null) MotionIconButton(onClick = servers, enabled = available, modifier = Modifier.size(44.dp)) { Icon(Icons.Outlined.Dns, "Saved servers", Modifier.size(18.dp)) }
         }, footer = {
             if (state.pairingUrl != null) OnboardingPrimary("Continue in browser", { openBrowser(state.pairingUrl) }, available)
             else OnboardingPrimary("Connect server", {

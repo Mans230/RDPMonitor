@@ -7,6 +7,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.*
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -66,7 +67,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
             val tabletOffset = ((maxHeight - 32.dp - measuredDp) / 4).coerceAtLeast(0.dp)
             Box(Modifier.fillMaxSize().padding(horizontal = if (phone) 0.dp else 16.dp, vertical = if (phone) 0.dp else 16.dp),
                 contentAlignment = if (phone) androidx.compose.ui.Alignment.BottomCenter else androidx.compose.ui.Alignment.TopCenter) {
-            Surface(Modifier.offset(y = if (phone) 0.dp else tabletOffset).onSizeChanged { measuredHeight = it.height }.widthIn(max = 512.dp).fillMaxWidth().heightIn(max = popupMaxHeight),
+            Surface(Modifier.offset(y = if (phone) 0.dp else tabletOffset).then(pageMotion(Unit)).onSizeChanged { measuredHeight = it.height }.widthIn(max = 512.dp).fillMaxWidth().heightIn(max = popupMaxHeight),
                 shape = RoundedCornerShape(if (phone) 0.dp else 16.dp), color = if (LocalDarkAppearance.current) androidx.compose.ui.graphics.Color(0xFF1B1B1B) else Ground, border = BorderStroke(1.dp, Rule)) {
                 Column {
                     Row(Modifier.fillMaxWidth().padding(start = 24.dp, top = 8.dp, end = 8.dp, bottom = if (phone) 16.dp else 12.dp), verticalAlignment = androidx.compose.ui.Alignment.Top) {
@@ -74,7 +75,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                             ProvideTextStyle(MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold), title)
                             description?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp)) }
                         }
-                        IconButton(onClick = onDismissRequest, modifier = Modifier.testTag("popup-close")) { Icon(CossIcons.X, "Close", Modifier.size(18.dp)) }
+                        MotionIconButton(onClick = onDismissRequest, modifier = Modifier.testTag("popup-close")) { Icon(CossIcons.X, "Close", Modifier.size(18.dp)) }
                     }
                     Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 24.dp)) { text() }
                     HorizontalDivider(color = Rule)
@@ -93,15 +94,17 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 
 @Composable fun CossTextButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
                               colors: ButtonColors = ButtonDefaults.textButtonColors(), content: @Composable RowScope.() -> Unit) {
-    TextButton(onClick, modifier.heightIn(min = 44.dp), enabled = enabled, shape = RoundedCornerShape(6.dp), colors = colors, content = content)
+    val interaction = remember { MutableInteractionSource() }
+    TextButton(onClick, modifier.pressMotion(interaction, enabled).heightIn(min = 44.dp), enabled = enabled, shape = RoundedCornerShape(6.dp), colors = colors, interactionSource = interaction, content = content)
 }
 
 @Composable fun CossButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
                           colors: ButtonColors = ButtonDefaults.buttonColors(containerColor = Signal, contentColor = Ground), interactionSource: MutableInteractionSource? = null,
                           content: @Composable RowScope.() -> Unit) {
     val phone = LocalConfiguration.current.screenWidthDp < 640
-    Button(onClick, modifier.heightIn(min = if (phone) 36.dp else 32.dp), enabled = enabled, shape = RoundedCornerShape(8.dp),
-        contentPadding = PaddingValues(horizontal = 11.dp), colors = colors, interactionSource = interactionSource) {
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
+    Button(onClick, modifier.pressMotion(interaction, enabled).heightIn(min = if (phone) 36.dp else 32.dp), enabled = enabled, shape = RoundedCornerShape(8.dp),
+        contentPadding = PaddingValues(horizontal = 11.dp), colors = colors, interactionSource = interaction) {
         ProvideTextStyle(MaterialTheme.typography.labelLarge.copy(fontSize = if (phone) 16.sp else 14.sp)) { content() }
     }
 }
@@ -109,8 +112,9 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 @Composable fun CossOutlinedButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
                                   colors: ButtonColors = ButtonDefaults.outlinedButtonColors(contentColor = Signal), content: @Composable RowScope.() -> Unit) {
     val phone = LocalConfiguration.current.screenWidthDp < 640
-    OutlinedButton(onClick, modifier.heightIn(min = if (phone) 36.dp else 32.dp), enabled = enabled, shape = RoundedCornerShape(8.dp),
-        contentPadding = PaddingValues(horizontal = 11.dp), border = BorderStroke(1.dp, InputRule), colors = colors) {
+    val interaction = remember { MutableInteractionSource() }
+    OutlinedButton(onClick, modifier.pressMotion(interaction, enabled).heightIn(min = if (phone) 36.dp else 32.dp), enabled = enabled, shape = RoundedCornerShape(8.dp),
+        contentPadding = PaddingValues(horizontal = 11.dp), border = BorderStroke(1.dp, InputRule), colors = colors, interactionSource = interaction) {
         ProvideTextStyle(MaterialTheme.typography.labelLarge.copy(fontSize = if (phone) 16.sp else 14.sp)) { content() }
     }
 }
@@ -143,8 +147,10 @@ import io.github.mans230.rdpmonitor.ui.theme.*
 @Composable fun CossSegments(labels: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
     Row(modifier.background(Tray, RoundedCornerShape(8.dp)).padding(3.dp)) {
         labels.forEachIndexed { index, label ->
-            Surface(Modifier.weight(1f).selectable(selected == index, role = Role.Tab, onClick = { onSelect(index) }),
-                shape = RoundedCornerShape(6.dp), color = if (selected == index) MaterialTheme.colorScheme.surfaceContainerHighest else Tray) {
+            val interaction = remember { MutableInteractionSource() }
+            val fill by animateColorAsState(if (selected == index) MaterialTheme.colorScheme.surfaceContainerHighest else Tray, if (LocalMotionEnabled.current) androidx.compose.animation.core.tween(160) else androidx.compose.animation.core.snap(), label = "Segment selection")
+            Surface(Modifier.weight(1f).pressMotion(interaction).selectable(selected == index, interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current, role = Role.Tab, onClick = { onSelect(index) }),
+                shape = RoundedCornerShape(6.dp), color = fill) {
                 Box(Modifier.padding(horizontal = 8.dp, vertical = 12.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
                     Text(label, color = if (selected == index) Signal else Muted, style = MaterialTheme.typography.labelLarge)
                 }

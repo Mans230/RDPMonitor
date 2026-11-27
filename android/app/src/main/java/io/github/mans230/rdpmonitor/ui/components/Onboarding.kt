@@ -28,7 +28,7 @@ val LocalServerWorkspace = staticCompositionLocalOf<(() -> Unit)?> { null }
 /** Native insets replace the reference's fixed artboard height; its content geometry is preserved. */
 @Composable fun OnboardingScaffold(onBack: (() -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {},
                                   footer: (@Composable () -> Unit)? = null, content: @Composable BoxScope.() -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize().background(Ground).safeDrawingPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
+    BoxWithConstraints(Modifier.fillMaxSize().then(pageMotion(onBack != null)).background(Ground).safeDrawingPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
         val narrow = maxWidth < 350.dp
         Column(Modifier.widthIn(max = 410.dp).fillMaxSize().padding(horizontal = if (narrow) 20.dp else 24.dp, vertical = 24.dp)) {
             Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -36,13 +36,13 @@ val LocalServerWorkspace = staticCompositionLocalOf<(() -> Unit)?> { null }
                 Text("RDPMonitor", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium.copy(fontSize = if (narrow) 14.sp else 15.sp, letterSpacing = (-.4).sp))
                 actions()
                 val toggle = LocalToggleAppearance.current; val dark = LocalDarkAppearance.current
-                IconButton(onClick = toggle, modifier = Modifier.size(44.dp).offset(x = 7.dp)) {
+                MotionIconButton(onClick = toggle, modifier = Modifier.size(44.dp).offset(x = 7.dp)) {
                     Icon(if (dark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, "Toggle appearance", Modifier.size(18.dp))
                 }
             }
             if (onBack != null) {
                 Spacer(Modifier.height(30.dp))
-                IconButton(onClick = onBack, modifier = Modifier.size(44.dp).offset(x = (-8).dp)) {
+                MotionIconButton(onClick = onBack, modifier = Modifier.size(44.dp).offset(x = (-8).dp)) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Go back", Modifier.size(18.dp))
                 }
             }

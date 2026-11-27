@@ -108,7 +108,7 @@ internal fun visibleEntryPage(page: EntryPage, hasAccount: Boolean, fixture: Boo
                     }
                     if (workspaceShell) RdpApp(model, openBrowser, content, workspaceKey = page.name, showShell = true, workspaceBack = ::backFromWorkspace) { page = EntryPage.Connection }
                     else OnboardingScaffold(onBack = ::backFromWorkspace, actions = {
-                        if (page == EntryPage.Servers) IconButton(onClick = { page = EntryPage.Account }, modifier = Modifier.size(44.dp)) {
+                        if (page == EntryPage.Servers) MotionIconButton(onClick = { page = EntryPage.Account }, modifier = Modifier.size(44.dp)) {
                             Icon(androidx.compose.material.icons.Icons.Outlined.AccountCircle, "Account")
                         }
                     }) { OnboardingBody { Spacer(Modifier.height(24.dp)); content() } }

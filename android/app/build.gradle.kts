@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.mans230.rdpmonitor"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.9.0-contextual"
+        versionCode = 13
+        versionName = "0.9.1-motion"
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"" + providers.gradleProperty("googleWebClientId").getOrElse("").replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -36,6 +36,7 @@ kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarg
 dependencies {
     val bom = platform("androidx.compose:compose-bom:2025.10.01")
     implementation(bom)
+    implementation("com.airbnb.android:lottie-compose:6.7.1")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")

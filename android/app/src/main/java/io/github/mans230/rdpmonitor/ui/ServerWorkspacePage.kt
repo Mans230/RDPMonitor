@@ -16,7 +16,7 @@ import io.github.mans230.rdpmonitor.ui.components.*
 import io.github.mans230.rdpmonitor.ui.theme.*
 
 @Composable fun WorkspaceLink(title: String, onClick: () -> Unit, enabled: Boolean = true) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = enabled, onClick = onClick),
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).motionClickable(enabled = enabled, onClick = onClick),
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f))
         Icon(CossIcons.ArrowRight, null, Modifier.size(18.dp), tint = Muted)
@@ -49,7 +49,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     CossFrame("Your servers", headerActions = { CossOutlinedButton(onClick = onAdd, enabled = available) { Text("Add server") } }) { CossPanel {
         if (state.profiles.isEmpty()) Text("No servers added yet.", color = Muted)
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp).testTag("saved-servers-list")) { items(state.profiles, key = { it.id }) { server ->
-            Row(Modifier.fillMaxWidth().testTag("server-${server.id}").heightIn(min = 56.dp).clickable(enabled = available) { inspected = server },
+            Row(Modifier.fillMaxWidth().testTag("server-${server.id}").heightIn(min = 56.dp).motionClickable(enabled = available) { inspected = server },
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(server.name)

@@ -41,7 +41,7 @@ class AppJourneyTest {
     }
     private fun dock(label: String) {
         ui.onNodeWithTag("section-navigation").assertIsDisplayed()
-        ui.onNode(hasText(label) and hasClickAction()).performClick()
+        ui.onNode(hasText(label) and hasClickAction() and hasAnyAncestor(hasTestTag("section-navigation"))).performClick()
     }
     private fun screenshot(name: String) {
         ui.waitForIdle()
@@ -58,6 +58,20 @@ class AppJourneyTest {
         output.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    @Test fun bottomNavigationRemainsReachableDuringFlingAndRapidSwitches() {
+        preview()
+        dock("More")
+        ui.onNodeWithTag("app-content").performTouchInput { swipeUp(durationMillis = 180) }
+        ui.onNodeWithTag("section-navigation").assertIsDisplayed()
+        dock("Backups")
+        ui.onNodeWithTag("app-content").performScrollToIndex(0)
+        dock("Protect"); dock("Overview"); dock("More"); dock("Overview")
+        ui.onNodeWithTag("page-title-Server overview").assertIsDisplayed()
+        val content = ui.onNodeWithTag("app-content").fetchSemanticsNode().boundsInRoot
+        val navigation = ui.onNodeWithTag("section-navigation").fetchSemanticsNode().boundsInRoot
+        check(content.bottom <= navigation.top + 1f)
+        screenshot("390-motion-navigation")
+    }
     @Test fun serverChooserReturnsToMonitorInsteadOfForcingLogin() {
         preview()
         ui.onNodeWithContentDescription("Server connections").performClick()

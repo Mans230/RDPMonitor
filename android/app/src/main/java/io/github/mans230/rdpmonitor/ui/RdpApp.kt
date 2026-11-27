@@ -7,6 +7,12 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -75,12 +81,17 @@ import io.github.mans230.rdpmonitor.ui.theme.*
         Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp).testTag("section-navigation"), contentAlignment = Alignment.Center) {
             FunctionDock(if (workspaceContent != null) null else selected, if (workspaceContent != null) Destination.More else state.destination,
                 { onNavigate(); detail = null; model.closeForm(); model.destination(Destination.Overview) }, { onNavigate(); open(it) },
-                { onNavigate(); detail = null; model.closeForm(); model.destination(Destination.More) })
+                { onNavigate(); detail = null; model.closeForm(); model.destination(Destination.More) }, scrolling = scroll.isScrollInProgress)
         }
     }) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            val scrollingInk by animateFloatAsState(if (scroll.isScrollInProgress && LocalMotionEnabled.current) .32f else 0f, if (LocalMotionEnabled.current) tween(140) else snap(), label = "Scroll edge")
+            val edgeInk = Signal
             val edge = if (maxWidth < 351.dp) 16.dp else 20.dp
-            LazyColumn(Modifier.align(Alignment.TopCenter).widthIn(max = 1104.dp).fillMaxHeight().testTag("app-content"), state = scroll,
+            LazyColumn(Modifier.align(Alignment.TopCenter).widthIn(max = 1104.dp).fillMaxHeight().testTag("app-content").drawWithContent {
+                    drawContent()
+                    if (scroll.canScrollBackward) drawRect(edgeInk.copy(alpha = scrollingInk), size = Size(size.width, 1.dp.toPx()))
+                }, state = scroll,
                 contentPadding = PaddingValues(horizontal = edge, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item {
                     Column {
@@ -92,17 +103,17 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                         val toggleTheme = LocalToggleAppearance.current
                         val darkAppearance = LocalDarkAppearance.current
                         Surface(shape = RoundedCornerShape(6.dp), color = Tray, border = BorderStroke(1.dp, Rule)) {
-                            IconButton(onClick = toggleTheme) { Icon(if (darkAppearance) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, "Toggle theme") }
+                            MotionIconButton(onClick = toggleTheme) { Icon(if (darkAppearance) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, "Toggle theme") }
                         }
                         Surface(shape = RoundedCornerShape(6.dp), color = Tray, border = BorderStroke(1.dp, Rule)) {
-                            IconButton(onClick = appearance) { Icon(Icons.Outlined.Tune, "Appearance") }
+                            MotionIconButton(onClick = appearance) { Icon(Icons.Outlined.Tune, "Appearance") }
                         }
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(if (state.demo) "Sample data" else state.selected?.name ?: snapshot?.host ?: "No server connected", Modifier.weight(1f), color = Muted, fontSize = 12.sp)
-                        IconButton(onClick = { detail = null; connections() }, enabled = !state.busy && !state.actionBusy) { Icon(Icons.Outlined.Dns, "Server connections") }
-                        LocalAppAccount.current?.let { account -> IconButton(onClick = account, enabled = !state.busy && !state.actionBusy) { Icon(Icons.Outlined.AccountCircle, "Account") } }
-                        if (!state.demo) IconButton(onClick = {
+                        MotionIconButton(onClick = { detail = null; connections() }, enabled = !state.busy && !state.actionBusy) { Icon(Icons.Outlined.Dns, "Server connections") }
+                        LocalAppAccount.current?.let { account -> MotionIconButton(onClick = account, enabled = !state.busy && !state.actionBusy) { Icon(Icons.Outlined.AccountCircle, "Account") } }
+                        if (!state.demo) MotionIconButton(onClick = {
                             model.refresh()
                             if (isOverview && state.administration) model.loadDocuments(listOf("/api/backup", "/api/sysinfo"))
                         }, enabled = state.connected) { Icon(Icons.Outlined.Refresh, "Refresh readings") }
@@ -116,7 +127,7 @@ import io.github.mans230.rdpmonitor.ui.theme.*
                     CossTextButton(onClick = { if (state.connected) model.refresh() else model.reconnect() }) { Text(if (state.connected) "Retry" else "Sign in again") }
                 }
                 state.message?.let { message -> item { Notice(message, true) } }
-                if (workspaceContent != null) item { IconButton(onClick = { workspaceBack?.invoke() ?: onNavigate() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Go back") } }
+                if (workspaceContent != null) item { MotionIconButton(onClick = { workspaceBack?.invoke() ?: onNavigate() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Go back") } }
                 if (state.actionBusy || state.actionResult != null) item {
                     CossTextButton(onClick = model::showOperation) { Text("${state.operationTitle} · ${if (state.actionBusy) "Running — view progress" else "Result ready"}") }
                 }
@@ -149,29 +160,48 @@ import io.github.mans230.rdpmonitor.ui.theme.*
     }
 }
 
-@Composable private fun FunctionDock(selected: Feature?, destination: Destination, overview: () -> Unit, open: (Feature) -> Unit, more: () -> Unit) {
+@Composable internal fun FunctionDock(selected: Feature?, destination: Destination, overview: () -> Unit,
+    open: (Feature) -> Unit, more: () -> Unit, scrolling: Boolean = false) {
+    val motion = LocalMotionEnabled.current
+    val dockScale by animateFloatAsState(if (scrolling && motion) .985f else 1f,
+        if (motion) spring(dampingRatio = 1f, stiffness = 550f) else snap(), label = "Dock scroll response")
     BoxWithConstraints {
         val compact = maxWidth < 340.dp
-        // Scaffold reserves the dock height; every route scrolls independently above it.
-        GlassSurface(radius = 32.dp, blur = 24.dp) {
-            Row(Modifier.widthIn(max = 380.dp).padding(5.dp), horizontalArrangement = Arrangement.Center) {
+        GlassSurface(Modifier.graphicsLayer { scaleX = dockScale; scaleY = dockScale }, radius = 32.dp, blur = 24.dp) {
+            BoxWithConstraints(Modifier.widthIn(max = 380.dp).fillMaxWidth().padding(5.dp)) {
                 val labels = listOf("Overview", "Protect", "Backups", "Processes", "More")
                 val features = listOf(null, Feature.Protection, Feature.Backups, Feature.Processes, null)
-                labels.forEachIndexed { index, label ->
-                    val interaction = remember { MutableInteractionSource() }
-                    val pressed by interaction.collectIsPressedAsState()
-                    val scale by animateFloatAsState(if (pressed) .96f else 1f, tween(100), label = "Navigation press")
-                    val active = when (index) {
-                        0 -> selected == null && destination == Destination.Overview
-                        4 -> selected !in listOf(Feature.Protection, Feature.Backups, Feature.Processes) && !(selected == null && destination == Destination.Overview)
-                        else -> selected == features[index]
-                    }
-                    val icon = when (index) { 0 -> CossIcons.Activity; 1 -> Icons.Outlined.VerifiedUser; 2 -> CossIcons.Archive; 3 -> CossIcons.ListFilter; else -> Icons.Outlined.MoreHoriz }
-                    Column(Modifier.weight(1f).graphicsLayer { scaleX = scale; scaleY = scale }.background(if (active) Signal.copy(alpha = .12f) else Color.Transparent, RoundedCornerShape(26.dp))
-                        .selectable(active, interactionSource = interaction, indication = LocalIndication.current, role = Role.Tab, onClick = { when (index) { 0 -> overview(); 4 -> more(); else -> open(features[index]!!) } })
-                        .padding(horizontal = 2.dp, vertical = 8.dp).heightIn(min = 44.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Icon(icon, null, Modifier.size(18.dp), tint = if (active) Signal else Muted)
-                        Text(if (compact && index == 3) "Tasks" else label, maxLines = 1, fontSize = 11.sp, color = if (active) Signal else Muted)
+                val activeIndex = when {
+                    selected == null && destination == Destination.Overview -> 0
+                    selected == Feature.Protection -> 1
+                    selected == Feature.Backups -> 2
+                    selected == Feature.Processes -> 3
+                    else -> 4
+                }
+                val cell = maxWidth / 5
+                val position by animateDpAsState(cell * activeIndex,
+                    if (motion) spring(dampingRatio = .86f, stiffness = 480f) else snap(), label = "Dock selection position")
+                Box(Modifier.matchParentSize()) {
+                    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset(position.roundToPx(), 0) }.width(cell).fillMaxHeight()
+                        .background(Signal.copy(alpha = .12f), RoundedCornerShape(26.dp)).testTag("dock-indicator"))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    labels.forEachIndexed { index, label ->
+                        val active = index == activeIndex
+                        val interaction = remember { MutableInteractionSource() }
+                        val tint by animateColorAsState(if (active) Signal else Muted,
+                            if (motion) tween(160) else snap(), label = "Navigation tint")
+                        val lift by animateFloatAsState(if (active && motion) -1.5f else 0f,
+                            if (motion) spring(dampingRatio = .8f, stiffness = 600f) else snap(), label = "Navigation icon lift")
+                        val icon = when (index) { 0 -> CossIcons.Activity; 1 -> Icons.Outlined.VerifiedUser; 2 -> CossIcons.Archive; 3 -> CossIcons.ListFilter; else -> Icons.Outlined.MoreHoriz }
+                        Column(Modifier.weight(1f).pressMotion(interaction)
+                            .selectable(active, interactionSource = interaction, indication = LocalIndication.current, role = Role.Tab,
+                                onClick = { when (index) { 0 -> overview(); 4 -> more(); else -> open(features[index]!!) } })
+                            .padding(horizontal = 2.dp, vertical = 8.dp).heightIn(min = 44.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(icon, null, Modifier.size(18.dp).graphicsLayer { translationY = lift.dp.toPx() }, tint = tint)
+                            Text(if (compact && index == 3) "Tasks" else label, maxLines = 1, fontSize = 11.sp, color = tint)
+                        }
                     }
                 }
             }
