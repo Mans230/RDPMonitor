@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.mans230.rdpmonitor"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.9.1-motion"
+        versionCode = 14
+        versionName = "0.10.0-motion-studio"
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"" + providers.gradleProperty("googleWebClientId").getOrElse("").replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
